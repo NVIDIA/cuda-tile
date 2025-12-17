@@ -1,0 +1,10 @@
+*.swp
+.cache
+.clangd
+.cursorignore
+.venv
+.vscode
+build*/
+compile_commands.json
+doxygen
+media/

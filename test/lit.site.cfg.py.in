@@ -1,0 +1,19 @@
+@LIT_SITE_CFG_IN_HEADER@
+
+import sys
+
+config.llvm_obj_root = "@LLVM_BINARY_DIR@"
+config.llvm_tools_dir = "@LLVM_TOOLS_DIR@"
+config.llvm_lib_dir = "@LLVM_LIBRARY_DIR@"
+config.llvm_shlib_ext = "@CMAKE_SHARED_LIBRARY_SUFFIX@"
+config.python_executable = "@Python3_EXECUTABLE@"
+
+config.cuda_tile_tool_dir = "@CUDA_TILE_TOOL_DIR@"
+config.cuda_tile_obj_root = "@CUDA_TILE_BINARY_DIR@"
+config.cuda_tile_lib_dir = "@CUDA_TILE_LIBRARY_DIR@"
+
+import lit.llvm
+lit.llvm.initialize(lit_config, config)
+
+# Let the main config do the real work
+lit_config.load_config(config, "@CUDA_TILE_SOURCE_DIR@/test/lit.cfg.py")
