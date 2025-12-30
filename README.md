@@ -55,6 +55,7 @@ https://github.com/llvm/llvm-project:
 cmake -G Ninja -S . -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_ENABLE_ASSERTIONS=OFF \
+  -DCUDA_TILE_ENABLE_TESTING=ON \
   -DCUDA_TILE_ENABLE_BINDINGS_PYTHON=ON
 
 # Build
@@ -134,7 +135,7 @@ the LLVM build.
 ## Testing
 
 CUDA Tile uses LLVM's lit testing infrastructure for comprehensive testing.
-Testing is enabled by default (`-DCUDA_TILE_ENABLE_TESTING=ON`). To run the test
+Testing is not enabled by default (`-DCUDA_TILE_ENABLE_TESTING=ON`). To run the test
 suite:
 
 ```bash
