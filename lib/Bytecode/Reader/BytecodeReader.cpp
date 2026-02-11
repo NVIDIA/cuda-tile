@@ -927,8 +927,7 @@ public:
     ArrayRef<char> rawData(reinterpret_cast<const char *>(rawUint8Data.data()),
                            rawUint8Data.size());
     // Validate the buffer size and format.
-    bool isSplat = false;
-    if (!DenseElementsAttr::isValidRawBuffer(tileType, rawData, isSplat))
+    if (!DenseElementsAttr::isValidRawBuffer(tileType, rawData))
       return reader.emitError() << "failed to validate buffer size and format";
 
     DenseElementsAttr attr = nullptr;
