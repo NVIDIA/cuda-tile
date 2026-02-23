@@ -51,7 +51,6 @@ declare_mlir_dialect_python_bindings(
   TD_FILE dialects/CudaTileOps.td
   SOURCES
     dialects/cuda_tile_ops.py
-    dialects/cuda_tile_utils.py
   DIALECT_NAME cuda_tile
   GEN_ENUM_BINDINGS_TD_FILE
     "../../include/cuda_tile/Dialect/CudaTile/IR/Types.td"

@@ -181,7 +181,7 @@ static ForOp copyLoop(RewriterBase &rewriter, ForOp forOp, CmpIOp cmpOp,
   Value step = forOp.getStep();
   IRMapping mapper;
   auto newLoop =
-      rewriter.create<ForOp>(loc, lowerBound, upperBound, step, iterArgs);
+      ForOp::create(rewriter, loc, lowerBound, upperBound, step, iterArgs);
   rewriter.setInsertionPointToStart(newLoop.getBody());
 
   for (auto [orig, repl] : llvm::zip(forOp.getBody()->getArguments(),
@@ -196,7 +196,7 @@ static ForOp copyLoop(RewriterBase &rewriter, ForOp forOp, CmpIOp cmpOp,
       llvm::APInt val(1, cloneThen ? 1 : 0);
       auto constAttr = DenseIntElementsAttr::get(constType, val);
       auto cmpConst =
-          rewriter.create<ConstantOp>(op->getLoc(), constType, constAttr);
+          ConstantOp::create(rewriter, op->getLoc(), constType, constAttr);
       mapper.map(cmpOp.getResult(), cmpConst);
       continue;
     } else if (!ifOps.contains(op)) {
@@ -269,24 +269,24 @@ static void performLoopSplit(RewriterBase &rewriter, ForOp forOp,
     auto intType = llvm::dyn_cast<IntegerType>(constType.getElementType());
     llvm::APInt val(intType.getWidth(), 1);
     auto constAttr = DenseIntElementsAttr::get(constType, val);
-    auto constOp = rewriter.create<ConstantOp>(loc, constType, constAttr);
-    splitPoint = rewriter.create<AddIOp>(loc, splitValue, constOp);
+    auto constOp = ConstantOp::create(rewriter, loc, constType, constAttr);
+    splitPoint = AddIOp::create(rewriter, loc, splitValue, constOp);
   }
   if (!constStep || !isConstOne(constStep)) {
     // Step is not equal to one (or dynamic)
     // Need special handling, so that loop split point is aligned (i.e. == lb +
     // k * step) So, splitPoint = start + Ceil(splitPoint - lb, step) * step
-    Value diff = rewriter.create<SubIOp>(loc, splitPoint, lb);
-    Value k = rewriter.create<DivIOp>(loc, diff, step, Signedness::Signed,
-                                      RoundingMode::POSITIVE_INF);
-    Value kstep = rewriter.create<MulIOp>(loc, k, step);
-    splitPoint = rewriter.create<AddIOp>(loc, lb, kstep);
+    Value diff = SubIOp::create(rewriter, loc, splitPoint, lb);
+    Value k = DivIOp::create(rewriter, loc, diff, step, Signedness::Signed,
+                             RoundingMode::POSITIVE_INF);
+    Value kstep = MulIOp::create(rewriter, loc, k, step);
+    splitPoint = AddIOp::create(rewriter, loc, lb, kstep);
   }
 
   Value minSplitPoint =
-      rewriter.create<MinIOp>(loc, splitPoint, ub, Signedness::Signed);
+      MinIOp::create(rewriter, loc, splitPoint, ub, Signedness::Signed);
   Value maxSplitPoint =
-      rewriter.create<MaxIOp>(loc, splitPoint, lb, Signedness::Signed);
+      MaxIOp::create(rewriter, loc, splitPoint, lb, Signedness::Signed);
 
   ForOp firstLoop, secondLoop;
   Block *originalBody = forOp.getBody();

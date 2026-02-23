@@ -1819,26 +1819,6 @@ class InstructionParser {
           return reader.emitError() << "parsed constant attribute is not the "
                                        "expected type derived "
                                        "from DenseElementsAttr";
-      } else if (std::is_same_v<T, DenseElementsAttr>) {
-        uint64_t numStringAttrs;
-        if (failed(reader.readVarInt(numStringAttrs)))
-          return reader.emitError() << "failed to read number of string attrs "
-                                       "in DenseElementsAttr";
-
-        llvm::SmallVector<StringRef> strs;
-        for (unsigned i = 0; i != numStringAttrs; ++i) {
-          StringRef strRef;
-          if (failed(reader.readAndGetString(strRef)))
-            return reader.emitError()
-                   << "failed to read string in DenseElementsAttr";
-          strs.push_back(strRef);
-        }
-
-        auto stringType = cuda_tile::StringType::get(&context);
-        auto tensorType = mlir::RankedTensorType::get(
-            {static_cast<int64_t>(strs.size())}, stringType);
-        nativeValue = dyn_cast<T>(DenseElementsAttr::get(tensorType, strs));
-
       } else
         return reader.emitError() << "unknown DenseElementsAttr based Attr";
       return success();
@@ -1924,7 +1904,7 @@ class InstructionParser {
                                   dictAttr, expectedType)))
         return failure();
       nativeValue = cuda_tile::OptimizationHintsAttr::getChecked(
-          [&]() {  return reader.emitError(); }, &context, dictAttr);
+          [&]() { return reader.emitError(); }, &context, dictAttr);
       if (!nativeValue)
         return reader.emitError() << "failed to parse OptimizationHintsAttr";
       return success();
@@ -2303,8 +2283,8 @@ static LogicalResult parseFunctionTableSection(
              << " bytes for function body";
 
     funcInfo.functionBody =
-      StringRef(reinterpret_cast<const char *>(bodyBytes.data()),
-                    funcInfo.lengthOfFunction);
+        StringRef(reinterpret_cast<const char *>(bodyBytes.data()),
+                  funcInfo.lengthOfFunction);
 
     functionInfoList.emplace_back(funcInfo);
   }
@@ -2400,9 +2380,9 @@ createFunction(const FunctionInfo &funcInfo, OpBuilder &builder,
              << funcNameStr << "'";
     }
 
-    funcOpIFace = funcBuilder.create<cuda_tile::EntryOp>(
-        funcLoc, funcName, TypeAttr::get(funcType), funcArgAttrs, funcRetAttrs,
-        funcOptHintAttr);
+    funcOpIFace = cuda_tile::EntryOp::create(
+        funcBuilder, funcLoc, funcName, TypeAttr::get(funcType), funcArgAttrs,
+        funcRetAttrs, funcOptHintAttr);
   } else {
     return reader.emitError()
            << "un-expected non-entry function '" << funcNameStr << "'";
@@ -2530,8 +2510,8 @@ createGlobal(const GlobalInfo &globalInfo, OpBuilder &builder,
   // Global variables must not have DILocAttr location type because CudaTile
   // supports only local scope. Therefore, global variables must have UnknownLoc
   // location type - the only other legal location type.
-  builder.create<cuda_tile::GlobalOp>(UnknownLoc::get(&context), symNameStr,
-                                      denseValueAttr, globalInfo.alignment);
+  cuda_tile::GlobalOp::create(builder, UnknownLoc::get(&context), symNameStr,
+                              denseValueAttr, globalInfo.alignment);
   return success();
 }
 
@@ -2545,7 +2525,7 @@ std::optional<size_t> cuda_tile::getBytecodeSize(const char *bytecodeBuffer) {
   if (!isTileIRBytecode(bytecodeBuffer))
     return std::nullopt;
 
-  auto charBuffer = reinterpret_cast<const unsigned char*>(bytecodeBuffer);
+  auto charBuffer = reinterpret_cast<const unsigned char *>(bytecodeBuffer);
   if (charBuffer[sizeof(kTileIRBytecodeMagic)] == 0)
     return std::nullopt;
 
@@ -2714,9 +2694,9 @@ cuda_tile::readBytecode(llvm::MemoryBufferRef bytecodeBuffer,
                                  context)))
       return reader.emitError() << "failed to parse debug section", nullptr;
 
-  OwningOpRef<cuda_tile::ModuleOp> cudaTileModule(
-      OpBuilder(&context).create<cuda_tile::ModuleOp>(UnknownLoc::get(&context),
-                                                      "kernels"));
+  OpBuilder moduleBuilder(&context);
+  OwningOpRef<cuda_tile::ModuleOp> cudaTileModule(cuda_tile::ModuleOp::create(
+      moduleBuilder, UnknownLoc::get(&context), "kernels"));
   OpBuilder builder(cudaTileModule->getBody());
   OpBuilder funcBuilder(&cudaTileModule->getBody().front(),
                         cudaTileModule->getBody().front().begin());

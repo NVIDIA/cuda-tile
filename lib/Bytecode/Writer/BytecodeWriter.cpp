@@ -1190,22 +1190,6 @@ struct FunctionTableWriter {
                   "failed to write type index for DenseElementsAttr");
           }
 
-          Type elementType =
-              cast<ShapedType>(denseAttr.getType()).getElementType();
-          if (isa<StringType>(elementType)) {
-            auto stringAttrs = denseAttr.getValues<StringAttr>();
-            writer.writeVarInt(stringAttrs.size());
-
-            for (Attribute element : stringAttrs) {
-              auto strAttr = dyn_cast<StringAttr>(element);
-              if (!strAttr)
-                return op->emitError(
-                    "expected StringAttr in DenseElementsAttr of string type");
-              writer.writeVarInt(strMgr.getStringIndex(strAttr.getValue()));
-            }
-            return success();
-          }
-
           if (auto intOrFPAttr =
                   dyn_cast<DenseIntOrFPElementsAttr>(denseAttr)) {
             uint64_t constantIndex;

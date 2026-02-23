@@ -2554,7 +2554,7 @@ struct ConvertToSelect : public OpRewritePattern<IfOp> {
     if (nonHoistable.size() == op->getNumResults())
       return failure();
 
-    IfOp replacement = rewriter.create<IfOp>(op.getLoc(), nonHoistable, cond);
+    IfOp replacement = IfOp::create(rewriter, op.getLoc(), nonHoistable, cond);
     replacement.getThenRegion().takeBody(op.getThenRegion());
     replacement.getElseRegion().takeBody(op.getElseRegion());
 
@@ -2582,7 +2582,7 @@ struct ConvertToSelect : public OpRewritePattern<IfOp> {
         results[it.index()] = trueVal;
       else
         results[it.index()] =
-            rewriter.create<SelectOp>(op.getLoc(), cond, trueVal, falseVal);
+            SelectOp::create(rewriter, op.getLoc(), cond, trueVal, falseVal);
     }
 
     if (thenYield) {
@@ -2654,7 +2654,7 @@ struct RemoveUnusedResults : public OpRewritePattern<IfOp> {
 
     // Create a replacement operation with empty then and else regions.
     auto newOp =
-        rewriter.create<IfOp>(op.getLoc(), newTypes, op.getCondition());
+        IfOp::create(rewriter, op.getLoc(), newTypes, op.getCondition());
     rewriter.createBlock(&newOp.getThenRegion());
     rewriter.createBlock(&newOp.getElseRegion());
 
@@ -2720,9 +2720,9 @@ struct ReplaceYieldWithValue : public OpRewritePattern<IfOp> {
           llvm::APInt val(1, 1);
           auto constAttr = DenseIntElementsAttr::get(constType, val);
           auto constOp =
-              rewriter.create<ConstantOp>(op->getLoc(), constType, constAttr);
+              ConstantOp::create(rewriter, op->getLoc(), constType, constAttr);
           Value notCond =
-              rewriter.create<XOrIOp>(op.getLoc(), op.getCondition(), constOp);
+              XOrIOp::create(rewriter, op.getLoc(), op.getCondition(), constOp);
           opResult.replaceAllUsesWith(notCond);
           changed = true;
         }
@@ -2823,8 +2823,8 @@ struct CombineIfs : public OpRewritePattern<IfOp> {
     SmallVector<Type> mergedTypes(prevIf.getResultTypes());
     llvm::append_range(mergedTypes, nextIf.getResultTypes());
 
-    IfOp combinedIf = rewriter.create<IfOp>(nextIf.getLoc(), mergedTypes,
-                                            prevIf.getCondition());
+    IfOp combinedIf = IfOp::create(rewriter, nextIf.getLoc(), mergedTypes,
+                                   prevIf.getCondition());
 
     rewriter.inlineRegionBefore(prevIf.getThenRegion(),
                                 combinedIf.getThenRegion(),
@@ -2839,7 +2839,7 @@ struct CombineIfs : public OpRewritePattern<IfOp> {
       if (thenYield && thenYield2) {
         SmallVector<Value> mergedYields(thenYield.getOperands());
         llvm::append_range(mergedYields, thenYield2.getOperands());
-        rewriter.create<YieldOp>(thenYield2.getLoc(), mergedYields);
+        YieldOp::create(rewriter, thenYield2.getLoc(), mergedYields);
       }
       if (thenYield)
         rewriter.eraseOp(thenYield);
@@ -2867,7 +2867,7 @@ struct CombineIfs : public OpRewritePattern<IfOp> {
           SmallVector<Value> mergedElseYields(elseYield.getOperands());
           llvm::append_range(mergedElseYields, elseYield2.getOperands());
 
-          rewriter.create<YieldOp>(elseYield2.getLoc(), mergedElseYields);
+          YieldOp::create(rewriter, elseYield2.getLoc(), mergedElseYields);
         }
         if (elseYield)
           rewriter.eraseOp(elseYield);
@@ -2998,9 +2998,9 @@ struct CombineNestedIfs : public OpRewritePattern<IfOp> {
     }
 
     Location loc = op.getLoc();
-    Value newCondition = rewriter.create<AndIOp>(loc, op.getCondition(),
-                                                 nestedIf.getCondition());
-    auto newIf = rewriter.create<IfOp>(loc, op.getResultTypes(), newCondition);
+    Value newCondition = AndIOp::create(rewriter, loc, op.getCondition(),
+                                        nestedIf.getCondition());
+    auto newIf = IfOp::create(rewriter, loc, op.getResultTypes(), newCondition);
     Block *newIfBlock = rewriter.createBlock(&newIf.getThenRegion());
 
     SmallVector<Value> results;
@@ -3008,8 +3008,8 @@ struct CombineNestedIfs : public OpRewritePattern<IfOp> {
     rewriter.setInsertionPoint(newIf);
 
     for (auto idx : elseYieldsToUpgradeToSelect)
-      results[idx] = rewriter.create<SelectOp>(op.getLoc(), op.getCondition(),
-                                               thenYield[idx], elseYield[idx]);
+      results[idx] = SelectOp::create(rewriter, op.getLoc(), op.getCondition(),
+                                      thenYield[idx], elseYield[idx]);
 
     rewriter.mergeBlocks(nestedIf.getThenBlock(), newIfBlock);
     rewriter.setInsertionPointToEnd(newIf.getThenBlock());
@@ -3019,7 +3019,7 @@ struct CombineNestedIfs : public OpRewritePattern<IfOp> {
     if (!elseYield.empty()) {
       rewriter.createBlock(&newIf.getElseRegion());
       rewriter.setInsertionPointToEnd(newIf.getElseBlock());
-      rewriter.create<YieldOp>(loc, elseYield);
+      YieldOp::create(rewriter, loc, elseYield);
     }
     rewriter.replaceOp(op, results);
     return success();
@@ -3040,8 +3040,8 @@ struct MoveTerminatorToParent : public OpRewritePattern<IfOp> {
         !isTerminatorForParent(op.getElseTerminator()))
       return failure();
 
-    auto newIfOp = rewriter.create<IfOp>(op.getLoc(), SmallVector<Type>(),
-                                         op.getCondition());
+    auto newIfOp = IfOp::create(rewriter, op.getLoc(), SmallVector<Type>(),
+                                op.getCondition());
     rewriter.inlineRegionBefore(op.getThenRegion(), newIfOp.getThenRegion(),
                                 newIfOp.getThenRegion().begin());
 
@@ -4185,7 +4185,7 @@ struct CudaTileinlinerInterface : public DialectInlinerInterface {
 
         // Replace the return operation with a break operation.
         OpBuilder builder(returnOp);
-        builder.create<BreakOp>(returnOp.getLoc(), returnOp.getOperands());
+        BreakOp::create(builder, returnOp.getLoc(), returnOp.getOperands());
         returnOp->erase();
       });
     }
@@ -4200,14 +4200,14 @@ struct CudaTileinlinerInterface : public DialectInlinerInterface {
     OpBuilder builder(returnOp);
 
     // Build a break for the new loop wrapper.
-    builder.create<BreakOp>(returnOp->getLoc(), returnOp->getOperands());
+    BreakOp::create(builder, returnOp->getLoc(), returnOp->getOperands());
 
     // Create a new loop operation that will contain the inlined block, and
     // update the original return to use the loops results.
     builder.setInsertionPointToStart(&block);
-    auto loopOp = builder.create<LoopOp>(block.front().getLoc(),
-                                         returnOp->getOperandTypes(),
-                                         /*operands=*/ValueRange());
+    auto loopOp = LoopOp::create(
+        builder, block.front().getLoc(), returnOp->getOperandTypes(),
+        /*operands=*/ValueRange(), /*attributes=*/ArrayRef<NamedAttribute>());
     returnOp->setOperands(loopOp.getResults());
     returnOp->moveAfter(loopOp);
 

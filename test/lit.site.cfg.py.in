@@ -5,12 +5,17 @@ import sys
 config.llvm_obj_root = "@LLVM_BINARY_DIR@"
 config.llvm_tools_dir = "@LLVM_TOOLS_DIR@"
 config.llvm_lib_dir = "@LLVM_LIBRARY_DIR@"
+config.llvm_use_sanitizer = "@LLVM_USE_SANITIZER@"
 config.llvm_shlib_ext = "@CMAKE_SHARED_LIBRARY_SUFFIX@"
+config.host_os = "@HOST_OS@"
+config.host_cxx = "@HOST_CXX@"
 config.python_executable = "@Python3_EXECUTABLE@"
 
 config.cuda_tile_tool_dir = "@CUDA_TILE_TOOL_DIR@"
 config.cuda_tile_obj_root = "@CUDA_TILE_BINARY_DIR@"
 config.cuda_tile_lib_dir = "@CUDA_TILE_LIBRARY_DIR@"
+config.cuda_tile_install_dir = "@CUDA_TILE_INSTALL_DIR@"
+config.enable_bindings_python = @CUDA_TILE_ENABLE_BINDINGS_PYTHON@
 
 import lit.llvm
 lit.llvm.initialize(lit_config, config)

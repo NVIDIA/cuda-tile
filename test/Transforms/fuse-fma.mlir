@@ -1,4 +1,4 @@
-// RUN: cuda-tile-opt %s --pass-pipeline="builtin.module(cuda_tile.module(cuda_tile.testing\$func(fuse-fma)))" --split-input-file | FileCheck %s
+// RUN: cuda-tile-opt %s --pass-pipeline='builtin.module(cuda_tile.module(cuda_tile.testing$func(fuse-fma)))' --split-input-file | FileCheck %s
 
 // Basic multiply-add fusion (x * y + z)
 // CHECK-LABEL: testing$func @test_mul_add_fusion

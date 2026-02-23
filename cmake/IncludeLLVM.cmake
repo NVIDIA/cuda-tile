@@ -1,5 +1,7 @@
 find_package(Python3 REQUIRED)
 
+set(LLVM_TOOLS_TO_INSTALL FileCheck;not)
+
 macro(print_llvm_config)
   message(STATUS "Summary of the LLVM/MLIR CMake environment:")
 
@@ -78,11 +80,13 @@ macro(configure_llvm_from_sources)
   set(LLVM_BUILD_EXAMPLES OFF CACHE BOOL "")
   set(LLVM_ENABLE_ASSERTIONS OFF CACHE BOOL "")
   set(LLVM_ENABLE_PROJECTS "mlir" CACHE STRING "")
-  # No need to build any LLVM targets.
   set(LLVM_TARGETS_TO_BUILD "" CACHE STRING "")
   # Disable PCH to avoid flag mismatches between LLVM and CUDA Tile targets
   # (e.g. NDEBUG differences).
   set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
+  set(LLVM_BUILD_UTILS ON CACHE BOOL "")
+  set(LLVM_INSTALL_UTILS ON CACHE BOOL "")
+
   # Propagate ccache setting to LLVM build.
   if(CUDA_TILE_ENABLE_CCACHE)
     set(LLVM_CCACHE_BUILD ON CACHE BOOL "")
@@ -97,6 +101,21 @@ macro(configure_llvm_from_sources)
   add_subdirectory(${LLVM_SOURCE_DIR}/llvm ${LLVM_BINARY_DIR} EXCLUDE_FROM_ALL)
   list(POP_BACK CMAKE_MESSAGE_INDENT)
 
+  if (CUDA_TILE_ENABLE_TESTING)
+    # Ensure FileCheck and not are always built even with EXCLUDE_FROM_ALL.
+    # These tools are required for testing.
+    foreach(_TOOL_NAME ${LLVM_TOOLS_TO_INSTALL})
+      add_custom_target(llvm-test-tool-${_TOOL_NAME} ALL DEPENDS ${_TOOL_NAME})
+
+      # Install LLVM tools to third_party/llvm/bin.
+      # Use install(TARGETS) since these are CMake targets built via add_subdirectory.
+      # This correctly resolves output paths across all platforms and generators.
+      install(TARGETS ${_TOOL_NAME}
+        RUNTIME DESTINATION third_party/llvm/bin
+      )
+    endforeach()
+  endif()
+
   set(LLVM_CMAKE_DIR "${LLVM_BINARY_DIR}/lib/cmake/llvm")
   set(LLVM_DIR "${LLVM_CMAKE_DIR}")
   # It looks like MLIR picks up the cmake directory from the main project's
@@ -104,6 +123,7 @@ macro(configure_llvm_from_sources)
   # set it differently here. We may want to fix that upstream.
   set(MLIR_CMAKE_DIR "${CUDA_TILE_BINARY_DIR}/lib/cmake/mlir")
   set(MLIR_DIR "${MLIR_CMAKE_DIR}")
+
 endmacro()
 
 # --------------------------------------------------------------
@@ -121,14 +141,16 @@ macro(configure_pre_installed_llvm)
     endif()
   endif()
 
-  set(LLVM_TOOLS_TO_INSTALL mlir-opt;FileCheck;not)
 
-  foreach(_TOOL_NAME ${LLVM_TOOLS_TO_INSTALL})
-    install(
-      PROGRAMS ${CUDA_TILE_USE_LLVM_INSTALL_DIR}/bin/${_TOOL_NAME}${CMAKE_EXECUTABLE_SUFFIX}
-      DESTINATION third_party/llvm/bin
-    )
-  endforeach()
+  # Install LLVM tools to third_party/llvm/bin.
+  if (CUDA_TILE_ENABLE_TESTING)
+    foreach(_TOOL_NAME ${LLVM_TOOLS_TO_INSTALL})
+      install(
+        PROGRAMS ${CUDA_TILE_USE_LLVM_INSTALL_DIR}/bin/${_TOOL_NAME}${CMAKE_EXECUTABLE_SUFFIX}
+          DESTINATION third_party/llvm/bin
+        )
+    endforeach()
+  endif()
 
   set(LLVM_CMAKE_DIR ${CUDA_TILE_USE_LLVM_INSTALL_DIR}/lib/cmake/llvm)
   set(LLVM_DIR "${LLVM_CMAKE_DIR}")

@@ -1,5 +1,4 @@
 # MLIR General Imports
-from tile_ir.base_dsl.typing import DslType
 from ._ods_common import _cext as _ods_cext
 from ._ods_common import (
     equally_sized_accessor as _ods_equally_sized_accessor,
@@ -9,7 +8,7 @@ from ._ods_common import (
     get_op_results_or_values as _get_op_results_or_values,
     segmented_accessor as _ods_segmented_accessor,
 )
-from tile_ir._mlir.ir import Context, Type
+from ..ir import Context, Type
 
 _ods_ir = _ods_cext.ir
 
@@ -18,7 +17,87 @@ from ._cuda_tile_ops_gen import _Dialect
 from . import _cuda_tile_enum_gen as _cuda_tile_enum
 from . import _cuda_tile_ops_gen as _cuda_tile
 from .._mlir_libs import _cuda_tile as _cuda_tile_capi
-from ...base_dsl.typing import *
+
+
+class _ElementTypeMeta(type):
+    """Metaclass providing mlir_type as a class property."""
+
+    _mlir_type_fn = None
+
+    @property
+    def mlir_type(cls):
+        if cls._mlir_type_fn is None:
+            raise NotImplementedError
+        return cls._mlir_type_fn()
+
+
+class _ElementType(metaclass=_ElementTypeMeta):
+    """Base class for element type wrappers."""
+
+    pass
+
+
+class Int8(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.IntegerType.get_signless(8))
+
+
+class Int32(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.IntegerType.get_signless(32))
+
+
+class Int64(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.IntegerType.get_signless(64))
+
+
+class Float16(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.F16Type.get())
+
+
+class BFloat16(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.BF16Type.get())
+
+
+class TFloat32(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.FloatTF32Type.get())
+
+
+class Float32(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.F32Type.get())
+
+
+class Float64(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.F64Type.get())
+
+
+class Float8E5M2(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.Float8E5M2Type.get())
+
+
+class Float8E4M3FN(_ElementType):
+    _mlir_type_fn = staticmethod(lambda: _ods_ir.Float8E4M3FNType.get())
+
+
+def _get_mlir_type(el_type):
+    """Extract MLIR type from element type wrapper or return as-is if already MLIR type."""
+    if hasattr(el_type, "mlir_type"):
+        return el_type.mlir_type
+    return el_type
+
+
+def _infer_mlir_type_from_python(value):
+    """Infer MLIR type from a Python value (int, float, bool)."""
+    if isinstance(value, bool):
+        return _ods_ir.IntegerType.get_signless(1)
+    elif isinstance(value, int):
+        return _ods_ir.IntegerType.get_signless(32)
+    elif isinstance(value, float):
+        return _ods_ir.F32Type.get()
+    raise ValueError(f"Cannot infer MLIR type from {type(value).__name__}")
+
+
+# =============================================================================
+# End Element Type Wrappers
+# =============================================================================
 
 
 # Global imports
@@ -329,9 +408,9 @@ class MMAConfig:
         rhs_signed: Signedness = Signedness.SIGNED,
     ):
         self.name = name
-        self.lhs_dtype = lhs_dtype  # DSL type
-        self.rhs_dtype = rhs_dtype  # DSL type
-        self.acc_dtype = acc_dtype  # DSL type
+        self.lhs_dtype = lhs_dtype
+        self.rhs_dtype = rhs_dtype
+        self.acc_dtype = acc_dtype
         self.lhs_signed = lhs_signed
         self.rhs_signed = rhs_signed
 
@@ -343,9 +422,9 @@ class MMAConfig:
 
     def matches_types(self, lhs_mlir_type, rhs_mlir_type, acc_mlir_type):
         """Check if the given MLIR types match this configuration"""
-        lhs_mlir_type_expected = self.lhs_dtype.mlir_type
-        rhs_mlir_type_expected = self.rhs_dtype.mlir_type
-        acc_mlir_type_expected = self.acc_dtype.mlir_type
+        lhs_mlir_type_expected = _get_mlir_type(self.lhs_dtype)
+        rhs_mlir_type_expected = _get_mlir_type(self.rhs_dtype)
+        acc_mlir_type_expected = _get_mlir_type(self.acc_dtype)
         return (
             lhs_mlir_type_expected == lhs_mlir_type
             and rhs_mlir_type_expected == rhs_mlir_type
@@ -550,7 +629,7 @@ def get_supported_mma_configs():
 # =============================================================================
 
 
-def _binary_op(lhs, rhs, op: str, predAtt="", is_reversed=False) -> "Tensor":
+def _binary_op(lhs, rhs, op: str, predAtt="", is_reversed=False) -> "Tile":
     """Generate arithmatic binary operations."""
 
     rhs = _check_is_rhs_tile(lhs, rhs)
@@ -807,8 +886,9 @@ class TensorView(TileView):
         return self.tensor_view_type.strides
 
     @property
-    def index_type(self) -> Numeric:
-        return Numeric.from_mlir_type(self.tensor_view_type.index_type)
+    def index_type(self):
+        """Returns the MLIR index type for this tensor view."""
+        return self.tensor_view_type.index_type
 
     @property
     def view_tile_type(self) -> TileType:
@@ -1058,31 +1138,41 @@ class _GlobalOp(_cuda_tile.GlobalOp):
 
 
 def make_tile_type(el_type, shape: Union[int, List[int]] = None) -> TileType:
-    """Create a TileType with a specified element type and shape."""
+    """Create a TileType with a specified element type and shape.
 
+    Args:
+        el_type: Element type - can be a type wrapper (Int32, Float32, etc.) or raw MLIR type
+        shape: Shape as int or list of ints
+    """
     shape = [shape] if isinstance(shape, int) else shape if shape is not None else []
     if not all(isinstance(dim, int) and dim >= 0 for dim in shape):
         raise ValueError(
             f"Shape must be a non-negative int or list of non-negative ints, got {shape}"
         )
-    cuda_tile_type = el_type
-    mlir_type = cuda_tile_type.mlir_type
+    mlir_type = _get_mlir_type(el_type)
     tile_type = TileType.get(shape, mlir_type)
 
     if tile_type is None:
+        type_name = getattr(el_type, "__name__", type(el_type).__name__)
         raise RuntimeError(
-            f"Error creating TileType with shape {shape} and element type {el_type.__name__}"
+            f"Error creating TileType with shape {shape} and element type {type_name}"
         )
 
     return tile_type
 
 
 def make_tensor_view_type(
-    el_type: Type[Numeric],
+    el_type,
     shape: List[int | None] | None = None,
     strides: List[int | None] | None = None,
 ) -> TensorViewType:
-    """Creates a TensorViewType from an element, a shape and strides."""
+    """Creates a TensorViewType from an element, a shape and strides.
+
+    Args:
+        el_type: Element type - can be a type wrapper (Int32, Float32, etc.) or raw MLIR type
+        shape: Shape as list of ints or None values
+        strides: Strides as list of ints or None values
+    """
     shape = shape if shape is not None else []
     strides = strides if strides is not None else []
 
@@ -1095,13 +1185,13 @@ def make_tensor_view_type(
             f"Strides must be a list of non-negative ints or None values, got {strides}"
         )
 
-    cuda_tile_type = el_type
-    elem_mlir_type = cuda_tile_type.mlir_type
+    elem_mlir_type = _get_mlir_type(el_type)
     tensor_view_type = TensorViewType.get(elem_mlir_type, shape, strides)
 
     if tensor_view_type is None:
+        type_name = getattr(el_type, "__name__", type(el_type).__name__)
         raise RuntimeError(
-            f"Error creating TensorViewType with element type {el_type.__name__}, "
+            f"Error creating TensorViewType with element type {type_name}, "
             f"shape {shape}, strides {strides}"
         )
 
@@ -1229,7 +1319,6 @@ def promote_rhs_to_tile(func):
 # =============================================================================
 
 # TODO: order ops alphabetically. It is really hard to navigate.
-
 
 
 @cuda_tile_op
@@ -1669,9 +1758,8 @@ def atomic_rmw_tko(
 
 
 @cuda_tile_op
-def bitcast(el_type: DslType, src: Tile, *, loc=None, ip=None) -> Tile:
-    if isinstance(el_type, type) and (el_type, DslType):
-        el_type = el_type.mlir_type
+def bitcast(el_type, src: Tile, *, loc=None, ip=None) -> Tile:
+    el_type = _get_mlir_type(el_type)
 
     # Check that neither source nor destination types are pointer types
     if PointerType.isinstance(src.element_type):
@@ -1693,9 +1781,8 @@ def bitcast(el_type: DslType, src: Tile, *, loc=None, ip=None) -> Tile:
 
 
 @cuda_tile_op
-def int_to_ptr(el_type: DslType, src: Tile, *, loc=None, ip=None) -> Tile:
-    if isinstance(el_type, type) and (el_type, DslType):
-        el_type = el_type.mlir_type
+def int_to_ptr(el_type, src: Tile, *, loc=None, ip=None) -> Tile:
+    el_type = _get_mlir_type(el_type)
 
     # Ensure src is a tile with i64 element type
     if not (
@@ -1726,14 +1813,8 @@ def ptr_to_int(src: Tile, *, loc=None, ip=None) -> Tile:
 
 
 @cuda_tile_op
-def ptr_to_ptr(el_type: DslType, src: Tile, *, loc=None, ip=None) -> Tile:
-    if isinstance(el_type, type) and (el_type, DslType):
-        el_type = el_type.mlir_type
-    else:
-        # TODO: There are currently no DSL types for cuda_tile.ptr, so this
-        # function also accepts MLIR types until proper pointer types have been
-        # added.
-        assert isinstance(el_type, _ods_ir.Type), "expected MLIR type or DSL type"
+def ptr_to_ptr(el_type, src: Tile, *, loc=None, ip=None) -> Tile:
+    el_type = _get_mlir_type(el_type)
     result_type = TileType.get(src.shape, el_type)
     return return_results(
         _cuda_tile.PtrToPtrOp(result=result_type, source=src, loc=loc, ip=ip)
@@ -2030,7 +2111,6 @@ def _subf(
     )
 
 
-
 @cuda_tile_op
 def sub(
     lhs: Tile,
@@ -2217,7 +2297,6 @@ def get_tile_block_id(*, loc=None, ip=None) -> Tile:
 def get_num_tile_blocks(*, loc=None, ip=None) -> Tile:
     """Get number of tile blocks."""
     return return_results(_cuda_tile.GetNumTileBlocksOp(loc=loc, ip=ip))
-
 
 
 @cuda_tile_op
@@ -2835,15 +2914,17 @@ def ftoi(
 
 
 @cuda_tile_op
-def iota(n: int, el_type: DslType, *, loc=None, ip=None) -> Tile:
-    bitwidth = el_type.width
+def iota(n: int, el_type, *, loc=None, ip=None) -> Tile:
+    mlir_type = _get_mlir_type(el_type)
+    if not isinstance(mlir_type, _ods_ir.IntegerType):
+        raise TypeError(f"iota requires an integer element type, got {mlir_type}")
+    bitwidth = mlir_type.width
     if n > (1 << bitwidth):
         raise Exception(
-            f"the number of elements {n} exceeds the maximum value of element type {el_type.__name__}"
+            f"the number of elements {n} exceeds the maximum value of {bitwidth}-bit integer"
         )
-    result_type = make_tile_type(el_type, (n,))
+    result_type = make_tile_type(mlir_type, (n,))
     return return_results(_cuda_tile.IotaOp(result=result_type, loc=loc, ip=ip))
-
 
 
 @cuda_tile_op
@@ -3112,7 +3193,7 @@ def for_loop(
     upper_bound: int | Tile,
     step: int | Tile = 1,
     init_values: Sequence[Tile] = (),
-    el_type: Type[Integer] = Int32,
+    el_type=Int32,
     *,
     loc=None,
     ip=None,
@@ -3212,7 +3293,7 @@ def ret(args: Iterable[Tile], *, loc=None, ip=None):
 @cuda_tile_op
 def make_tensor_view(
     base_ptr,
-    el_type: Type[Numeric],
+    el_type,
     shape: List[int | Tile] | None = None,
     strides: List[int | Tile] | None = None,
     *,
@@ -3454,15 +3535,13 @@ def _prepare_aggregate_op(operand, dim, reverse, identities, operation_type):
         operation_type: "reduce" or "scan" to determine shape transformation
 
     Returns:
-        A tuple of (result_type, dim_attr, identities_attr, bb_arg_type, dsl_type)
+        A tuple of (result_type, dim_attr, reverse_attr, identities_attr, bb_arg_type, el_type)
     """
-
     el_type = operand.element_type
-    dsl_type = Numeric.from_mlir_type(operand.tile_type.element_type)
     if isinstance(el_type, _ods_ir.IntegerType):
-        attr = _ods_ir.IntegerAttr.get(dsl_type.mlir_type, identities)
+        attr = _ods_ir.IntegerAttr.get(el_type, identities)
     elif isinstance(el_type, _ods_ir.FloatType):
-        attr = _ods_ir.FloatAttr.get(dsl_type.mlir_type, identities)
+        attr = _ods_ir.FloatAttr.get(el_type, identities)
     else:
         raise TypeError("Tile operand is not integer or float data type")
 
@@ -3473,7 +3552,7 @@ def _prepare_aggregate_op(operand, dim, reverse, identities, operation_type):
     else:  # scan
         result_shape = shape
 
-    result_type = make_tile_type(dsl_type, result_shape)
+    result_type = make_tile_type(el_type, result_shape)
 
     # Create dimension and identities attributes
     i32 = _ods_ir.IntegerType.get_signless(32)
@@ -3484,13 +3563,13 @@ def _prepare_aggregate_op(operand, dim, reverse, identities, operation_type):
     # Create block argument type
     bb_arg_ty = _cuda_tile_capi.TileType.get([], el_type)
 
-    return (result_type, dim_attr, reverse_attr, identities_attr, bb_arg_ty, dsl_type)
+    return (result_type, dim_attr, reverse_attr, identities_attr, bb_arg_ty, el_type)
 
 
 @cuda_tile_op
 def reduce(operand: Tile, dim, identities, reduce_body: Callable, *, loc=None, ip=None):
     # Prepare common components
-    result_type, dim_attr, _, identities_attr, bb_arg_ty, dsl_type = (
+    result_type, dim_attr, _, identities_attr, bb_arg_ty, el_type = (
         _prepare_aggregate_op(operand, dim, False, identities, "reduce")
     )
 
@@ -3503,8 +3582,8 @@ def reduce(operand: Tile, dim, identities, reduce_body: Callable, *, loc=None, i
     block = reduce_op.regions[0].blocks.append(bb_arg_ty, bb_arg_ty)
     with _ods_ir.InsertionPoint(block):
         values = reduce_body(
-            Tile(block.arguments[0], make_tile_type(dsl_type, [])),
-            Tile(block.arguments[1], make_tile_type(dsl_type, [])),
+            Tile(block.arguments[0], make_tile_type(el_type, [])),
+            Tile(block.arguments[1], make_tile_type(el_type, [])),
         )
         if isinstance(values, Tile) is False:
             error = f"Expected a tile type but it received {values}"
@@ -3519,7 +3598,7 @@ def scan(
     operand: Tile, dim, reverse, identities, scan_body: Callable, *, loc=None, ip=None
 ):
     # Prepare common components
-    result_type, dim_attr, reverse_attr, identities_attr, bb_arg_ty, dsl_type = (
+    result_type, dim_attr, reverse_attr, identities_attr, bb_arg_ty, el_type = (
         _prepare_aggregate_op(operand, dim, reverse, identities, "scan")
     )
 
@@ -3538,8 +3617,8 @@ def scan(
     block = scan_op.regions[0].blocks.append(bb_arg_ty, bb_arg_ty)
     with _ods_ir.InsertionPoint(block):
         values = scan_body(
-            Tile(block.arguments[0], make_tile_type(dsl_type, [])),
-            Tile(block.arguments[1], make_tile_type(dsl_type, [])),
+            Tile(block.arguments[0], make_tile_type(el_type, [])),
+            Tile(block.arguments[1], make_tile_type(el_type, [])),
         )
         if isinstance(values, Tile) is False:
             error = f"Expected a tile type but it received {values}"
@@ -3799,7 +3878,7 @@ def constant(
     if tile_type is None:
         # type is optional. Try to infer it from the first input value.
         if el_type is None:
-            el_type = Numeric.from_python(flattened_values[0])
+            el_type = _infer_mlir_type_from_python(flattened_values[0])
 
         tile_type = make_tile_type(el_type, shape)
         assert tile_type != None, "cannot create tile type"
@@ -3839,7 +3918,7 @@ def global_(
     if tile_type is None:
         # type is optional. Try to infer it from the first input value.
         if el_type is None:
-            el_type = Numeric.from_python(flattened_values[0])
+            el_type = _infer_mlir_type_from_python(flattened_values[0])
 
         tile_type = make_tile_type(el_type, shape)
         assert tile_type != None, "cannot create tile type"
@@ -3887,7 +3966,7 @@ def create_and_get_global(
 
 @cuda_tile_op
 def get_index_space_shape(
-    view: TileView, result_type: Type[Integer] = Int64, loc=None, ip=None
+    view: TileView, result_type=Int64, loc=None, ip=None
 ) -> Tuple[Tile, ...]:
     if not isinstance(view, TileView):
         raise TypeError(f"view must be a TileView")
@@ -3901,7 +3980,7 @@ def get_index_space_shape(
 
 @cuda_tile_op
 def get_tensor_shape(
-    view: TensorView, result_type: Type[Integer] = Int64, loc=None, ip=None
+    view: TensorView, result_type=Int64, loc=None, ip=None
 ) -> Tuple[Tile, ...]:
     if not isinstance(view, TensorView):
         raise TypeError(f"view must be a TensorView")
