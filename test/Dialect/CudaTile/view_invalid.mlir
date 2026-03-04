@@ -265,7 +265,7 @@ cuda_tile.module @module {
 
 cuda_tile.module @module {
   cuda_tile.testing$func @make_tensor_view_invalid_element_type(%base: !cuda_tile.tile<!cuda_tile.ptr<f32>>) {
-    // expected-error-re @below{{failed to verify 'elementType': f16 or bf16 or f32 or tf32 or f64 or f8E4M3FN or f8E5M2 {{(or f4E2M1FN )?}}or i1 or i8 or i16 or i32 or i64}}
+    // expected-error-re @below{{failed to verify 'elementType': f16 or bf16 or f32 or tf32 or f64 or f8E4M3FN or f8E5M2 or f8E8M0FNU or i1 or i8 or i16 or i32 or i64}}
     cuda_tile.make_tensor_view %arg0, shape = [32, 32], strides = [32, 1] : tensor_view<32x32xptr<f32>, strides=[32,1]>
   }
 }
@@ -369,7 +369,7 @@ cuda_tile.module @module {
     %c0 = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
     // expected-error @below{{operand #0 must be TileView instance, but got '!cuda_tile.tile<32xf32>'}}
     %x, %t = load_view_tko weak %tile[%c0] : !cuda_tile.tile<32xf32>, tile<i32> -> !cuda_tile.tile<8xf32>, !cuda_tile.token
-    cuda_tile.print "%f\n", %x : !cuda_tile.tile<8xf32>
+    cuda_tile.print_tko "%f\n", %x : !cuda_tile.tile<8xf32> -> !cuda_tile.token
   }
 }
 
@@ -447,3 +447,4 @@ cuda_tile.module @module {
     %t = store_view_tko acquire %tile, %view[%c0, %c0] : tile<1024x1024xf32>, partition_view<tile=(1024x1024), tensor_view<4096x4096xf32, strides=[4096,1]>>, tile<i32> -> token
   }
 }
+

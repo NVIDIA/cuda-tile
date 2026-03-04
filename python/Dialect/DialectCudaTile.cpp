@@ -1,9 +1,12 @@
 //===- DialectCudaTile.cpp - CUDA Tile dialect python bindings --*- C++ -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #include "mlir/Bindings/Python/NanobindAdaptors.h"
 #include "mlir/CAPI/IR.h"
 
@@ -11,7 +14,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "cuda_tile-c/Dialect/CudaTileDialect.h"
-
+#include "cuda_tile-c/Dialect/CudaTileOptimizer.h"
 namespace nb = nanobind;
 using namespace mlir::python::nanobind_adaptors;
 
@@ -35,30 +38,27 @@ NB_MODULE(_cuda_tile, m) {
   // Create a simple struct to avoid C++ symbol binding issues with
   // EMBED_CAPI_LINK_LIBS
   struct TileIROptimizationsOptsWrapper {
-    int loop_split_threshold = -1;   // Default: disabled
-    bool enable_cse = true;          // Default: enabled
-    bool canonicalize_before = true; // Default: enabled
-    bool canonicalize_after = true;  // Default: enabled
+    int opt_level = 3;
+    bool fuse_fma = false;
   };
 
   nb::class_<TileIROptimizationsOptsWrapper>(m, "TileIROptimizationsOpts")
       .def(nb::init<>())
-      .def_rw("loop_split_threshold",
-              &TileIROptimizationsOptsWrapper::loop_split_threshold)
-      .def_rw("enable_cse", &TileIROptimizationsOptsWrapper::enable_cse)
-      .def_rw("canonicalize_before",
-              &TileIROptimizationsOptsWrapper::canonicalize_before)
-      .def_rw("canonicalize_after",
-              &TileIROptimizationsOptsWrapper::canonicalize_after);
+      .def_rw("opt_level", &TileIROptimizationsOptsWrapper::opt_level)
+      .def_rw("fuse_fma", &TileIROptimizationsOptsWrapper::fuse_fma);
 
   // TODO: Add CudaTile python bindings tests for ir passes
   m.def(
       "applyTileIROptimizations",
       [](nb::object &moduleOp, const TileIROptimizationsOptsWrapper &opts) {
+        mlirCudaTileOptConfig config;
+        mlirCudaTileOptFlagsInit(&config);
+        config.optLevel = opts.opt_level;
+        if (opts.fuse_fma)
+          config.flags |= CUDATILE_OPT_FLAG_FUSE_FMA;
         MlirOperation mlirOp = nb::cast<MlirOperation>(moduleOp);
-        return mlirCudaTileApplyOptimizations(
-            mlirOp, opts.loop_split_threshold, opts.enable_cse,
-            opts.canonicalize_before, opts.canonicalize_after);
+        return mlirLogicalResultIsSuccess(
+            mlirCudaTileApplyOptimizations(mlirOp, &config));
       },
       nb::arg("module"), nb::arg("opts") = TileIROptimizationsOptsWrapper{},
       "Perform CUDA Tile IR optimizations using CAPI wrapper");
@@ -268,7 +268,7 @@ NB_MODULE(_cuda_tile, m) {
              const nb::object &paddingValue,
              MlirContext context) -> nb::object {
             if (!mlirCudaTileTypeIsATensorViewType(wrappedTensorViewType)) {
-              throw std::invalid_argument("expected tensor_view type");
+              throw nb::type_error("expected tensor_view type");
             }
 
             std::vector<int32_t> dimMapInPlace;
@@ -326,9 +326,10 @@ NB_MODULE(_cuda_tile, m) {
           [](MlirType type) -> std::vector<int32_t> {
             intptr_t rank = mlirCudaTilePartitionViewTypeGetDimMapRank(type);
             std::vector<int32_t> result(rank);
-            for (intptr_t i = 0; i < rank; ++i)
+            for (intptr_t i = 0; i < rank; ++i) {
               result[i] =
                   mlirCudaTilePartitionViewTypeGetDimMapElement(type, i);
+            }
             return result;
           })
       .def_property_readonly(
@@ -379,8 +380,8 @@ NB_MODULE(_cuda_tile, m) {
       })
       .def_classmethod(
           "getEntryOpHint",
-          [](const nb::object &cls, const std::string &arch, int num_cta,
-             int occupancy, MlirContext context) -> nb::object {
+          [](const nb::object &cls, const std::string &arch, const int &num_cta,
+             const int &occupancy, MlirContext context) -> nb::object {
             MlirStringRef archStr =
                 mlirStringRefCreateFromCString(arch.c_str());
             MlirAttribute attr =
@@ -393,19 +394,20 @@ NB_MODULE(_cuda_tile, m) {
       .def_classmethod(
           "getLoadStoreOpHint",
           [](const nb::object &cls, const std::string &arch,
-             std::optional<bool> allow_tma, int latency,
+             const nb::object &allow_tma, const int &latency,
              MlirContext context) -> nb::object {
             MlirStringRef archStr =
                 mlirStringRefCreateFromCString(arch.c_str());
+            // Convert Python None/True/False to -1/1/0
             int8_t allowTmaValue = -1; // default: not specified
-            if (allow_tma.has_value())
-              allowTmaValue = *allow_tma ? 1 : 0;
+            if (!allow_tma.is_none())
+              allowTmaValue = nb::cast<bool>(allow_tma) ? 1 : 0;
             MlirAttribute attr =
                 mlirCudaTileOptimizationHintsAttrGetLoadStoreOpHint(
                     context, archStr, allowTmaValue, latency);
             return cls(attr);
           },
-          nb::arg("cls"), nb::arg("arch"), nb::arg("allow_tma") = nb::none(),
+          nb::arg("cls"), nb::arg("arch"), nb::arg("allow_tma"),
           nb::arg("latency"), nb::arg("context") = nb::none());
 
   mlir_attribute_subclass(
@@ -549,7 +551,6 @@ NB_MODULE(_cuda_tile, m) {
         MlirStringRef valueRef = mlirCudaTileSignednessAttrGetValue(self);
         return std::string(valueRef.data, valueRef.length);
       });
-
   mlir_attribute_subclass(
       m, "ComparisonOrderingAttr",
       [](MlirAttribute attr) -> bool {
@@ -574,7 +575,6 @@ NB_MODULE(_cuda_tile, m) {
             mlirCudaTileComparisonOrderingAttrGetValue(self);
         return std::string(valueRef.data, valueRef.length);
       });
-
   mlir_attribute_subclass(
       m, "ComparisonPredicateAttr",
       [](MlirAttribute attr) -> bool {

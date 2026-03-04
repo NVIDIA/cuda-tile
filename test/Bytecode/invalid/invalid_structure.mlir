@@ -11,7 +11,7 @@
 // Version
 //===--------------------------------------------------------------------===//
 // RUN: not cuda-tile-translate -cudatilebc-to-mlir %S/unsupported_version.tileirbc -no-implicit-module 2>&1 | FileCheck %s --check-prefix=VERSION
-// VERSION: unsupported Tile version 18.0.0, this reader supports versions [13.1, 13.1]
+// VERSION: unsupported Tile version 18.0.0, this reader supports versions [13.1, 13.2]
 
 //===--------------------------------------------------------------------===//
 // Section ID
@@ -36,4 +36,3 @@
 //===--------------------------------------------------------------------===//
 // RUN: not cuda-tile-translate -cudatilebc-to-mlir %S/invalid_attribute_name.bc -no-implicit-module 2>&1 | FileCheck %s --check-prefix=ATTR_NAME
 // ATTR_NAME: invalid empty attribute name for DictionaryAttr element 0
-

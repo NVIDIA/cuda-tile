@@ -243,7 +243,7 @@ cuda_tile.module @addf_invalid_rnd_modifier {
 "cuda_tile.module"() <{sym_name = "addf_invalid_rnd_modifier"}> ({
   "cuda_tile.testing$func"() <{arg_attrs = [{}, {}], function_type = (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
   ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>, %arg1: !cuda_tile.tile<2x4x8xf32>):
-    // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
+    // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
     %0 = "cuda_tile.addf"(%arg0, %arg1) <{rounding_mode = #cuda_tile.rounding<full>}> : (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
     "cuda_tile.return"() : () -> ()
   }) : () -> ()
@@ -255,7 +255,7 @@ cuda_tile.module @addf_invalid_rnd_modifier {
 "cuda_tile.module"() <{sym_name = "addf_invalid_rnd_modifier"}> ({
   "cuda_tile.testing$func"() <{arg_attrs = [{}, {}], function_type = (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
   ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>, %arg1: !cuda_tile.tile<2x4x8xf32>):
-    // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
+    // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
     %0 = "cuda_tile.addf"(%arg0, %arg1) <{rounding_mode = #cuda_tile.rounding<approx>}> : (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
     "cuda_tile.return"() : () -> ()
   }) : () -> ()
@@ -772,7 +772,7 @@ cuda_tile.module @divf_invalid_flush_to_zero_modifier {
 "cuda_tile.module"() <{sym_name = "divf_invalid_rnd_modifier"}> ({
   "cuda_tile.testing$func"() <{arg_attrs = [{}, {}], function_type = (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
   ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>, %arg1: !cuda_tile.tile<2x4x8xf32>):
-    // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf, approx, full]}}
+    // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf, approx, full]}}
     %0 = "cuda_tile.divf"(%arg0, %arg1) <{rounding_mode = #cuda_tile.rounding<nearest_int_to_zero>}> : (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
     "cuda_tile.return"() : () -> ()
   }) : () -> ()
@@ -1273,7 +1273,7 @@ cuda_tile.module @mulf_invalid_rounding_mode {
 "cuda_tile.module"() <{sym_name = "mulf_invalid_rnd_modifier"}> ({
   "cuda_tile.testing$func"() <{arg_attrs = [{}, {}], function_type = (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
   ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>, %arg1: !cuda_tile.tile<2x4x8xf32>):
-    // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
+    // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
     %0 = "cuda_tile.mulf"(%arg0, %arg1) <{rounding_mode = #cuda_tile.rounding<full>}> : (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
     "cuda_tile.return"() : () -> ()
   }) : () -> ()
@@ -1284,7 +1284,7 @@ cuda_tile.module @mulf_invalid_rounding_mode {
 "cuda_tile.module"() <{sym_name = "mulf_invalid_rnd_modifier"}> ({
   "cuda_tile.testing$func"() <{arg_attrs = [{}, {}], function_type = (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
   ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>, %arg1: !cuda_tile.tile<2x4x8xf32>):
-    // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
+    // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
     %0 = "cuda_tile.mulf"(%arg0, %arg1) <{rounding_mode = #cuda_tile.rounding<approx>}> : (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
     "cuda_tile.return"() : () -> ()
   }) : () -> ()
@@ -1422,7 +1422,7 @@ cuda_tile.module @fma_invalid_rounding_mode {
 "cuda_tile.module"() <{sym_name = "fma_invalid_rnd_modifier"}> ({
   "cuda_tile.testing$func"() <{arg_attrs = [{}, {}], function_type = (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
   ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>, %arg1: !cuda_tile.tile<2x4x8xf32>):
-    // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
+    // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
     %0 = "cuda_tile.fma"(%arg0, %arg1, %arg0) <{rounding_mode = #cuda_tile.rounding<full>}> : (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
     "cuda_tile.return"() : () -> ()
   }) : () -> ()
@@ -1433,7 +1433,7 @@ cuda_tile.module @fma_invalid_rounding_mode {
 "cuda_tile.module"() <{sym_name = "fma_invalid_rnd_modifier"}> ({
   "cuda_tile.testing$func"() <{arg_attrs = [{}, {}], function_type = (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
   ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>, %arg1: !cuda_tile.tile<2x4x8xf32>):
-    // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
+    // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
     %0 = "cuda_tile.fma"(%arg0, %arg1, %arg0) <{rounding_mode = #cuda_tile.rounding<approx>}> : (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
     "cuda_tile.return"() : () -> ()
   }) : () -> ()
@@ -2007,7 +2007,7 @@ cuda_tile.module @subf_invalid_rounding_mode {
 "cuda_tile.module"() <{sym_name = "subf_invalid_rnd_modifier"}> ({
   "cuda_tile.testing$func"() <{arg_attrs = [{}, {}], function_type = (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
   ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>, %arg1: !cuda_tile.tile<2x4x8xf32>):
-    // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
+    // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
     %0 = "cuda_tile.subf"(%arg0, %arg1) <{rounding_mode = #cuda_tile.rounding<full>}> : (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
     "cuda_tile.return"() : () -> ()
   }) : () -> ()
@@ -2019,7 +2019,7 @@ cuda_tile.module @subf_invalid_rounding_mode {
 "cuda_tile.module"() <{sym_name = "subf_invalid_rnd_modifier"}> ({
   "cuda_tile.testing$func"() <{arg_attrs = [{}, {}], function_type = (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
   ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>, %arg1: !cuda_tile.tile<2x4x8xf32>):
-    // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
+    // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf]}}
     %0 = "cuda_tile.subf"(%arg0, %arg1) <{rounding_mode = #cuda_tile.rounding<approx>}> : (!cuda_tile.tile<2x4x8xf32>, !cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
     "cuda_tile.return"() : () -> ()
   }) : () -> ()

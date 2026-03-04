@@ -2,9 +2,11 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
 // Implements the BytecodeReader for the cuda_tile dialect, enabling
 // deserialization of bytecode into a cuda_tile module.
 //
@@ -19,6 +21,7 @@
 #include "llvm/ADT/ScopeExit.h"
 
 #include "../BytecodeEnums.h"
+#include "../Common/VersionUtils.h"
 #include "cuda_tile/Bytecode/Common/Version.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Attributes.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Types.h"
@@ -293,7 +296,8 @@ struct SectionHeader {
 
 /// Parses and validates the bytecode header, including the magic number and
 /// version.
-static LogicalResult parseHeader(EncodingReader &reader, MLIRContext &context) {
+static LogicalResult parseHeader(EncodingReader &reader, MLIRContext &context,
+                                 BytecodeVersion &version) {
   // Read and verify the magic number.
   for (int i = 0, e = std::size(kTileIRBytecodeMagic); i < e; ++i) {
     uint8_t byte = reader.readLE<uint8_t>();
@@ -319,6 +323,7 @@ static LogicalResult parseHeader(EncodingReader &reader, MLIRContext &context) {
            << BytecodeVersion::kMinSupportedVersion.toString() << ", "
            << BytecodeVersion::kCurrentVersion.toString() << "]";
   }
+  version = *versionInfo;
   return success();
 }
 
@@ -538,7 +543,7 @@ public:
     // Mark this type as currently being parsed.
     currentlyParsing.insert(typeIndex);
     auto removeIndex =
-        llvm::make_scope_exit([&] { currentlyParsing.erase(typeIndex); });
+        llvm::scope_exit([&] { currentlyParsing.erase(typeIndex); });
     // Calculate the boundaries for the type data.
     uint32_t start = typeStartIndices[typeIndex];
     uint32_t end = (typeIndex + 1 < typeStartIndices.size())
@@ -577,55 +582,10 @@ public:
   }
 
 private:
-  // integer-type =: typeTag[I1/I8/I16/I32/I64]
-  LogicalResult parseIntegerType(uint8_t typeTag, Type &result) {
-
-    switch (static_cast<TypeTag>(typeTag)) {
-    case TypeTag::I1:
-      result = IntegerType::get(&context, 1);
-      return success();
-    case TypeTag::I8:
-      result = IntegerType::get(&context, 8);
-      return success();
-    case TypeTag::I16:
-      result = IntegerType::get(&context, 16);
-      return success();
-    case TypeTag::I32:
-      result = IntegerType::get(&context, 32);
-      return success();
-    case TypeTag::I64:
-      result = IntegerType::get(&context, 64);
-      return success();
-    default:
-      return ::emitError(UnknownLoc::get(&context))
-             << "invalid integer type tag: " << static_cast<int>(typeTag);
-    }
-  }
-
-  // tile-type =:
-  //   typeTag[Tile]
-  //   elementTypeIndex[varint]
-  //   rank[varint]
-  //   dimensions[int64_t*rank]
-  LogicalResult parseTileType(EncodingReader &reader, Type &result) {
-    Type elementType = readAndGetType(reader);
-    if (!elementType)
-      return reader.emitError() << "failed to get element type";
-    // Validate that the element type is a valid scalar type for tiles.
-    if (!elementType.isIntOrFloat() &&
-        !isa<cuda_tile::PointerType>(elementType))
-      return reader.emitError() << "tile element type must be integer, float, "
-                                   "or valid pointer, got: "
-                                << elementType;
-    // Read dimensions (size is implicitly read by readLEVarSize)
-    SmallVector<int64_t, 4> shape;
-    if (failed(reader.readLEVarSize(shape)))
-      return reader.emitError() << "failed to read tile shape";
-    result = cuda_tile::TileType::getChecked(
-        [&]() { return reader.emitError(); }, &context,
-        ArrayRef<int64_t>(shape), elementType);
-    return success(result);
-  }
+  // All type deserialization is now auto-generated - see
+  // TypeBytecodeReader.inc.
+#define GEN_TYPE_READERS
+#include "TypeBytecodeReader.inc"
 
   // function-type =:
   //   typeTag[Func]
@@ -666,168 +626,12 @@ private:
     return success();
   }
 
-  // float-type =: typeTag[F16/BF16/F32/TF32/F64/F8E4M3FN/F8E5M2]
-  LogicalResult parseFloatType(uint8_t typeTag, Type &result) {
-    if (typeTag == static_cast<uint8_t>(TypeTag::F16)) {
-      result = Float16Type::get(&context);
-      return success();
-    }
-    if (typeTag == static_cast<uint8_t>(TypeTag::BF16)) {
-      result = BFloat16Type::get(&context);
-      return success();
-    }
-    if (typeTag == static_cast<uint8_t>(TypeTag::F32)) {
-      result = Float32Type::get(&context);
-      return success();
-    }
-    if (typeTag == static_cast<uint8_t>(TypeTag::TF32)) {
-      result = FloatTF32Type::get(&context);
-      return success();
-    }
-    if (typeTag == static_cast<uint8_t>(TypeTag::F64)) {
-      result = Float64Type::get(&context);
-      return success();
-    }
-    if (typeTag == static_cast<uint8_t>(TypeTag::F8E4M3FN)) {
-      result = Float8E4M3FNType::get(&context);
-      return success();
-    }
-    if (typeTag == static_cast<uint8_t>(TypeTag::F8E5M2)) {
-      result = Float8E5M2Type::get(&context);
-      return success();
-    }
-    return ::emitError(UnknownLoc::get(&context))
-           << "unsupported float type tag: " << static_cast<int>(typeTag);
-  }
-
-  // pointer-type =:
-  //   typeTag[Pointer]
-  //   pointeeTypeIndex[varint]
-  LogicalResult parsePointerType(EncodingReader &reader, Type &result) {
-    Type pointeeType = readAndGetType(reader);
-    if (!pointeeType)
-      return reader.emitError() << "failed to get pointer type";
-    result = cuda_tile::PointerType::getChecked(
-        [&]() { return reader.emitError(); }, &context, pointeeType);
-    return success(result);
-  }
-
-  // memref-type =:
-  //   typeTag[MemRef]
-  //   elementTypeIndex[varint]
-  //   shapeSize[varint]
-  //   shape[int64_t*shapeSize]
-  //   stridesSize[varint]
-  //   strides[int64_t*stridesSize]
-  //   indexBitwidth[varint]
-  LogicalResult parseTensorViewType(EncodingReader &reader, Type &result) {
-    // Read the element type index.
-    Type elementType = readAndGetType(reader);
-    if (!elementType || !elementType.isIntOrFloat())
-      return reader.emitError()
-             << "tensor_view element type must be integer or float, got: "
-             << elementType;
-    // Read the shape size.
-    SmallVector<int64_t, 4> shape;
-    if (failed(reader.readLEVarSize(shape)))
-      return reader.emitError() << "failed to read tensor_view shape";
-    // Read the strides size.
-    SmallVector<int64_t, 4> strides;
-    if (failed(reader.readLEVarSize(strides)))
-      return reader.emitError() << "failed to read tensor_view strides";
-    result = cuda_tile::TensorViewType::getChecked(
-        [&]() { return reader.emitError(); }, &context, elementType,
-        ArrayRef<int64_t>(shape), ArrayRef<int64_t>(strides));
-    return success(result);
-  }
-
-  // tile-partition-view-type =:
-  //   typeTag[PartitionView]
-  //   tileShapeSize[varint]
-  //   tileShape[int32_t*tileShapeSize]
-  //   memrefTypeIndex[varint]
-  //   dimMapSize[varint]
-  //   dimMap[int32_t*dimMapSize]
-  //   hasPadding[byte]
-  //   paddingValueEnum[varint]?
-  LogicalResult parsePartitionViewType(EncodingReader &reader, Type &result) {
-    // Read the tile shape size.
-    SmallVector<int32_t, 4> tileShape;
-    if (failed(reader.readLEVarSize(tileShape)))
-      return reader.emitError()
-             << "failed to read tile partition view tile shape";
-    // Validate tile shape values.
-    for (int32_t val : tileShape) {
-      if (LLVM_UNLIKELY(val == 0x7fffffff || val == (-0x7fffffff - 1)))
-        return reader.emitError()
-               << "tile shape contains unsupported value " << val;
-    }
-
-    // Read the tensor_view type index.
-    Type tensorViewType = readAndGetType(reader);
-    if (!tensorViewType)
-      return reader.emitError()
-             << "failed to get tensor_view type for tile partition view";
-    auto typedTensorViewType =
-        mlir::dyn_cast<cuda_tile::TensorViewType>(tensorViewType);
-    if (!typedTensorViewType)
-      return reader.emitError()
-             << "invalid tensor_view type for tile partition view";
-    // Read the dimension map size.
-    SmallVector<int32_t, 4> dimMap;
-    if (failed(reader.readLEVarSize(dimMap)))
-      return reader.emitError()
-             << "failed to read tile partition view dimension map";
-
-    PaddingValueAttr paddingValueAttr;
-    if (reader.readLE<uint8_t>())
-      if (failed(parseGenericEnumAttr(reader, context, paddingValueAttr)))
-        return failure();
-
-    //  Create an attribute for the tile shape.
-    auto tileShapeAttr = DenseI32ArrayAttr::get(&context, tileShape);
-    result = cuda_tile::PartitionViewType::getChecked(
-        [&]() { return reader.emitError(); }, &context, tileShapeAttr,
-        typedTensorViewType, ArrayRef<int32_t>(dimMap), paddingValueAttr);
-
-    return success(result);
-  }
-
   LogicalResult parseTypeImpl(uint8_t typeTag, ArrayRef<uint8_t> payloadBytes,
                               Type &result) {
     EncodingReader reader(payloadBytes, context);
-    switch (static_cast<TypeTag>(typeTag)) {
-    case TypeTag::I1:
-    case TypeTag::I8:
-    case TypeTag::I16:
-    case TypeTag::I32:
-    case TypeTag::I64:
-      return parseIntegerType(typeTag, result);
-    case TypeTag::F16:
-    case TypeTag::BF16:
-    case TypeTag::F32:
-    case TypeTag::TF32:
-    case TypeTag::F64:
-    case TypeTag::F8E4M3FN:
-    case TypeTag::F8E5M2:
-      return parseFloatType(typeTag, result);
-    case TypeTag::Tile:
-      return parseTileType(reader, result);
-    case TypeTag::Pointer:
-      return parsePointerType(reader, result);
-    case TypeTag::TensorView:
-      return parseTensorViewType(reader, result);
-    case TypeTag::PartitionView:
-      return parsePartitionViewType(reader, result);
-    case TypeTag::Func:
-      return parseFunctionType(reader, result);
-    case TypeTag::Token:
-      result = cuda_tile::TokenType::get(&context);
-      return success();
-    default:
-      return ::emitError(UnknownLoc::get(&context))
-             << "unknown type tag: " << static_cast<int>(typeTag);
-    }
+    // Generated complete switch statement.
+#define GEN_TYPE_READER_DISPATCH
+#include "TypeBytecodeReader.inc"
   }
 
   MLIRContext &context;
@@ -1117,7 +921,7 @@ private:
     // Mark this index as currently being parsed.
     currentlyParsing.insert(diIndex);
     auto removeIndex =
-        llvm::make_scope_exit([&] { currentlyParsing.erase(diIndex); });
+        llvm::scope_exit([&] { currentlyParsing.erase(diIndex); });
 
     // Slice the payload to get the data for this debug info attribute.
     EncodingReader diReader(diData.slice(start, end - start), context);
@@ -1374,12 +1178,14 @@ class InstructionParser {
   // Helper for Operation Creation and Result Handling
   //===----------------------------------------------------------------------===//
   /// Creates an operation using OperationState and pushes its results to the
-  /// valueIndexList.
+  /// valueIndexList. The numResultsForValueIndex parameter controls how many
+  /// results are added to valueIndexList.
   static LogicalResult createOperationGeneric(
       OpBuilder &builder, Location loc, StringRef opNameStr,
       ArrayRef<Type> resultTypes, ArrayRef<Value> operands,
       ArrayRef<NamedAttribute> attributes, std::vector<Value> &valueIndexList,
-      SmallVectorImpl<std::unique_ptr<Region>> &parsedRegions) {
+      SmallVectorImpl<std::unique_ptr<Region>> &parsedRegions,
+      std::optional<size_t> numResultsForValueIndex = std::nullopt) {
     OperationState state(loc, opNameStr, operands, resultTypes, attributes);
 
     // Add parsed regions to the operation state.
@@ -1392,8 +1198,12 @@ class InstructionParser {
     if (!op)
       return ::emitError(loc) << "failed to create operation '" << opNameStr
                               << "'due to verification error.";
-    // Add results to the value index list.
-    llvm::append_range(valueIndexList, op->getResults());
+    // Add results to the value index list. Only add numResultsForValueIndex
+    // results if specified (for backward compat with older bytecode that
+    // didn't have newer results).
+    size_t numToAdd = numResultsForValueIndex.value_or(op->getNumResults());
+    for (size_t i = 0; i < numToAdd; ++i)
+      valueIndexList.push_back(op->getResult(i));
 
     return success();
   }
@@ -1433,7 +1243,8 @@ class InstructionParser {
              Block &targetBlock, std::vector<Value> &valueIndexList,
              ArrayRef<ArrayRef<uint8_t>> constants, LazyTypeTable &types,
              DenseElementsAttrCache &constCache,
-             DebugInfoReader::Iterator &diIterator, MLIRContext &context) {
+             DebugInfoReader::Iterator &diIterator, MLIRContext &context,
+             const BytecodeVersion &bytecodeVersion) {
     // Read number of block arguments
     uint64_t numBlockArgs;
     if (failed(reader.readVarInt(numBlockArgs)))
@@ -1467,7 +1278,7 @@ class InstructionParser {
     for (uint64_t i = 0; i < numOps; ++i) {
       if (failed(InstructionParser::parseOperation(
               reader, builder, valueIndexList, constants, types, constCache,
-              diIterator, context)))
+              diIterator, context, bytecodeVersion)))
         return reader.emitError()
                << "failed to parse operation " << i << " in block.";
     }
@@ -1500,7 +1311,8 @@ class InstructionParser {
               ArrayRef<ArrayRef<uint8_t>> constants, LazyTypeTable &types,
               DenseElementsAttrCache &constCache,
               DebugInfoReader::Iterator &diIterator, MLIRContext &context,
-              Region &regionToPopulate) {
+              Region &regionToPopulate,
+              const BytecodeVersion &bytecodeVersion) {
     // Read number of blocks in the region.
     uint64_t numBlocks;
     if (failed(reader.readVarInt(numBlocks)))
@@ -1513,7 +1325,7 @@ class InstructionParser {
       // with values defined in the parent scope.
       if (failed(parseBlock(reader, builder, loc, currentBlock,
                             parentValueIndexList, constants, types, constCache,
-                            diIterator, context)))
+                            diIterator, context, bytecodeVersion)))
         return reader.emitError()
                << "failed to parse block " << i << " in region.";
     }
@@ -1796,6 +1608,8 @@ class InstructionParser {
       if (failed(reader.readAndGetString(strRef)))
         return reader.emitError()
                << "failed to read string for FlatSymbolRefAttr.";
+      if (strRef.empty())
+        return reader.emitError() << "empty symbol reference is invalid";
       nativeValue = mlir::FlatSymbolRefAttr::get(&context, strRef);
       return success();
     } else if constexpr (is_cuda_tile_enum_attr<T>::value) {
@@ -1819,9 +1633,8 @@ class InstructionParser {
           return reader.emitError() << "parsed constant attribute is not the "
                                        "expected type derived "
                                        "from DenseElementsAttr";
-      } else {
+      } else
         return reader.emitError() << "unknown DenseElementsAttr based Attr";
-      }
       return success();
     } else if constexpr (std::is_same_v<
                              T,
@@ -1905,7 +1718,7 @@ class InstructionParser {
                                   dictAttr, expectedType)))
         return failure();
       nativeValue = cuda_tile::OptimizationHintsAttr::getChecked(
-          [&]() { return reader.emitError(); }, &context, dictAttr);
+          [&]() {  return reader.emitError(); }, &context, dictAttr);
       if (!nativeValue)
         return reader.emitError() << "failed to parse OptimizationHintsAttr";
       return success();
@@ -2054,10 +1867,19 @@ public:
                  std::vector<Value> &valueIndexList,
                  ArrayRef<ArrayRef<uint8_t>> constants, LazyTypeTable &types,
                  DenseElementsAttrCache &constCache,
-                 DebugInfoReader::Iterator &diIterator, MLIRContext &context) {
+                 DebugInfoReader::Iterator &diIterator, MLIRContext &context,
+                 const BytecodeVersion &bytecodeVersion) {
     uint64_t opcode;
     if (failed(reader.readVarInt(opcode)))
       return reader.emitError() << "failed to read operation opcode.";
+
+    // Version checking for public operations.
+    uint32_t opcodeValue = static_cast<uint32_t>(opcode);
+    if (!mlir::cuda_tile::detail::isOpcodeAvailableInVersion(opcodeValue,
+                                                             bytecodeVersion))
+      return reader.emitError()
+             << "unsupported opcode " << opcodeValue << " for bytecode version "
+             << bytecodeVersion.toString();
 
     // Get the location for this operation.
     auto loc = diIterator.next<LocationAttr>();
@@ -2284,8 +2106,8 @@ static LogicalResult parseFunctionTableSection(
              << " bytes for function body";
 
     funcInfo.functionBody =
-        StringRef(reinterpret_cast<const char *>(bodyBytes.data()),
-                  funcInfo.lengthOfFunction);
+      StringRef(reinterpret_cast<const char *>(bodyBytes.data()),
+                    funcInfo.lengthOfFunction);
 
     functionInfoList.emplace_back(funcInfo);
   }
@@ -2299,7 +2121,8 @@ parseFunctionBody(ArrayRef<uint8_t> bodyBytes, OpBuilder &innerBuilder,
                   DebugInfoReader::Iterator &diIterator,
                   ArrayRef<ArrayRef<uint8_t>> constants, LazyTypeTable &types,
                   DenseElementsAttrCache &constCache, MLIRContext &context,
-                  const EncodingReader &mainFileStreamReader) {
+                  const EncodingReader &mainFileStreamReader,
+                  const BytecodeVersion &bytecodeVersion) {
   EncodingReader bodyReader(bodyBytes, context);
   // Inherit the string table from the main file stream reader.
   bodyReader.inheritStringTableFrom(mainFileStreamReader);
@@ -2307,23 +2130,25 @@ parseFunctionBody(ArrayRef<uint8_t> bodyBytes, OpBuilder &innerBuilder,
   while (bodyReader.remaining() > 0)
     if (failed(InstructionParser::parseOperation(
             bodyReader, innerBuilder, valueIndexList, constants, types,
-            constCache, diIterator, context)))
+            constCache, diIterator, context, bytecodeVersion)))
       return failure();
   return success();
 }
 
 /// Creates a function based on the parsed FunctionInfo.
-static LogicalResult
-createFunction(const FunctionInfo &funcInfo, OpBuilder &builder,
-               OpBuilder &funcBuilder, const EncodingReader &reader,
-               LazyTypeTable &types, DebugInfoReader &debuginfo,
-               ArrayRef<ArrayRef<uint8_t>> constants,
-               DenseElementsAttrCache &constCache,
-               std::vector<Value> &valueIndexList, MLIRContext &context) {
+static LogicalResult createFunction(
+    const FunctionInfo &funcInfo, OpBuilder &builder, OpBuilder &funcBuilder,
+    const EncodingReader &reader, LazyTypeTable &types,
+    DebugInfoReader &debuginfo, ArrayRef<ArrayRef<uint8_t>> constants,
+    DenseElementsAttrCache &constCache, std::vector<Value> &valueIndexList,
+    MLIRContext &context, const BytecodeVersion &bytecodeVersion) {
   StringRef funcNameStr;
   if (failed(reader.getString(funcInfo.nameIndex, funcNameStr, context)))
     return reader.emitError() << "failed to get function name string at index "
                               << funcInfo.nameIndex;
+  if (funcNameStr.empty())
+    return reader.emitError()
+           << "function name at index " << funcInfo.nameIndex << " is empty";
   StringAttr funcName = builder.getStringAttr(funcNameStr);
   // Get the function type lazily from the type table.
   if (funcInfo.signatureIndex >= types.size())
@@ -2400,7 +2225,7 @@ createFunction(const FunctionInfo &funcInfo, OpBuilder &builder,
   // Parse the function body  instructions.
   if (failed(parseFunctionBody(bodyBytes, innerBuilder, valueIndexList,
                                diIterator, constants, types, constCache,
-                               context, reader)))
+                               context, reader, bytecodeVersion)))
     return reader.emitError() << "failed to parse function body for function '"
                               << funcNameStr << "'";
   return success();
@@ -2495,6 +2320,9 @@ createGlobal(const GlobalInfo &globalInfo, OpBuilder &builder,
     return reader.emitError()
            << "failed to get global symbol name string for index "
            << globalInfo.symbolNameIndex;
+  if (symNameStr.empty())
+    return reader.emitError() << "global symbol name at index "
+                              << globalInfo.symbolNameIndex << " is empty";
 
   FailureOr<Attribute> valueAttr =
       constCache.getOrCreate(types.getType(globalInfo.valueTypeIndex),
@@ -2526,7 +2354,7 @@ std::optional<size_t> cuda_tile::getBytecodeSize(const char *bytecodeBuffer) {
   if (!isTileIRBytecode(bytecodeBuffer))
     return std::nullopt;
 
-  auto charBuffer = reinterpret_cast<const unsigned char *>(bytecodeBuffer);
+  auto charBuffer = reinterpret_cast<const unsigned char*>(bytecodeBuffer);
   if (charBuffer[sizeof(kTileIRBytecodeMagic)] == 0)
     return std::nullopt;
 
@@ -2544,7 +2372,8 @@ std::optional<size_t> cuda_tile::getBytecodeSize(const char *bytecodeBuffer) {
   });
 
   // Parse the header of the bytecode.
-  if (failed(parseHeader(reader, context)))
+  BytecodeVersion version;
+  if (failed(parseHeader(reader, context, version)))
     return std::nullopt;
 
   // Parse the sections until we reach the end of the bytecode. We don't
@@ -2576,7 +2405,8 @@ cuda_tile::readBytecode(llvm::MemoryBufferRef bytecodeBuffer,
   EncodingReader reader(bytecodeData, context);
   DebugInfoReader debuginfo(context, reader);
 
-  if (failed(parseHeader(reader, context)))
+  BytecodeVersion bytecodeVersion;
+  if (failed(parseHeader(reader, context, bytecodeVersion)))
     return reader.emitError() << "failed to parse bytecode header", nullptr;
 
   // Store section payloads to allow parsing in a specific order later.
@@ -2709,7 +2539,7 @@ cuda_tile::readBytecode(llvm::MemoryBufferRef bytecodeBuffer,
   for (const auto &funcInfo : functionInfoList)
     if (failed(createFunction(funcInfo, builder, funcBuilder, reader, types,
                               debuginfo, constants, globalConstCache,
-                              valueIndexList, context)))
+                              valueIndexList, context, bytecodeVersion)))
       return reader.emitError() << "failed to create function from bytecode",
              nullptr;
   if (failed(verify(cudaTileModule.get()))) {

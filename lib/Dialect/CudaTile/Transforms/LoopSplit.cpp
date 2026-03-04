@@ -2,9 +2,11 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Value.h"
 #include "mlir/IR/Visitors.h"
@@ -18,6 +20,8 @@
 #include "cuda_tile/Dialect/CudaTile/IR/Ops.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Types.h"
 #include "cuda_tile/Dialect/CudaTile/Transforms/Passes.h"
+#include <llvm/ADT/APInt.h>
+#include <llvm/Support/Casting.h>
 #include <regex>
 #include <string>
 
@@ -31,10 +35,14 @@ namespace mlir::cuda_tile {
 //  Return false if comparison signedness doesn't match ForOp signedness
 static bool normalizeForOpCmp(ForOp forOp, CmpIOp cmp,
                               ComparisonPredicate &normalizedPred, Value &rhs) {
-  // Currently ForOp always use signed comparison for bound checks,
-  // so don't perform split if signedness of cmp doesn't match
-  if (cmp.getSignedness() == Signedness::Unsigned)
+  // Determine ForOp signedness based on unsignedCmp attribute
+  Signedness forOpSignedness =
+      forOp.getUnsignedCmp() ? Signedness::Unsigned : Signedness::Signed;
+
+  // Don't perform split if signedness of cmp doesn't match ForOp signedness
+  if (cmp.getSignedness() != forOpSignedness)
     return false;
+
   auto iv = forOp.getInductionVar();
   auto pred = cmp.getComparisonPredicate();
   if (cmp.getLhs() == iv) {
@@ -181,7 +189,8 @@ static ForOp copyLoop(RewriterBase &rewriter, ForOp forOp, CmpIOp cmpOp,
   Value step = forOp.getStep();
   IRMapping mapper;
   auto newLoop =
-      ForOp::create(rewriter, loc, lowerBound, upperBound, step, iterArgs);
+      ForOp::create(rewriter, loc, lowerBound, upperBound, step, iterArgs,
+                    /*bodyBuilder=*/nullptr, forOp.getUnsignedCmp());
   rewriter.setInsertionPointToStart(newLoop.getBody());
 
   for (auto [orig, repl] : llvm::zip(forOp.getBody()->getArguments(),
@@ -260,6 +269,10 @@ static void performLoopSplit(RewriterBase &rewriter, ForOp forOp,
   Value lb = forOp.getLowerBound();
   Value ub = forOp.getUpperBound();
 
+  // Determine ForOp signedness based on unsignedCmp attribute
+  Signedness forOpSignedness =
+      forOp.getUnsignedCmp() ? Signedness::Unsigned : Signedness::Signed;
+
   // Compute split point depending on predicate.
   // Increase splitPoint by 1 in the case of GT or LTE
   Value splitPoint = splitValue;
@@ -277,16 +290,16 @@ static void performLoopSplit(RewriterBase &rewriter, ForOp forOp,
     // Need special handling, so that loop split point is aligned (i.e. == lb +
     // k * step) So, splitPoint = start + Ceil(splitPoint - lb, step) * step
     Value diff = SubIOp::create(rewriter, loc, splitPoint, lb);
-    Value k = DivIOp::create(rewriter, loc, diff, step, Signedness::Signed,
+    Value k = DivIOp::create(rewriter, loc, diff, step, forOpSignedness,
                              RoundingMode::POSITIVE_INF);
     Value kstep = MulIOp::create(rewriter, loc, k, step);
     splitPoint = AddIOp::create(rewriter, loc, lb, kstep);
   }
 
   Value minSplitPoint =
-      MinIOp::create(rewriter, loc, splitPoint, ub, Signedness::Signed);
+      MinIOp::create(rewriter, loc, splitPoint, ub, forOpSignedness);
   Value maxSplitPoint =
-      MaxIOp::create(rewriter, loc, splitPoint, lb, Signedness::Signed);
+      MaxIOp::create(rewriter, loc, splitPoint, lb, forOpSignedness);
 
   ForOp firstLoop, secondLoop;
   Block *originalBody = forOp.getBody();

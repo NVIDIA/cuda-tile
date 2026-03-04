@@ -1,9 +1,12 @@
 //===- Version.h - CUDA Tile Bytecode Version Utilities ---------*- C++ -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef CUDA_TILE_BYTECODE_COMMON_VERSION_H
 #define CUDA_TILE_BYTECODE_COMMON_VERSION_H
 
@@ -50,6 +53,13 @@ public:
     if (verMinor != other.verMinor)
       return verMinor < other.verMinor;
     return verTag < other.verTag;
+  }
+  bool operator<=(const BytecodeVersion &other) const {
+    return *this < other || *this == other;
+  }
+  bool operator>(const BytecodeVersion &other) const { return other < *this; }
+  bool operator>=(const BytecodeVersion &other) const {
+    return !(*this < other);
   }
 
   /// Convert the version to a human-readable string format.

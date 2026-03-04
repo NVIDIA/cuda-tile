@@ -2,10 +2,12 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// This file defines helpers used in the CUDA Tile dialect spec generator.
+//
+// This file defines helpers used in the op generators.
 //
 //===----------------------------------------------------------------------===//
 
@@ -134,12 +136,6 @@ enum BadgeType {
   kWarningLine,
   kDanger,
   kDangerLine,
-};
-
-struct FormattedExample {
-  std::vector<std::tuple<int, int>> lineRanges;
-  std::string content;
-  int dedent;
 };
 
 struct Badge {
@@ -279,20 +275,16 @@ public:
     this->os << ".. include:: " << path << "\n\n";
   }
 
-  void emitExample(const std::string &exampleName,
-                   const FormattedExample &formattedExample);
-
   /// Write an example to the examples output directory.
-  void writeExampleToDiskAndAppendToAppendix(const std::string &exampleName,
-                                             const std::string &exampleAnchor,
-                                             const std::string &fileName,
-                                             const std::string &example);
+  void emitExample(const std::string &exampleName,
+                   const std::string &exampleAnchor,
+                   const std::string &fileName, const std::string &example);
 
   void emitLiteralInclude(const std::string &fileName,
                           const std::string &anchor,
                           const std::vector<std::tuple<int, int>> &lineRanges,
                           const std::string &language,
-                          std::optional<int> dedent = std::nullopt);
+                          const std::optional<int> dedent = std::nullopt);
 };
 
 } // namespace tblgen

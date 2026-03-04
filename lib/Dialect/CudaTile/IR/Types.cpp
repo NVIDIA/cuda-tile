@@ -2,9 +2,11 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #include "cuda_tile/Dialect/CudaTile/IR/Types.h"
 
 #include "mlir/IR/Builders.h"
@@ -194,20 +196,22 @@ cuda_tile::TileType::cloneWith(std::optional<ArrayRef<int64_t>> shape,
                                   elementType);
 }
 
-Type cuda_tile::getI1SameShape(Type type) {
+TileType cuda_tile::getI1SameShape(Type type) {
   auto i1Type = IntegerType::get(type.getContext(), 1);
-  if (auto tileType = dyn_cast<cuda_tile::TileType>(type))
-    return cuda_tile::TileType::get(tileType.getShape(), i1Type);
-
-  return i1Type;
+  auto tileType = dyn_cast<cuda_tile::TileType>(type);
+  assert(tileType);
+  return cuda_tile::TileType::get(tileType.getShape(), i1Type);
 }
 
-//===----------------------------------------------------------------------===//
-// PointerType
-//===----------------------------------------------------------------------===//
-
-cuda_tile::PointerType cuda_tile::PointerType::get(Type pointeeType) {
-  return cuda_tile::PointerType::get(pointeeType.getContext(), pointeeType);
+TileType cuda_tile::reshapeTileTypeToRank(TileType type, int targetRank) {
+  int r = type.hasRank() ? type.getRank() : 0;
+  assert(targetRank >= r);
+  if (targetRank == r)
+    return type;
+  llvm::SmallVector<int64_t, 8> newShape;
+  newShape.assign(targetRank - r, /*value=*/1);
+  llvm::append_range(newShape, type.getShape());
+  return cuda_tile::TileType::get(newShape, type.getElementType());
 }
 
 //===----------------------------------------------------------------------===//

@@ -65,6 +65,12 @@ cuda_tile.module @kernels {
     continue
   }
 
+  // CHECK: for unsigned {{.*}} in ({{.*}} to {{.*}}, step {{.*}}) : tile<i32>
+  for unsigned %iv_u in (%c0_i32 to %c1_i32, step %c1_i32) : tile<i32> {
+    // CHECK-NOT: continue
+    continue
+  }
+
   // CHECK: for {{.*}} in ({{.*}} to {{.*}}, step {{.*}}) : tile<i32> iter_values({{.*}}) -> (tile<i32>)
   %for_result = for %iv in (%c0_i32 to %c1_i32, step %c1_i32) : tile<i32>
                               iter_values(%var0 = %c0_i32) -> (tile<i32>) {
@@ -76,6 +82,13 @@ cuda_tile.module @kernels {
 
     // CHECK: continue %{{.*}} : tile<i32>
     continue %iv : tile<i32>
+  }
+
+  // CHECK: for unsigned {{.*}} in ({{.*}} to {{.*}}, step {{.*}}) : tile<i32> iter_values({{.*}}) -> (tile<i32>)
+  %for_result_u = for unsigned %iv_u in (%c0_i32 to %c1_i32, step %c1_i32) : tile<i32>
+                              iter_values(%var0_u = %c0_i32) -> (tile<i32>) {
+    // CHECK: continue %{{.*}} : tile<i32>
+    continue %iv_u : tile<i32>
   }
 
   // CHECK: loop {
@@ -135,20 +148,20 @@ cuda_tile.module @kernels {
     break %cf16_tensor, %c_tensor, %c5 : tile<2x2xf16>, tile<2x2xf32>, tile<bf16>
   }
 
-  // CHECK: print "hello_world"
-  print "hello_world"
+  // CHECK: print_tko "hello_world"
+  print_tko "hello_world" -> !cuda_tile.token
 
-  // CHECK: print "hello_world, %i, %f", %[[c1]], %[[c5]] : tile<i1>, tile<bf16>
-  print "hello_world, %i, %f", %c1, %c5 : tile<i1>, tile<bf16>
+  // CHECK: print_tko "hello_world, %i, %f", %[[c1]], %[[c5]] : tile<i1>, tile<bf16>
+  print_tko "hello_world, %i, %f", %c1, %c5 : tile<i1>, tile<bf16> -> !cuda_tile.token
 
-  // CHECK: print "hello_world2, %lld, %+08.3f %%", %[[c_i64tensor]], %[[c5]] : tile<2x2xi64>, tile<bf16>
-  print "hello_world2, %lld, %+08.3f %%", %c_i64tensor, %c5 : !cuda_tile.tile<2x2xi64>, tile<bf16>
+  // CHECK: print_tko "hello_world2, %lld, %+08.3f %%", %[[c_i64tensor]], %[[c5]] : tile<2x2xi64>, tile<bf16>
+  print_tko "hello_world2, %lld, %+08.3f %%", %c_i64tensor, %c5 : !cuda_tile.tile<2x2xi64>, tile<bf16> -> !cuda_tile.token
 
-  // CHECK: print "%f%f"
-  print "%f%f", %c5, %c5 : tile<bf16>, tile<bf16>
+  // CHECK: print_tko "%f%f"
+  print_tko "%f%f", %c5, %c5 : tile<bf16>, tile<bf16> -> !cuda_tile.token
 
-  // CHECK: print "%%%%"
-  print "%%%%"
+  // CHECK: print_tko "%%%%"
+  print_tko "%%%%" -> !cuda_tile.token
 
   // CHECK: addi %[[c42_i16]], %[[c42_i16]] : tile<i16>
   %addi = addi %c42_i16, %c42_i16 : tile<i16>
@@ -253,6 +266,11 @@ cuda_tile.module @kernels {
 
   // CHECK: mini %[[c_itensor]], %[[c_itensor]] unsigned : tile<2x2xi32>
   %mini3 = mini %c_itensor, %c_itensor unsigned : tile<2x2xi32>
+
+  // CHECK: negi %[[c42_i16]] : tile<i16>
+  %negi1 = negi %c42_i16 : tile<i16>
+  // CHECK: negi %[[c42_i16]] overflow<no_signed_wrap> : tile<i16>
+  %negi2 = negi %c42_i16 overflow<no_signed_wrap> : tile<i16>
 
   // CHECK: exp2 %[[c_tensor]] : tile<2x2xf32>
   %exp2 = exp2 %c_tensor : tile<2x2xf32>
@@ -1022,4 +1040,21 @@ cuda_tile.module @kernels {
           : tile<2xptr<f16>>, tile<2xf16> -> tile<2xf16>, token
   }
 
+  testing$func @kernel_atan2(%x32: !cuda_tile.tile<2xf32>,
+                             %y32: !cuda_tile.tile<2xf32>,
+                             %x64: !cuda_tile.tile<2xf64>,
+                             %y64: !cuda_tile.tile<2xf64>,
+                             %x16: !cuda_tile.tile<2xf16>,
+                             %y16: !cuda_tile.tile<2xf16>,
+                             %xbf16: !cuda_tile.tile<2xbf16>,
+                             %ybf16: !cuda_tile.tile<2xbf16>) {
+    // CHECK: %{{.+}} = atan2 %{{.+}}, %{{.+}} : tile<2xf32>
+    %r0 = atan2 %x32, %y32 : tile<2xf32>
+    // CHECK: %{{.+}} = atan2 %{{.+}}, %{{.+}} : tile<2xf64>
+    %r1 = atan2 %x64, %y64 : tile<2xf64>
+    // CHECK: %{{.+}} = atan2 %{{.+}}, %{{.+}} : tile<2xf16>
+    %r2 = atan2 %x16, %y16 : tile<2xf16>
+    // CHECK: %{{.+}} = atan2 %{{.+}}, %{{.+}} : tile<2xbf16>
+    %r3 = atan2 %xbf16, %ybf16 : tile<2xbf16>
+  }
 } // end module

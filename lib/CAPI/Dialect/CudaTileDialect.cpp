@@ -2,9 +2,11 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #include "cuda_tile-c/Dialect/CudaTileDialect.h"
 
 #include "mlir/CAPI/IR.h"
@@ -534,28 +536,6 @@ MlirAttribute mlirCudaTileOptimizationHintsAttrGetLoadStoreOpHint(
 }
 
 //===----------------------------------------------------------------------===//
-// Helper Functions
-//===----------------------------------------------------------------------===//
-
-static cuda_tile::ModuleOp extractCudaTileModuleOp(Operation *op) {
-  // Try direct cast first
-  if (auto directCudaTileModule = dyn_cast<cuda_tile::ModuleOp>(op))
-    return directCudaTileModule;
-
-  // Try nested case: look inside a regular ModuleOp
-  if (auto moduleOp = dyn_cast<mlir::ModuleOp>(op)) {
-    if (!moduleOp.getBody()->empty()) {
-      if (auto nestedCudaTileModule =
-              dyn_cast<cuda_tile::ModuleOp>(&moduleOp.getBody()->front()))
-        return nestedCudaTileModule;
-    }
-  }
-
-  // Not found
-  return {};
-}
-
-//===----------------------------------------------------------------------===//
 // Pass Management and Optimization Functions
 //===----------------------------------------------------------------------===//
 
@@ -565,44 +545,6 @@ bool mlirCudaTileOperationIsAModuleOp(MlirOperation op) {
 
 bool mlirOperationIsAModuleOp(MlirOperation op) {
   return isa<mlir::ModuleOp>(unwrap(op));
-}
-
-bool mlirCudaTileApplyOptimizations(MlirOperation moduleOp,
-                                    int32_t loopSplitThreshold, bool enableCSE,
-                                    bool canonicalizeBefore,
-                                    bool canonicalizeAfter) {
-  auto *op = unwrap(moduleOp);
-
-  // Extract cuda_tile::ModuleOp (handles both direct and nested cases)
-  auto cudaTileModule = extractCudaTileModuleOp(op);
-  if (!cudaTileModule)
-    return false;
-
-  // Create PassManager for cuda_tile::ModuleOp
-  PassManager pm = PassManager::on<cuda_tile::ModuleOp>(op->getContext());
-  auto &nested = pm.nest<cuda_tile::EntryOp>();
-
-  // Add canonicalization pass before optimizations if requested
-  if (canonicalizeBefore)
-    nested.addPass(createCanonicalizerPass());
-
-  // Add loop split pass if threshold is >= 0
-  if (loopSplitThreshold >= 0)
-    nested.addPass(cuda_tile::createLoopSplitPass({loopSplitThreshold}));
-
-  // Add CSE pass if requested
-  if (enableCSE)
-    nested.addPass(createCSEPass());
-
-  // Add canonicalization pass after optimizations if requested
-  if (canonicalizeAfter)
-    nested.addPass(createCanonicalizerPass());
-
-  // Run the passes
-  if (failed(pm.run(cudaTileModule)))
-    return false;
-
-  return true;
 }
 
 MlirStringRef mlirCudaTileWriteBytecodeToBuffer(MlirOperation moduleOp) {
@@ -668,6 +610,7 @@ void mlirCudaTileRegisterPasses(void) {
   // Register standard MLIR passes
   registerCanonicalizerPass();
   registerCSEPass();
+  registerStripDebugInfoPass();
 }
 
 void mlirCudaTileRegisterSynthesizeDebugInfoScopesPass(void) {

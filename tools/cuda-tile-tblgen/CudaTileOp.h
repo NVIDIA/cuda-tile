@@ -2,10 +2,12 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// This file defines the CUDA Tile dialect operation constraints.
+//
+// This file defines the CUDA Tile dialect operations.
 //
 //===----------------------------------------------------------------------===//
 
@@ -21,9 +23,9 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/TableGen/Record.h"
 
+#include "Emitter.h"
 #include "CudaTileAttr.h"
 #include "CudaTileType.h"
-#include "Emitter.h"
 #include <iostream>
 #include <string>
 #include <vector>

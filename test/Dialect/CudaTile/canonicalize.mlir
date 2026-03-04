@@ -216,13 +216,13 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_select(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK-NOT: if
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R2]]
     // CHECK: %[[SELECT:.*]] = select %[[CMP]], %[[R0]], %[[R1]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %c, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1 = if %cond -> (tile<i32>) {
@@ -241,13 +241,13 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_select_many(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R2]]
     // CHECK: %[[SELECT:.*]] = select %[[CMP]], %[[R0]], %[[R1]]
     // CHECK: %[[IF:.*]] = if %[[CMP]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %c, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1, %2 = if %cond -> (tile<i32>, tile<i32>) {
@@ -266,14 +266,14 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_select_all(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R2]]
     // CHECK: %[[SELECT:.*]] = select %[[CMP]], %[[R0]], %[[R1]]
     // CHECK: %[[SELECT:.*]] = select %[[CMP]], %[[R1]], %[[R0]]
     // CHECK-NOT: if
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %c, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1, %2 = if %cond -> (tile<i32>, tile<i32>) {
@@ -291,13 +291,13 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_fold(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R2]]
     // CHECK-NOT: xori
     // CHECK: %{{.*}} = if %[[CMP]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %c1 = cuda_tile.constant <i1: 1> : !cuda_tile.tile<i1>
     %cond = cmpi equal %arg1, %c, signed : !cuda_tile.tile<i32> -> tile<i1>
@@ -321,7 +321,7 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_yield_return(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R2]]
     // CHECK: if %[[CMP]]
@@ -329,7 +329,7 @@ cuda_tile.module @test {
     // CHECK: return %[[R2]]
     // CHECK %[[RESULT:.*]] = addi %[[R0]], %[[R1]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %c, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1, %2 = if %cond -> (tile<i32>, tile<i32>) {
@@ -351,7 +351,7 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_return_yield(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R2]]
     // CHECK: if %[[CMP]]
@@ -360,7 +360,7 @@ cuda_tile.module @test {
     // CHECK-NOT: yield
     // CHECK %[[RESULT:.*]] = addi %[[R0]], %[[R1]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %c, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1, %2 = if %cond -> (tile<i32>, tile<i32>) {
@@ -429,7 +429,7 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_merge(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R0]]
     // CHECK: %[[RES:[^:]+]]:2 = if %[[CMP]]
@@ -437,7 +437,7 @@ cuda_tile.module @test {
     // CHECK: %[[RESULT:.*]] = addi %[[RES]]#0, %[[RES]]#1
     // CHECK return %[[RESULT]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %a, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1 = if %cond -> (tile<i32>) {
@@ -465,7 +465,7 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_merge_then_return_first(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R0]]
     // CHECK: %[[RES:[^:]+]]:2 = if %[[CMP]]
@@ -474,7 +474,7 @@ cuda_tile.module @test {
     // CHECK: %[[RESULT:.*]] = addi %[[RES]]#0, %[[RES]]#1
     // CHECK return %[[RESULT]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %a, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1 = if %cond -> (tile<i32>) {
@@ -502,7 +502,7 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_merge_else_return_first(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R0]]
     // CHECK: %[[RES:[^:]+]]:2 = if %[[CMP]]
@@ -511,7 +511,7 @@ cuda_tile.module @test {
     // CHECK: %[[RESULT:.*]] = addi %[[RES]]#0, %[[RES]]#1
     // CHECK return %[[RESULT]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %a, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1 = if %cond -> (tile<i32>) {
@@ -539,7 +539,7 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_merge_then_return_second(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R0]]
     // CHECK: %[[RES:[^:]+]]:2 = if %[[CMP]]
@@ -548,7 +548,7 @@ cuda_tile.module @test {
     // CHECK: %[[RESULT:.*]] = addi %[[RES]]#0, %[[RES]]#1
     // CHECK return %[[RESULT]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %a, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1 = if %cond -> (tile<i32>) {
@@ -576,7 +576,7 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_merge_else_return_second(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R0]]
     // CHECK: %[[RES:[^:]+]]:2 = if %[[CMP]]
@@ -585,7 +585,7 @@ cuda_tile.module @test {
     // CHECK: %[[RESULT:.*]] = addi %[[RES]]#0, %[[RES]]#1
     // CHECK return %[[RESULT]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond = cmpi equal %arg1, %a, signed : !cuda_tile.tile<i32> -> tile<i1>
     %1 = if %cond -> (tile<i32>) {
@@ -613,20 +613,20 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_nested(%arg1 : !cuda_tile.tile<i32>, %arg2 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP1:.*]] = cmpi equal %{{.*}}, %[[R0]]
     // CHECK: %[[CMP2:.*]] = cmpi equal %{{.*}}, %[[R1]]
     // CHECK: %[[AND:.*]] = andi %[[CMP1]], %[[CMP2]]
     // CHECK: if %[[AND]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond1 = cmpi equal %arg1, %a, signed : !cuda_tile.tile<i32> -> tile<i1>
     %cond2 = cmpi equal %arg2, %b, signed : !cuda_tile.tile<i32> -> tile<i1>
     if %cond1 {
       if %cond2 {
-        print "%d", %c : tile<i32>
+        print_tko "%d", %c : tile<i32> -> token
       }
     }
     return %a : tile<i32>
@@ -639,20 +639,20 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_nested_return(%arg1 : !cuda_tile.tile<i32>, %arg2 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[R2:.*]] = constant <i32: 2>
     // CHECK: %[[CMP1:.*]] = cmpi equal %{{.*}}, %[[R0]]
     // CHECK: %[[CMP2:.*]] = cmpi equal %{{.*}}, %[[R1]]
     // CHECK: %[[AND:.*]] = andi %[[CMP1]], %[[CMP2]]
     // CHECK: if %[[AND]]
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond1 = cmpi equal %arg1, %a, signed : !cuda_tile.tile<i32> -> tile<i1>
     %cond2 = cmpi equal %arg2, %b, signed : !cuda_tile.tile<i32> -> tile<i1>
     if %cond1 {
       if %cond2 {
-        print "%d", %c : tile<i32>
+        print_tko "%d", %c : tile<i32> -> token
         return %b : tile<i32>
       }
     }
@@ -668,7 +668,7 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_both_return(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R0]]
     // CHECK: if %[[CMP]] {
     // CHECK:   return %[[R0]]
@@ -676,17 +676,17 @@ cuda_tile.module @test {
     // CHECK: return %[[R1]]
     // CHECK-NOT: return
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond1 = cmpi equal %arg1, %a, signed : !cuda_tile.tile<i32> -> tile<i1>
     if %cond1 {
-      print "%d", %a : tile<i32>
+      print_tko "%d", %a : tile<i32> -> token
       return %a : tile<i32>
     } else {
-      print "%d", %b : tile<i32>
+      print_tko "%d", %b : tile<i32> -> token
       return %b : tile<i32>
     }
-    print "%d", %c : tile<i32>
+    print_tko "%d", %c : tile<i32> -> token
     return %c : tile<i32>
   }
 }
@@ -699,7 +699,7 @@ cuda_tile.module @test {
 cuda_tile.module @test {
   testing$func @test_if_def_both_return(%arg1 : !cuda_tile.tile<i32>) -> !cuda_tile.tile<i32> {
     // CHECK: %[[R0:.*]] = constant <i32: 0>
-    // CHECK: %[[R1:.*]] = constant <i32: 1>
+    // CHECK: %[[R1:.*]] = constant <i32: 3>
     // CHECK: %[[CMP:.*]] = cmpi equal %{{.*}}, %[[R0]]
     // CHECK: if %[[CMP]] {
     // CHECK:   return %[[R0]]
@@ -707,17 +707,17 @@ cuda_tile.module @test {
     // CHECK: return %[[R1]]
     // CHECK-NOT: return
     %a = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
-    %b = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
+    %b = cuda_tile.constant <i32: 3> : !cuda_tile.tile<i32>
     %c = cuda_tile.constant <i32: 2> : !cuda_tile.tile<i32>
     %cond1 = cmpi equal %arg1, %a, signed : !cuda_tile.tile<i32> -> tile<i1>
     %if = if %cond1 -> (tile<i32>) {
-      print "%d", %a : tile<i32>
+      print_tko "%d", %a : tile<i32> -> token
       return %a : tile<i32>
     } else {
-      print "%d", %b : tile<i32>
+      print_tko "%d", %b : tile<i32> -> token
       return %b : tile<i32>
     }
-    print "%d", %if : tile<i32>
+    print_tko "%d", %if : tile<i32> -> token
     return %if : tile<i32>
   }
 }
@@ -746,22 +746,28 @@ cuda_tile.module @cuda_module {
 }
 
 // -----
-// Test ConvertToSelect with non-0 dim tile types - should NOT convert to select
-// This tests the fix that checks all yielded values are 0-dim TileType before converting
-// CHECK-LABEL: entry @test_if_tile_yield
+// Test ConvertToSelect with non-0 dim tile types
 cuda_tile.module @cuda_module {
   entry @test_if_tile_yield(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
-    // CHECK: if %arg0
-    // CHECK-NOT: select
-    %cst_0_i32 = constant <i32: 0> : tile<1xi32>
-    %cst_1_i32 = constant <i32: 1> : tile<1xi32>
-    %if = if %arg0 -> (tile<1xi32>) {
-      yield %cst_0_i32 : tile<1xi32>
+    // СHECK: entry @test_if_tile_yield(%[[A0:.*]]: tile<i1>,
+    // CHECK: %[[C0:.*]] = constant <i32: 0>
+    // CHECK: %[[C1:.*]] = constant <i32: 2>
+    // CHECK: %[[R:.*]] = reshape %[[A0:.*]] : tile<i1> -> tile<1xi1>
+    // CHECK: %[[B:.*]] = broadcast %[[R]] : tile<1xi1> -> tile<2xi1>
+    // CHECK: %[[S:.*]] = select %[[B:.*]], %[[C0]], %[[C1]] : tile<2xi1>, tile<2xi32>
+    // CHECK: store_ptr_tko weak %{{.*}}, %[[S]]
+    %cst_0_i32 = constant <i32: 0> : tile<2xi32>
+    %cst_1_i32 = constant <i32: 2> : tile<2xi32>
+    %if = if %arg0 -> (tile<2xi32>) {
+      yield %cst_0_i32 : tile<2xi32>
     } else {
-      yield %cst_1_i32 : tile<1xi32>
+      yield %cst_1_i32 : tile<2xi32>
     }
-    %off = reshape %arg1 : tile<ptr<i32>> -> tile<1xptr<i32>>
-    %3 = store_ptr_tko weak %off, %if: tile<1xptr<i32>>, tile<1xi32> -> token
+    %reshape = reshape %arg1 : tile<ptr<i32>> -> tile<1xptr<i32>>
+    %broadcast = broadcast %reshape : tile<1xptr<i32>> -> tile<2xptr<i32>>
+    %iota = iota : tile<2xi32>
+    %off = offset %broadcast, %iota : tile<2xptr<i32>>, tile<2xi32> -> tile<2xptr<i32>>
+    %3 = store_ptr_tko weak %off, %if: tile<2xptr<i32>>, tile<2xi32> -> token
     return
   }
 }
@@ -773,7 +779,7 @@ cuda_tile.module @cuda_module {
 cuda_tile.module @cuda_module {
   global @exitval alignment = 4 <i32: 0> : tile<1xi32>
   entry @test_combine_ifs_with_tokens(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
-    %cst_1_i32 = constant <i32: 1> : tile<i32>
+    %cst_1_i32 = constant <i32: 2> : tile<i32>
     %cst_0_i32 = constant <i32: 0> : tile<i32>
     %0 = make_token : token
     %1 = cmpi not_equal %cst_0_i32, %cst_0_i32, signed : tile<i32> -> tile<i1>
@@ -809,7 +815,7 @@ cuda_tile.module @cuda_module {
 cuda_tile.module @cuda_module {
   global @exitval alignment = 4 <i32: 0> : tile<1xi32>
   entry @test_combine_ifs_with_tokens_and_return(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
-    %cst_1_i32 = constant <i32: 1> : tile<i32>
+    %cst_1_i32 = constant <i32: 2> : tile<i32>
     %cst_0_i32 = constant <i32: 0> : tile<i32>
     %0 = make_token : token
     %1 = cmpi not_equal %cst_0_i32, %cst_0_i32, signed : tile<i32> -> tile<i1>
@@ -834,6 +840,251 @@ cuda_tile.module @cuda_module {
       %6 = join_tokens %4, %2#0 : token
       %7 = store_ptr_tko weak %3, %5 token=%6 : tile<ptr<i32>>, tile<i32> -> token
     }
+    return
+  }
+}
+
+// -----
+// Test pattern: select(pred, select(pred, a, b), c) => select(pred, a, c)
+// CHECK-LABEL: entry @test_select_select_first
+module {
+  cuda_tile.module @cuda_module {
+    entry @test_select_select_first(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
+      // CHECK: %[[C0:.*]] = constant <i32: 0>
+      // CHECK: %[[C2:.*]] = constant <i32: 2>
+      // CHECK: %[[RES:.*]] = select {{.*}}, %[[C0]], %[[C2]]
+      // CHECK: store_ptr_tko weak %{{.*}}, %[[RES]]
+      %cst_0_i32 = constant <i32: 0> : tile<i32>
+      %cst_1_i32 = constant <i32: 3> : tile<i32>
+      %cst_2_i32 = constant <i32: 2> : tile<i32>
+      %0 = make_token : token
+      %2 = select %arg0, %cst_0_i32, %cst_1_i32 : tile<i1>, tile<i32>
+      %3 = select %arg0, %2, %cst_2_i32 : tile<i1>, tile<i32>
+      %4 = store_ptr_tko weak %arg1, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+      return
+    }
+  }
+}
+
+// -----
+// Test pattern: select(pred, a, select(pred, b, c)) => select(pred, a, c)
+// CHECK-LABEL: entry @test_select_select_second
+module {
+  cuda_tile.module @cuda_module {
+    entry @test_select_select_second(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
+      // CHECK: %[[C1:.*]] = constant <i32: 3>
+      // CHECK: %[[C2:.*]] = constant <i32: 2>
+      // CHECK: %[[RES:.*]] = select {{.*}}, %[[C2]], %[[C1]]
+      // CHECK: store_ptr_tko weak %{{.*}}, %[[RES]]
+      %cst_0_i32 = constant <i32: 0> : tile<i32>
+      %cst_1_i32 = constant <i32: 3> : tile<i32>
+      %cst_2_i32 = constant <i32: 2> : tile<i32>
+      %0 = make_token : token
+      %2 = select %arg0, %cst_0_i32, %cst_1_i32 : tile<i1>, tile<i32>
+      %3 = select %arg0, %cst_2_i32, %2 : tile<i1>, tile<i32>
+      %4 = store_ptr_tko weak %arg1, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+      return
+    }
+  }
+}
+
+// -----
+// Test pattern: // select %x, true, false => %x
+module {
+  cuda_tile.module @cuda_module {
+    entry @test_select_true_false_select(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
+      // CHECK: entry @test_select_true_false_select(%[[ARG0:.*]]: tile<i1>,
+      // CHECK: %[[C0:.*]] = constant <i32: 0>
+      // CHECK: %[[C1:.*]] = constant <i32: 3>
+      // CHECK: %[[RES:.*]] = select %[[ARG0]], %[[C0]], %[[C1]]
+      // CHECK: store_ptr_tko weak %{{.*}}, %[[RES]]
+      %cst_0_i32 = constant <i32: 0> : tile<i32>
+      %cst_1_i32 = constant <i32: 3> : tile<i32>
+      %true = constant <i1: 1> : tile<i1>
+      %false = constant <i1: 0> : tile<i1>
+      %0 = make_token : token
+      %2 = select %arg0, %true, %false : tile<i1>, tile<i1>
+      %3 = select %2, %cst_0_i32, %cst_1_i32 : tile<i1>, tile<i32>
+      %4 = store_ptr_tko weak %arg1, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+      return
+    }
+  }
+}
+
+// -----
+// Test patterns:
+// select(pred, false, true) => not(pred)
+// select(not(pred), a, b) => select(pred, b, a)
+module {
+  cuda_tile.module @cuda_module {
+    entry @test_select_false_true_select(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
+      // CHECK: entry @test_select_false_true_select(%[[ARG0:.*]]: tile<i1>,
+      // CHECK: %[[C0:.*]] = constant <i32: 0>
+      // CHECK: %[[C1:.*]] = constant <i32: 3>
+      // CHECK: %[[RES:.*]] = select %[[ARG0]], %[[C1]], %[[C0]]
+      // CHECK: store_ptr_tko weak %{{.*}}, %[[RES]]
+      %cst_0_i32 = constant <i32: 0> : tile<i32>
+      %cst_1_i32 = constant <i32: 3> : tile<i32>
+      %true = constant <i1: 1> : tile<i1>
+      %false = constant <i1: 0> : tile<i1>
+      %0 = make_token : token
+      %2 = select %arg0, %false, %true : tile<i1>, tile<i1>
+      %3 = select %2, %cst_0_i32, %cst_1_i32 : tile<i1>, tile<i32>
+      %4 = store_ptr_tko weak %arg1, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+      return
+    }
+  }
+}
+
+// -----
+// Test pattern:
+// select %cond, %val, %val => %val
+// CHECK-LABEL: entry @test_select_val_val
+module {
+  cuda_tile.module @cuda_module {
+    entry @test_select_val_val(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
+      // CHECK: %[[C1:.*]] = constant <i32: 3>
+      // CHECK-NOT: select
+      // CHECK: store_ptr_tko weak %{{.*}}, %[[C1]]
+      %cst_1_i32 = constant <i32: 3> : tile<i32>
+      %0 = make_token : token
+      %3 = select %arg0, %cst_1_i32, %cst_1_i32 : tile<i1>, tile<i32>
+      %4 = store_ptr_tko weak %arg1, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+      return
+    }
+  }
+}
+
+// -----
+// Test pattern:
+// select true, %0, %1 => %0
+// CHECK-LABEL: entry @test_select_true
+module {
+  cuda_tile.module @cuda_module {
+    entry @test_select_true(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
+      // CHECK: %[[C0:.*]] = constant <i32: 0>
+      // CHECK-NOT: select
+      // CHECK: store_ptr_tko weak %{{.*}}, %[[C0]]
+      %cst_0_i32 = constant <i32: 0> : tile<i32>
+      %cst_1_i32 = constant <i32: 3> : tile<i32>
+      %true = constant <i1: 1> : tile<i1>
+      %0 = make_token : token
+      %3 = select %true, %cst_0_i32, %cst_1_i32 : tile<i1>, tile<i32>
+      %4 = store_ptr_tko weak %arg1, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+      return
+    }
+  }
+}
+
+// -----
+// Test pattern:
+// select false, %0, %1 => %1
+// CHECK-LABEL: entry @test_select_false
+module {
+  cuda_tile.module @cuda_module {
+    entry @test_select_false(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
+      // CHECK: %[[C1:.*]] = constant <i32: 3>
+      // CHECK-NOT: select
+      // CHECK: store_ptr_tko weak %{{.*}}, %[[C1]]
+      %cst_0_i32 = constant <i32: 0> : tile<i32>
+      %cst_1_i32 = constant <i32: 3> : tile<i32>
+      %false = constant <i1: 0> : tile<i1>
+      %0 = make_token : token
+      %3 = select %false, %cst_0_i32, %cst_1_i32 : tile<i1>, tile<i32>
+      %4 = store_ptr_tko weak %arg1, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+      return
+    }
+  }
+}
+
+// -----
+// Test pattern:
+// %0 = cmpi eq, %arg0, %arg1
+// %1 = select %0, %arg0, %arg1 => %arg1
+module {
+  cuda_tile.module @cuda_module {
+    entry @test_cmpi_eq_select(%arg0: tile<i32>, %arg1: tile<i32>, %arg2: tile<ptr<i32>>) {
+      // CHECK: entry @test_cmpi_eq_select(%[[ARG0:.*]]: tile<i32>, %[[ARG1:.*]]: tile<i32>,
+      // CHECK-NOT: select
+      // CHECK: store_ptr_tko weak %{{.*}}, %[[ARG1]]
+      %0 = make_token : token
+      %cond = cmpi equal %arg0, %arg1, signed : !cuda_tile.tile<i32> -> tile<i1>
+      %3 = select %cond, %arg0, %arg1 : tile<i1>, tile<i32>
+      %4 = store_ptr_tko weak %arg2, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+      return
+    }
+  }
+}
+
+// -----
+// Test pattern:
+// %0 = cmpi ne, %arg0, %arg1
+// %1 = select %0, %arg0, %arg1 => %arg0
+module {
+  cuda_tile.module @cuda_module {
+    entry @test_cmpi_neq_select(%arg0: tile<i32>, %arg1: tile<i32>, %arg2: tile<ptr<i32>>) {
+      // CHECK: entry @test_cmpi_neq_select(%[[ARG0:.*]]: tile<i32>, %[[ARG1:.*]]: tile<i32>,
+      // CHECK-NOT: select
+      // CHECK: store_ptr_tko weak %{{.*}}, %[[ARG0]]
+      %0 = make_token : token
+      %cond = cmpi not_equal %arg0, %arg1, signed : !cuda_tile.tile<i32> -> tile<i1>
+      %3 = select %cond, %arg0, %arg1 : tile<i1>, tile<i32>
+      %4 = store_ptr_tko weak %arg2, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+      return
+    }
+  }
+}
+
+// -----
+// Canonicalization of select with constant arguments
+// CHECK-LABEL: @test_select_consts
+cuda_tile.module @test {
+  testing$func @test_select_consts() -> !cuda_tile.tile<4xi32> {
+    // CHECK: constant <i32: [0, 3, 4, 7]>
+    %c0 = constant <i1: [1, 0, 1, 0]> : tile<4xi1>
+    %c1 = constant <i32: [0, 2, 4, 6]> : tile<4xi32>
+    %c2 = constant <i32: [1, 3, 5, 7]> : tile<4xi32>
+    %0 = select %c0, %c1, %c2 : tile<4xi1>, tile<4xi32>
+    return %0 : tile<4xi32>
+  }
+}
+
+// -----
+// Canonicalization of SelectOp - conversion into ExtIOp
+cuda_tile.module @cuda_module {
+  entry @test_select_exti(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
+    // CHECK: entry @test_select_exti(%[[A0:.*]]: tile<i1>,
+    // CHECK: %[[X:.*]] = xori %[[A0]]
+    // CHECK: %[[E:.*]] = exti %[[X]] unsigned : tile<i1> -> tile<i32>
+    %cst_0_i32 = constant <i32: 0> : tile<i32>
+    %cst_1_i32 = constant <i32: 1> : tile<i32>
+    %0 = make_token : token
+    %3 = select %arg0, %cst_0_i32, %cst_1_i32 : tile<i1>, tile<i32>
+    %4 = store_ptr_tko weak %arg1, %3 token=%0 : tile<ptr<i32>>, tile<i32> -> token
+    return
+  }
+}
+
+// -----
+// Canonicalization of SelectOp - conversion of ranked-tile into ExtIOp
+cuda_tile.module @cuda_module {
+  entry @test_select_exti_tile(%arg0: tile<i1>, %arg1: tile<ptr<i32>>) {
+    // CHECK: entry @test_select_exti_tile(%[[A0:.*]]: tile<i1>,
+    // CHECK: %[[R:.*]] = reshape %[[A0]] : tile<i1> -> tile<1xi1>
+    // CHECK: %[[B:.*]] = broadcast %[[R]] : tile<1xi1> -> tile<2xi1>
+    // CHECK: %[[X:.*]] = xori %[[B]]
+    // CHECK: %[[E:.*]] = exti %[[X]] unsigned : tile<2xi1> -> tile<2xi32>
+    %cst_0_i32 = constant <i32: 0> : tile<2xi32>
+    %cst_1_i32 = constant <i32: 1> : tile<2xi32>
+    %r = reshape %arg0 : tile<i1> -> tile<1xi1>
+    %b = broadcast %r : tile<1xi1> -> tile<2xi1>
+    %0 = make_token : token
+    %3 = select %b, %cst_0_i32, %cst_1_i32 : tile<2xi1>, tile<2xi32>
+    %reshape = reshape %arg1 : tile<ptr<i32>> -> tile<1xptr<i32>>
+    %broadcast = broadcast %reshape : tile<1xptr<i32>> -> tile<2xptr<i32>>
+    %iota = iota : tile<2xi32>
+    %off = offset %broadcast, %iota : tile<2xptr<i32>>, tile<2xi32> -> tile<2xptr<i32>>
+    %4 = store_ptr_tko weak %off, %3 token=%0 : tile<2xptr<i32>>, tile<2xi32> -> token
     return
   }
 }

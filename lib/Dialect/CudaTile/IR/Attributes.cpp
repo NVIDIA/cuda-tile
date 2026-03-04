@@ -2,9 +2,11 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #include "cuda_tile/Dialect/CudaTile/IR/Attributes.h"
 
 #include "mlir/IR/Builders.h"
@@ -46,6 +48,18 @@ LogicalResult OptimizationHintsAttr::verifyParamWithContext(
       if (auto intAttr =
               llvm::dyn_cast_or_null<IntegerAttr>(param.getValue())) {
         uint64_t numCTA = intAttr.getInt();
+        // Ampere/ada don't support multiple CTAs in a CGA.
+        static const llvm::SmallVector<llvm::StringLiteral, 5> restrictedArchs =
+            {"sm_80", "sm_86", "sm_87", "sm_88", "sm_89"};
+        bool requiresSingleCTA =
+            llvm::any_of(restrictedArchs, [&](llvm::StringRef arch) {
+              return context.starts_with(arch);
+            });
+
+        if (requiresSingleCTA && numCTA != 1) {
+          return emitError() << "expected 1 for " << context << "." << key;
+        }
+
         if ((numCTA == 0) || (numCTA > 16) || ((numCTA & (numCTA - 1)) != 0))
           return emitError()
                  << "expected power-of-two ≤ 16 for " << context << "." << key;

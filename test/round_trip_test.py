@@ -2,7 +2,7 @@
 
 """
 Cross-platform replacement for round_trip_test.sh
-Tests MLIR -> CUDA Tile BC -> MLIR round-trip conversion
+Tests MLIR -> CudaTileBC -> MLIR round-trip conversion
 """
 
 import sys
@@ -39,12 +39,12 @@ def main():
     extra_flags_str = " ".join(extra_flags) if extra_flags else ""
 
     try:
-        # Step 1: Convert MLIR to CUDA Tile BC
+        # Step 1: Convert MLIR to CudaTileBC
         tilebc_file = f"{output_base}.out.tilebc"
         cmd1 = f"cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module {input_file} -o {tilebc_file}"
         run_command(cmd1)
 
-        # Step 2: Convert CUDA Tile BC back to MLIR
+        # Step 2: Convert CudaTileBC back to MLIR
         roundtrip_file = f"{output_base}.roundtrip.mlir"
         cmd2 = f"cuda-tile-translate -cudatilebc-to-mlir {tilebc_file} -o {roundtrip_file} {extra_flags_str}".strip()
         run_command(cmd2)

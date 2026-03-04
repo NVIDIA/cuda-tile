@@ -55,3 +55,25 @@ cuda_tile.module @test {
     return loc("file.py":12:4)
   } loc("file.py":10:4)
 } loc("other_file.py":1:1)
+
+// -----
+
+// Test that we handle OpaqueLoc, NameLoc, and CallSiteLoc
+// CHECK-LABEL: testing$func @func_with_other_locs()
+// CHECK: return loc(#[[LOC_RETURN:.*]])
+// CHECK: } loc(#[[LOC_FN:.*]])
+
+// CHECK-DAG: #[[FILE:.*]] = #cuda_tile.di_file<"file.py" in "">
+// CHECK-DAG: #[[CU_FILE:.*]] = #cuda_tile.di_file<"other_file.py" in "">
+// CHECK-DAG: #[[LOC_FN_FILE:.*]] = loc("file.py":10:4)
+// CHECK-DAG: #[[LOC_RETURN_FILE:.*]] = loc("file.py":12:4)
+// CHECK-DAG: #[[COMPILE_UNIT]] = #cuda_tile.di_compile_unit<file = #[[CU_FILE]]>
+// CHECK-DAG: #[[SUBPROGRAM]] = #cuda_tile.di_subprogram<file = #[[FILE]], line = 10, name = "func_with_other_locs", linkageName = "func_with_other_locs", compileUnit = #[[COMPILE_UNIT]], scopeLine = 10>
+// CHECK-DAG: #[[LOC_RETURN]] = #cuda_tile.di_loc<#[[LOC_RETURN_FILE]] in #[[SUBPROGRAM]]>
+// CHECK-DAG: #[[LOC_FN]] = #cuda_tile.di_loc<#[[LOC_FN_FILE]] in #[[SUBPROGRAM]]>
+
+cuda_tile.module @test {
+  testing$func @func_with_other_locs() {
+    return loc(callsite(unknown at "file.py":12:4))
+  } loc(fused["file.py":10:4, unknown])
+} loc("blah"("other_file.py":1:1))

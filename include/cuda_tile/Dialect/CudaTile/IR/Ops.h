@@ -1,9 +1,12 @@
 //===- Ops.h - CUDA Tile Operation Utilities --------------------*- C++ -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef CUDA_TILE_DIALECT_CUDATILE_IR_OPS_H
 #define CUDA_TILE_DIALECT_CUDATILE_IR_OPS_H
 
@@ -55,6 +58,10 @@ LogicalResult verifyFuncBodyDebugInfo(FunctionOpInterface funcOp);
 //===----------------------------------------------------------------------===//
 
 namespace mlir::cuda_tile {
+
+// Helper function to extract cuda_tile::ModuleOp
+cuda_tile::ModuleOp extractCudaTileModuleOp(Operation *op);
+
 namespace impl {
 //===----------------------------------------------------------------------===//
 // ControlFlowImplicitTerminatorOperation

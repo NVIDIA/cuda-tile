@@ -33,6 +33,12 @@ tablegen(CUDA_TILE StaticOpcodes.inc -gen-cuda-tile-opcodes)
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
              ${CMAKE_CURRENT_BINARY_DIR}/StaticOpcodes.inc)
 
+# Generate type bytecode functions from type opcodes
+set(LLVM_TARGET_DEFINITIONS ../../../include/cuda_tile/Dialect/CudaTile/IR/BytecodeTypeOpcodes.td)
+tablegen(CUDA_TILE TypeBytecode.inc -gen-cuda-tile-type-bytecode)
+set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
+             ${CMAKE_CURRENT_BINARY_DIR}/TypeBytecode.inc)
+
 # Ensure the bytecode include is generated with other targets
 add_public_tablegen_target(CudaTileBytecodeIncGen)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})

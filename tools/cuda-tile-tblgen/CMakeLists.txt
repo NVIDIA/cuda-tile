@@ -7,6 +7,9 @@ add_tablegen(cuda-tile-tblgen CUDA_TILE
   EXPORT CUDA_TILE
   cuda-tile-tblgen.cpp
   BytecodeGen.cpp
+  BytecodeGenUtilities.cpp
+  BytecodeTypeAnalysis.cpp
+  BytecodeTypeCodeGen.cpp
   SpecGen.cpp
   Emitter.cpp
   CudaTileOp.cpp

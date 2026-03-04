@@ -1,9 +1,12 @@
 //===- Types.h - CUDA Tile Type Utilities -----------------------*- C++ -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef CUDA_TILE_DIALECT_CUDATILE_IR_TYPES_H
 #define CUDA_TILE_DIALECT_CUDATILE_IR_TYPES_H
 
@@ -45,8 +48,12 @@ int64_t constexpr maxTileNumElements = 16777216;
 /// Return "true" if the given type is an pointer or a tensor of pointer.
 bool isPointerLike(Type t);
 
-/// Return a type with same shape as the argument, with i1 element type.
-Type getI1SameShape(Type type);
+/// Return a TileType with same shape as the argument, with i1 element type.
+TileType getI1SameShape(Type type);
+
+/// Return a TileType with the rank extended to targetRank
+/// targetRank should be positive & be not less than the original rank
+TileType reshapeTileTypeToRank(TileType type, int targetRank);
 
 /// Parse a type, if type is unprefixed, assume it is from the cuda_tile dialect
 ParseResult parseCudaTileType(AsmParser &p, Type &type);

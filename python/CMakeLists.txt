@@ -68,6 +68,7 @@ declare_mlir_python_extension(CudaTilePythonSources.Dialects.cuda_tile.Nanobind
   EMBED_CAPI_LINK_LIBS
     MLIRCAPIIR
     CudaTileCAPIDialects # CAPI functions via embed (controlled exports)
+    CudaTileCAPIOptimizer # CAPI optimizations via embed
 )
 
 
@@ -87,6 +88,7 @@ add_mlir_python_common_capi_library(CudaTilePythonCAPI
     CudaTilePythonSources
   EMBED_LIBS
     CudaTileCAPIDialects
+    CudaTileCAPIOptimizer
 )
 
 ################################################################################

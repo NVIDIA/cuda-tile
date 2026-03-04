@@ -52,7 +52,6 @@ else:
 tools = [
     "cuda-tile-opt",
     "FileCheck",
-    "not",
 ]
 
 llvm_config.add_tool_substitutions(tools, tool_dirs)

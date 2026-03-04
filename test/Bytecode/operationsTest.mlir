@@ -90,7 +90,7 @@ cuda_tile.module @kernels {
     %result, %result_token = load_ptr_tko weak %arg0 token=%0 : !cuda_tile.tile<!cuda_tile.ptr<i32>> -> !cuda_tile.tile<i32>, !cuda_tile.token
     %1 = constant <i32: 25> : !cuda_tile.tile<i32>
     %2 = store_ptr_tko weak %arg0, %1 token=%result_token : !cuda_tile.tile<!cuda_tile.ptr<i32>>, !cuda_tile.tile<i32> -> !cuda_tile.token
-    print "\0Ahello % from the tile world !\0A\00", %result : !cuda_tile.tile<i32>
+    print_tko "\0Ahello % from the tile world !\0A\00", %result : !cuda_tile.tile<i32> -> !cuda_tile.token
     return
   }
 }

@@ -1,9 +1,12 @@
 //===- AttrDefs.td - CUDA Tile Attribute Definitions -------*- tablegen -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef CUDATILE_DIALECT_CUDATILE_IR_ATTRDEFS_TD
 #define CUDATILE_DIALECT_CUDATILE_IR_ATTRDEFS_TD
 
@@ -108,7 +111,7 @@ def CudaTile_OptimizationHintsAttr : CudaTileAttrDef<"OptimizationHints", "optim
     static constexpr llvm::StringLiteral kLatency = "latency";
     static constexpr llvm::StringLiteral kOccupancy = "occupancy";
     static constexpr llvm::StringLiteral allowedKeysArr[] = {
-        "sm_80", "sm_90", "sm_100", "sm_103", "sm_110", "sm_120", "sm_121"};
+        "sm_80", "sm_86", "sm_87", "sm_88", "sm_89", "sm_90", "sm_100", "sm_103", "sm_110", "sm_120", "sm_121"};
 
     static bool isAllowedKey(llvm::StringRef key) {
       return llvm::is_contained(allowedKeysArr, key);
@@ -167,6 +170,7 @@ def CudaTile_ComparisonOrdering : CudaTileI32EnumAttr<"ComparisonOrdering", "com
   let cppNamespace = "::mlir::cuda_tile";
   let genSpecializedAttr = 0;
   let specPrefixDescription = "The :code:`comparison_ordering` attribute specifies the kind of ordering to be performed in the comparison operation.";
+  let specSuffixDescription = "";
 }
 
 def CudaTile_ComparisonOrderingAttr : CudaTileEnumAttr<CudaTile_ComparisonOrdering, "comparison_ordering"> {
@@ -187,6 +191,7 @@ def CudaTile_ComparisonPredicate : CudaTileI32EnumAttr<
   let cppNamespace = "::mlir::cuda_tile";
   let genSpecializedAttr = 0;
   let specPrefixDescription = "The :code:`comparison_predicate` attribute specifies the kind of comparison to be performed.";
+  let specSuffixDescription = "";
 }
 
 def CudaTile_ComparisonPredicateAttr : CudaTileEnumAttr<CudaTile_ComparisonPredicate, "comparison_predicate"> {

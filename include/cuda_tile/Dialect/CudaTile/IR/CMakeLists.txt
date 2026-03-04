@@ -30,7 +30,6 @@ mlir_tablegen(Ops.cpp.inc -gen-op-defs)
 add_public_tablegen_target(CudaTileIncGen)
 add_dependencies(mlir-headers CudaTileIncGen)
 
-add_dependencies(mlir-headers cuda-tile-tblgen)
 # TableGen Markdown documentation generation.
 #####################################################################
 # Note: MLIR generated documentation use Hugo, so we enable Hugo specific features
@@ -62,8 +61,9 @@ if(NOT DEFINED CUDA_TILE_TABLEGEN_EXE)
     message(FATAL_ERROR "CUDA_TILE_TABLEGEN_EXE is not defined and is required to generate the specification.")
 endif()
 
+message(STATUS "SPEC")
 
-set(GEN_SPEC_DIR ${CMAKE_BINARY_DIR}/docs/spec)
+set(GEN_SPEC_DIR ${CMAKE_SOURCE_DIR}/spec)
 file(MAKE_DIRECTORY ${GEN_SPEC_DIR})
 file(MAKE_DIRECTORY ${GEN_SPEC_DIR}/examples)
 

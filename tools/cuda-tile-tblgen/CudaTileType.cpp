@@ -1,13 +1,13 @@
-//===- CudaTileType.cpp - CUDA Tile IR Type wrapper for TableGen -------*- C++
-//-*-===//
+//===- CudaTileType.cpp - CUDA Tile IR Type wrapper for TableGen ---------*- C++
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-// This file implements the CUDA Tile dialect type parsing and printing
-// utilities.
+//
+// This file implements the CUDA Tile dialect operations.
 //
 //===----------------------------------------------------------------------===//
 
@@ -392,6 +392,8 @@ TileIRType convertAttributeDef(const std::string &opName,
     return TileIRType::attribute(opName, "DivRoundingMode");
   } else if (attrName == "Builtin_DenseTypedElementsAttr") {
     return TileIRType::builtin("DenseConstant");
+  } else if (attrName == "DenseBoolArrayAttr") {
+    return TileIRType::builtin("DenseBoolArray");
   } else {
     PrintFatalError("convertAttributeDef: unhandled attribute type: `" +
                     attrName + "`");
@@ -480,15 +482,17 @@ TileIRType getType(const Record &tcDef) {
     // This should be a builtin type.
   } else if (tcDef.getName() == "CudaTile_PartitionViewType") {
     return TileIRType::builtin("partition_view");
-  } else if (tcDef.getName() == "CudaTile_StridedViewType") {
-    return TileIRType::builtin("strided_view");
   } else if (tcDef.getName() == "CudaTile_TileView") {
     // Today we represent the view type interface as a builtin type.
     return TileIRType::builtin("view_type");
   } else if (tcDef.getName() == "CudaTile_IntTileType") {
     return TileIRType::int_tile();
+  } else if (tcDef.getName() == "CudaTile_ProgramIdType") {
+    return TileIRType::builtin("program_id");
   } else if (tcDef.getName() == "CudaTile_BaseFloatTileType") {
     return TileIRType::base_float_tile();
+  } else if (tcDef.getName() == "CudaTile_QueueType") {
+    return TileIRType::builtin("queue");
     // TensorOf
   } else if (tcDef.isSubClassOf("CudaTile_ScalarTileOf")) {
     auto allowedElementTypes = getAllowedElementTypes(tcDef);
@@ -520,11 +524,16 @@ TileIRType getType(const Record &tcDef) {
     auto baseTypeDesc = getType(*baseType);
     // TODO(@jroesch): add optional
     return baseTypeDesc;
-  } else if (tcDef.getName() == "I32") {
-    return TileIRType::builtin("i32");
   } else {
+    std::string superTypes = " with superclasses (";
+    auto superClasses = tcDef.getSuperClasses();
+    for (auto it = superClasses.rbegin(); it != superClasses.rend(); ++it) {
+      superTypes += (*it)->getName().str() + " | ";
+    }
+    superTypes += ")";
+
     PrintFatalError("getType: unsupported type `" + tcDef.getName().str() +
-                    "`");
+                    "`" + superTypes);
   }
 }
 

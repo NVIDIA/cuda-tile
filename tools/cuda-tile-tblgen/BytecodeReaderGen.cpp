@@ -1,17 +1,20 @@
-//===- BytecodeReaderGen.cpp - CUDA Tile Bytecode Reader Gen ----*- C++ -*-===//
+//===- BytecodeReaderGen.cpp ------------------------------------*- C++ -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
 // This file defines the TableGen backend for generating bytecode
 // reader functions for cuda_tile operations.
 //
 //===----------------------------------------------------------------------===//
 
 #include "mlir/TableGen/AttrOrTypeDef.h"
+#include "mlir/TableGen/Format.h"
 #include "mlir/TableGen/GenInfo.h"
-#include "mlir/TableGen/Operator.h"
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -19,6 +22,9 @@
 #include "llvm/TableGen/Record.h"
 #include "llvm/TableGen/TableGenBackend.h"
 
+#include "BytecodeGenUtilities.h"
+#include "BytecodeTypeAnalysis.h"
+#include "BytecodeTypeCodeGen.h"
 using namespace llvm;
 using namespace mlir;
 using namespace mlir::tblgen;
@@ -35,7 +41,8 @@ static const char *const functionSignatureTemplate = R"(
                                      LazyTypeTable &types,
                                      DenseElementsAttrCache &constCache,
                                      DebugInfoReader::Iterator &diIterator,
-                                     MLIRContext &context) {{
+                                     MLIRContext &context,
+                                     const BytecodeVersion &bytecodeVersion) {{
 )";
 
 /// The template for generating operand deserialization code.
@@ -96,10 +103,10 @@ static const char *const odsOperandSSAReadTemplate = R"(
 /// {2}: Expected type argument.
 /// {3}: Attribute name string.
 static const char *const optionalAttrParseTemplate = R"(
-    {1} tempValue;
-    if (failed(parseOpAttribute(reader, context, types, constants, constCache, tempValue, {2})))
-      return reader.emitError() << "failed to parse optional attribute '" << "{3}" << "'";
-    {0} = tempValue;
+      {1} tempValue;
+      if (failed(parseOpAttribute(reader, context, types, constants, constCache, tempValue, {2})))
+        return reader.emitError() << "failed to parse optional attribute '" << "{3}" << "'";
+      {0} = tempValue;
 )";
 
 /// Template for required attribute parsing with parseOpAttribute.
@@ -110,6 +117,31 @@ static const char *const requiredAttrParseTemplate = R"(
   if (failed(parseOpAttribute(reader, context, types, constants, constCache, {0}, {1})))
     return reader.emitError() << "failed to parse attribute '" << "{2}" << "'";
 )";
+
+/// Helper function to generate common attribute parsing logic.
+static void generateAttributeParsingLogic(raw_ostream &os, StringRef varName,
+                                          StringRef expectedTypeArg,
+                                          StringRef attrName,
+                                          StringRef baseCppTypeStr,
+                                          bool isOptional, bool isUnitAttr,
+                                          int bitIndex) {
+  if (isOptional) {
+    // Optional attribute - check flags field.
+    os << "    if (flags & (1ULL << " << bitIndex << ")) {\n";
+    if (isUnitAttr)
+      os << llvm::formatv(R"(      {0} = UnitAttr::get(&context);)", varName);
+    else {
+      os << "      ";
+      os << llvm::formatv(optionalAttrParseTemplate, varName, baseCppTypeStr,
+                          expectedTypeArg, attrName);
+    }
+    os << "    }\n";
+  } else {
+    // Required attribute - read directly.
+    os << llvm::formatv(requiredAttrParseTemplate, varName, expectedTypeArg,
+                        attrName);
+  }
+}
 
 /// The template for generating result type deserialization code.
 /// {0}: Number of results.
@@ -130,20 +162,20 @@ static const char *const resultTypeDeserializationTemplate = R"(
 
 /// The template for generating the final operation creation code.
 /// {0}: The MLIR operation name (e.g. "cuda_tile.addf").
+/// {1}: The number of results to add to valueIndexList.
 static const char *const operationDeserializationTemplate = R"(
   // --- Create Operation ---
   if (failed(createOperationGeneric(innerBuilder, loc, "{0}",
                                   resultTypes, parsedOperands, attributes,
-                                  valueIndexList, parsedRegions)))
+                                  valueIndexList, parsedRegions, {1})))
     return failure();
 )";
 
 /// The template for generating a case in the opcode dispatch switch statement.
-/// {0}: The Opcode enum name (e.g., AddI).
-/// {1}: The C++ class name of the operation (e.g., CudaTile_AddIOp).
+/// {0}: The C++ class name of the operation (e.g., CudaTile_AddIOp).
 static const char *const dispatchCaseTemplate = R"(
   case Opcode::{0}:
-    if (failed(parse{1}(reader, innerBuilder, loc, valueIndexList, constants, types, constCache, diIterator, context)))
+    if (failed(parse{0}(reader, innerBuilder, loc, valueIndexList, constants, types, constCache, diIterator, context, bytecodeVersion)))
       return failure();
     break;
 )";
@@ -162,59 +194,74 @@ static const char *const regionDeserializationTemplate = R"(
     parsedRegions.reserve(numRegionsToParse);
     for (uint64_t i = 0; i < numRegionsToParse; ++i) {{
       auto region = std::make_unique<Region>();
-      if (failed(parseRegion(reader, innerBuilder, loc, valueIndexList, constants, types, constCache, diIterator, context, *region)))
+      if (failed(parseRegion(reader, innerBuilder, loc, valueIndexList, constants, types, constCache, diIterator, context, *region, bytecodeVersion)))
         return reader.emitError() << "failed to parse region " << i;
       parsedRegions.push_back(std::move(region));
     }
   }
 )";
 
-/// Collects information about optional attributes and operands for flags field.
-static void
-collectOptionalFields(const Operator &op,
-                      SmallVector<std::string> &optionalAttrNames,
-                      SmallVector<std::string> &optionalOperandNames) {
-  // Collect optional attributes.
-  for (const auto &namedAttr : op.getAttributes())
-    if (namedAttr.attr.isOptional())
-      optionalAttrNames.push_back(namedAttr.name.str());
-
-  // Collect optional operands (for AttrSizedOperandSegments).
-  if (op.getTrait("::mlir::OpTrait::AttrSizedOperandSegments"))
-    for (const auto &[index, odsOperand] : llvm::enumerate(op.getOperands()))
-      if (odsOperand.isOptional())
-        optionalOperandNames.push_back(odsOperand.name.str());
-}
-
 /// Reads the flags field that encodes the presence of optional attributes
 /// and operands using individual bits.
-static void
-generateFlagsFieldDeserialization(const Operator &op, raw_ostream &os,
-                                  ArrayRef<std::string> optionalAttrNames,
-                                  ArrayRef<std::string> optionalOperandNames) {
-  size_t totalOptionalFields =
-      optionalAttrNames.size() + optionalOperandNames.size();
+static void generateFlagsFieldDeserialization(
+    const Operator &op, raw_ostream &os,
+    const StringMap<size_t> &bitAssignments,
+    const std::optional<std::pair<std::string, std::string>>
+        &minOptionalVersion) {
+  size_t totalOptionalFields = bitAssignments.size();
 
-  if (totalOptionalFields > 0)
+  // Always declare flags variable for use in conditional logic below.
+  if (totalOptionalFields > 0) {
     os << "  // Read flags field for optional attributes/operands.\n"
-       << "  uint64_t flags = 0;\n"
-       << "  if (failed(reader.readVarInt(flags)))\n"
-       << "    return reader.emitError() << \"failed to read flags "
-          "field\";\n\n";
+       << "  uint64_t flags = 0;\n";
+
+    // Forward Compatibility: Only generate version check if the first optional
+    // field was added AFTER the operation's baseline version. This allows newer
+    // readers (e.g., 13.2) to read older bytecode (e.g., 13.1) that was written
+    // before optional fields existed. If optional fields existed from the
+    // operation's baseline, flags field is always present and no check needed.
+    std::string opVersion = extractVersionFromOperation(op);
+    std::string minOptionalVersionStr =
+        minOptionalVersion
+            ? (minOptionalVersion->first + "." + minOptionalVersion->second)
+            : "";
+    bool needsVersionCheck =
+        minOptionalVersion && (minOptionalVersionStr != opVersion);
+
+    if (needsVersionCheck) {
+      auto [majorStr, minorStr] = *minOptionalVersion;
+      os << llvm::formatv(
+          R"(  // Only read flags if bytecode version supports it (>= {0}.{1})
+  auto requiredVersionForFlags = BytecodeVersion::fromVersion({0}, {1}, 0);
+  assert(requiredVersionForFlags && "TableGen should guarantee valid versions");
+  if (bytecodeVersion >= *requiredVersionForFlags) {{
+    if (failed(reader.readVarInt(flags)))
+      return reader.emitError() << "failed to read flags field";
+  }
+  // Else: flags stays 0 (no optional fields in older bytecode versions)
+
+)",
+          majorStr, minorStr);
+    } else {
+      // Flags field always exists for this operation.
+      os << "  if (failed(reader.readVarInt(flags)))\n"
+         << "    return reader.emitError() << \"failed to read flags "
+            "field\";\n\n";
+    }
+  }
 }
 
 /// Generates the C++ function signature for the 'parse<OpName>' function,
 /// which handles deserialization for a specific cuda_tile operation.
 static void generateFunctionSignature(const Operator &op, raw_ostream &os) {
-  std::string opClassName = op.getCppClassName().str();
-  os << llvm::formatv(functionSignatureTemplate, opClassName);
+  os << llvm::formatv(functionSignatureTemplate, op.getCppClassName());
 }
 
 /// Generates C++ code within the 'parse<OpName>' function to deserialize the
 /// operands of the given operation.
 static void
 generateOperandDeserialization(const Operator &opDef, raw_ostream &os,
-                               ArrayRef<std::string> optionalAttrNames) {
+                               const StringMap<size_t> &bitAssignments) {
   os << "  SmallVector<Value, 0> parsedOperands;\n";
   if (opDef.getNumOperands() == 0)
     return;
@@ -224,28 +271,60 @@ generateOperandDeserialization(const Operator &opDef, raw_ostream &os,
     os << "  SmallVector<int32_t, 4> readSegmentSizes;\n";
 
     std::string opName = opDef.getOperationName();
-    size_t operandBitIndex = optionalAttrNames.size();
 
     for (unsigned i = 0; i < static_cast<unsigned>(opDef.getNumOperands());
          ++i) {
       const auto &odsOperand = opDef.getOperand(i);
-      std::string odsOperandName = odsOperand.name.str();
+      StringRef odsOperandName = odsOperand.name;
       bool isOptional = odsOperand.isOptional();
       bool isVariadic = odsOperand.isVariableLength();
 
       // Make variable names unique within the generated function by embedding
       // the index 'i'.
       os << "  // Parsing ODS Operand Segment: " << odsOperandName << "\n"
-         << "  int32_t currentSegmentLengthOds_" << i << ";\n";
+         << "  int32_t currentSegmentLengthOds_" << i << " = 0;\n";
 
       if (isOptional) {
-        os << llvm::formatv(optionalOdsOperandSegmentTemplate, odsOperandName,
-                            opName, i, operandBitIndex);
-        operandBitIndex++;
+        size_t operandBitIndex = bitAssignments.lookup(odsOperandName);
+       // Public operations: check operand version compatibility.
+          auto [majorStr, minorStr] = extractVersionFromOperand(i, opDef);
+          std::string version = majorStr + "." + minorStr;
+          std::string opVersion = extractVersionFromOperation(opDef);
+
+          if (version == opVersion) {
+            // Operand from original operation - simple flag reading.
+            os << llvm::formatv(optionalOdsOperandSegmentTemplate,
+                                odsOperandName, opName, i, operandBitIndex);
+          } else {
+            // Versioned operand - validate flag consistency.
+            std::string templateCode =
+                llvm::formatv(optionalOdsOperandSegmentTemplate, odsOperandName,
+                              opName, i, operandBitIndex)
+                    .str();
+
+            os << llvm::formatv(R"(
+  auto requiredVersionFor_{0} = BytecodeVersion::fromVersion({1}, {2}, 0);
+  assert(requiredVersionFor_{0} && "TableGen should guarantee valid versions");
+  if (bytecodeVersion >= *requiredVersionFor_{0}) {{
+    // Operand supported - read flag normally.
+    {3}  
+  } else {{
+    // Operand not supported in this bytecode version - validate consistency.
+    if (flags & (1ULL << {4}))
+      return reader.emitError() << "malformed bytecode: flag set for operand '{0}' which requires {5} but reading "
+                                << bytecodeVersion.toString() << " bytecode";
+    currentSegmentLengthOds_{6} = 0;
+  }
+)",
+                                odsOperandName, majorStr, minorStr,
+                                templateCode, operandBitIndex, version, i);
+          }
       } else if (isVariadic) {
+        // Read variadic operand size from stream.
         os << llvm::formatv(variadicOdsOperandSegmentTemplate, odsOperandName,
                             opName, i);
       } else {
+        // Required operand: always 1 element.
         os << "  currentSegmentLengthOds_" << i << " = 1;\n";
       }
       // Code to read SSA value indices based on currentSegmentLengthOds_i.
@@ -276,24 +355,26 @@ generateOperandDeserialization(const Operator &opDef, raw_ostream &os,
 
 /// Generates C++ code within the 'parse<OpName>' function to deserialize the
 /// attributes of the given operation by calling the parseOpAttribute helper.
-static void generateAttributeDeserialization(const Operator &op,
-                                             raw_ostream &os) {
-  os << R"(  // --- Deserialize Attributes ---
-  SmallVector<NamedAttribute> attributes;)";
+static void
+generateAttributeDeserialization(const Operator &op, raw_ostream &os,
+                                 const StringMap<size_t> &bitAssignments) {
+  os << R"(
+  // --- Deserialize Attributes ---
+  SmallVector<NamedAttribute> attributes;
+  )";
 
-  int bitIndex = 0;
   for (const NamedAttribute &namedAttr : op.getAttributes()) {
     std::string attrName = namedAttr.name.str();
     std::string varName = "parsed_" + attrName;
-    std::string baseCppTypeStr = namedAttr.attr.getStorageType().str();
+    StringRef baseCppTypeStr = namedAttr.attr.getStorageType();
     bool isOptional = namedAttr.attr.isOptional();
-    bool isUnitAttr = StringRef(baseCppTypeStr).contains("UnitAttr");
+    bool isUnitAttr = baseCppTypeStr.contains("UnitAttr");
 
     // Declare the attribute variable
-    os << llvm::formatv(R"(  {0} {1};)", baseCppTypeStr, varName);
+    os << llvm::formatv(R"(  {0} {1};)", baseCppTypeStr, varName) << "\n";
 
     // Determine expectedType for parseOpAttribute
-    bool isElements = StringRef(baseCppTypeStr).contains("ElementsAttr");
+    bool isElements = baseCppTypeStr.contains("ElementsAttr");
     std::string expectedTypeArg = "nullptr";
     std::string expectedTypeDeclaration;
 
@@ -322,23 +403,77 @@ static void generateAttributeDeserialization(const Operator &op,
     }
     // Emit the expected type declaration if needed.
     os << expectedTypeDeclaration;
-    // Generate parsing logic.
-    if (isOptional) {
-      // Optional attribute - check flags field.
-      os << "  if (flags & (1ULL << " << bitIndex << ")) {\n";
-      if (isUnitAttr)
-        os << llvm::formatv(R"(    {0} = UnitAttr::get(&context);)", varName);
-      else
-        os << llvm::formatv(optionalAttrParseTemplate, varName, baseCppTypeStr,
-                            expectedTypeArg, attrName);
-      os << "  }\n";
-      bitIndex++;
-    } else {
-      // Required attribute - read directly.
-      os << llvm::formatv(requiredAttrParseTemplate, varName, expectedTypeArg,
-                          attrName);
-    }
 
+      os << "  // Public operations: use version checking\n";
+      // For public operations, add version checking.
+      auto [majorStr, minorStr] = extractVersionFromAttribute(namedAttr, op);
+      auto defaultValue = extractDefaultValue(namedAttr);
+      std::string version = majorStr + "." + minorStr;
+
+      os << llvm::formatv(R"(
+  auto requiredVersionFor_{0} = BytecodeVersion::fromVersion({1}, {2}, 0);
+  assert(requiredVersionFor_{0} && "TableGen should guarantee valid versions");
+  if (bytecodeVersion >= *requiredVersionFor_{0}) {{
+)",
+                          attrName, majorStr, minorStr);
+
+      // Generate parsing logic within version check.
+      int bitPos =
+          isOptional ? static_cast<int>(bitAssignments.lookup(attrName)) : -1;
+      generateAttributeParsingLogic(os, varName, expectedTypeArg, attrName,
+                                    baseCppTypeStr, isOptional, isUnitAttr,
+                                    bitPos);
+
+      os << "  } else {\n"
+         << "    // For older bytecode versions, use default value\n";
+      if (defaultValue.has_value()) {
+        // Handle different attribute types with their specific construction
+        // patterns
+        if (baseCppTypeStr.contains("UnitAttr")) {
+          // UnitAttr with false default means don't create the attribute
+          // (nullptr).
+          if (*defaultValue == "false")
+            os << "    " << varName << " = nullptr;\n";
+          else
+            os << "    " << varName << " = ::mlir::UnitAttr::get(&context);\n";
+        } else if (baseCppTypeStr.contains("IntegerAttr")) {
+          // IntegerAttr needs a type.
+          os << "    " << varName << " = ::mlir::IntegerAttr::get("
+             << expectedTypeArg << ", " << *defaultValue << ");\n";
+        } else if (baseCppTypeStr.contains("cuda_tile::")) {
+          // Custom cuda_tile attributes follow the standard pattern.
+          os << "    " << varName << " = " << baseCppTypeStr
+             << "::get(&context, " << *defaultValue << ");\n";
+        } else {
+          PrintFatalError("Versioned attribute type '" + baseCppTypeStr.str() +
+                          "' is not supported. Please add explicit handling in "
+                          "BytecodeReaderGen.cpp for operation '" +
+                          op.getOperationName() + "'");
+        }
+      } else {
+        // No default value available.
+        std::string opVersion = extractVersionFromOperation(op);
+        if (version != opVersion) {
+          // For attributes introduced after the operation itself
+          if (namedAttr.attr.isOptional()) {
+            // Optional attributes should be nullptr (missing) for older
+            // versions
+            os << "    " << varName << " = nullptr;\n";
+          } else {
+            // Required attributes introduced after the operation must have
+            // default value
+            PrintFatalError(
+                "Versioned attribute '" + namedAttr.name + "' in operation '" +
+                op.getOperationName() + "' (since " + version +
+                ") was introduced after the operation itself (since " +
+                opVersion +
+                ") and must have a default value for backward compatibility");
+          }
+        }
+        // Note: Attributes introduced with the operation itself don't need
+        // defaults.
+      }
+      os << "  }\n";
     // Generate attribute addition to the attributes vector.
     os << formatv(R"(  if ({0}) {{
     attributes.emplace_back(innerBuilder.getStringAttr("{1}"), {2});})",
@@ -347,10 +482,12 @@ static void generateAttributeDeserialization(const Operator &op,
   os << "\n";
 }
 
-/// Generates C++ code to deserialize the result types of the operation.
-static void generateResultTypeDeserialization(const Operator &op,
-                                              raw_ostream &os) {
-  std::string opClassName = op.getCppClassName().str();
+/// Generate result deserialization without version checking.
+static void generateSimpleResultDeserialization(const Operator &op,
+                                                raw_ostream &os) {
+  StringRef opClassName = op.getCppClassName();
+  os << "  // Deserialize results directly.\n";
+
   std::string numResultsStr;
   if (op.isVariadic()) {
     os << "  uint64_t numActualResults;\n"
@@ -366,6 +503,130 @@ static void generateResultTypeDeserialization(const Operator &op,
   os << "  // --- Read Result Types ---\n";
   os << llvm::formatv(resultTypeDeserializationTemplate, numResultsStr,
                       opClassName);
+  // For simple deserialization, all results were serialized.
+  os << "  std::optional<size_t> numResultsForValueIndex = std::nullopt;\n";
+}
+
+/// Generate version-aware result deserialization.
+static void generateVersionAwareResultDeserialization(const Operator &op,
+                                                      raw_ostream &os) {
+  StringRef opClassName = op.getCppClassName();
+  os << "  // Public operations: version checking for results.\n";
+
+  std::string opVersion = extractVersionFromOperation(op);
+
+  // Single analysis pass - collect version info for all results.
+  SmallVector<ResultVersionInfo> versionInfos;
+  bool hasVersionedResults = false;
+
+  for (int i = 0; i < op.getNumResults(); ++i) {
+    ResultVersionInfo info(i, op.getResult(i), op, opVersion);
+    if (info.requiresVersionCheck)
+      hasVersionedResults = true;
+    versionInfos.push_back(std::move(info));
+  }
+
+  if (!hasVersionedResults) {
+    // All results from original operation - use simple deserialization.
+    generateSimpleResultDeserialization(op, os);
+    return;
+  }
+
+  os << llvm::formatv(R"(
+  // --- Read Result Types (Version-Aware) ---
+  SmallVector<Type> resultTypes;
+)");
+
+  if (op.isVariadic()) {
+    os << llvm::formatv(R"(
+  uint64_t numSerializedResults;
+  if (failed(reader.readVarInt(numSerializedResults,
+             std::numeric_limits<uint32_t>::max() - 1)))
+    return reader.emitError() << "failed to read number of result types for {0}";
+)",
+                        opClassName);
+  }
+
+  os << llvm::formatv(R"(
+  uint64_t expectedResults = 0;
+  uint64_t resultIndex = 0;
+)");
+
+  for (int i = 0; i < op.getNumResults(); ++i) {
+    const auto &info = versionInfos[i];
+
+    if (!info.requiresVersionCheck) {
+      // Original result always compatible.
+      os << llvm::formatv(R"(
+  ++expectedResults;
+  Type resultType = types.readAndGetType(reader);
+  if (!resultType)
+    return reader.emitError() << "failed to get result type " << resultIndex << " for {0}";
+  resultTypes.push_back(resultType);
+  ++resultIndex;
+)",
+                          opClassName);
+    } else {
+      // Add default result type based on actual type constraint.
+      const auto &result = op.getResult(i);
+      const auto &constraint = result.constraint;
+
+      std::string defaultTypeCode;
+      std::optional<StringRef> builderCall = constraint.getBuilderCall();
+      if (builderCall.has_value()) {
+        FmtContext fctx;
+        fctx.withBuilder("innerBuilder");
+        fctx.addSubst("_ctxt", "&context");
+        defaultTypeCode = "    resultTypes.push_back(" +
+                          tgfmt(*builderCall, &fctx).str() + ");\n";
+      } else {
+        PrintFatalError("Result '" + result.name.str() + "' in operation '" +
+                        op.getOperationName() +
+                        "' has non-buildable type constraint '" +
+                        constraint.getDefName().str() +
+                        "'. Results introduced after operation version must "
+                        "have buildable types.");
+      }
+
+      os << llvm::formatv(
+          R"(
+  auto requiredVersionFor_result_{0} = BytecodeVersion::fromVersion({1}, {2}, 0);
+  assert(requiredVersionFor_result_{0} && "TableGen should guarantee valid versions");
+  if (bytecodeVersion >= *requiredVersionFor_result_{0}) {{
+    ++expectedResults;
+    Type resultType = types.readAndGetType(reader);
+    if (!resultType)
+      return reader.emitError() << "failed to get result type " << resultIndex << " for {3}";
+    resultTypes.push_back(resultType);
+    ++resultIndex;
+  } else {{
+    // Result introduced in newer version.
+{4}  }
+)",
+          info.name, info.majorStr, info.minorStr, opClassName,
+          defaultTypeCode);
+    }
+  }
+
+  if (op.isVariadic()) {
+    os << llvm::formatv(R"(
+  if (numSerializedResults != expectedResults)
+    return reader.emitError() << "result count mismatch for {0}: expected " << expectedResults 
+                              << " compatible results but got " << numSerializedResults;
+)",
+                        opClassName);
+  }
+
+  // For version-aware deserialization, only add serialized results to
+  // valueIndexList. Results introduced in newer versions (with default types)
+  // should not be added to valueIndexList to preserve SSA value numbering.
+  os << "  std::optional<size_t> numResultsForValueIndex = expectedResults;\n";
+}
+
+/// Generates C++ code to deserialize the result types of the operation.
+static void generateResultTypeDeserialization(const Operator &op,
+                                              raw_ostream &os) {
+  generateVersionAwareResultDeserialization(op, os);
 }
 
 /// Generates C++ code within the 'parse<OpName>' function to deserialize the
@@ -384,25 +645,22 @@ static void generateRegionDeserialization(const Operator &op, raw_ostream &os) {
 static void generateOperationDeserialization(const Operator &op,
                                              raw_ostream &os) {
   std::string opName = op.getOperationName();
-  os << llvm::formatv(operationDeserializationTemplate, opName);
+  os << llvm::formatv(operationDeserializationTemplate, opName,
+                      "numResultsForValueIndex");
 }
 
 /// Generates the complete C++ function 'parse<OpName>'.
 static void generateOpReader(const Operator &op, raw_ostream &os) {
   std::string opName = op.getOperationName();
+  auto [bitAssignments, minOptionalVersion] =
+      getVersionOrderedBitAssignments(op);
   os << "// Reader for Op: " << opName << "\n";
-
-  // Collect optional fields.
-  SmallVector<std::string> optionalAttrNames;
-  SmallVector<std::string> optionalOperandNames;
-  collectOptionalFields(op, optionalAttrNames, optionalOperandNames);
 
   generateFunctionSignature(op, os);
   generateResultTypeDeserialization(op, os);
-  generateFlagsFieldDeserialization(op, os, optionalAttrNames,
-                                    optionalOperandNames);
-  generateAttributeDeserialization(op, os);
-  generateOperandDeserialization(op, os, optionalAttrNames);
+  generateFlagsFieldDeserialization(op, os, bitAssignments, minOptionalVersion);
+  generateAttributeDeserialization(op, os, bitAssignments);
+  generateOperandDeserialization(op, os, bitAssignments);
   generateRegionDeserialization(op, os);
   generateOperationDeserialization(op, os);
   os << "  return success();\n"
@@ -431,9 +689,8 @@ static void generateOpReaderDispatch(const RecordKeeper &records,
   os << R"(switch (static_cast<Opcode>(opcode)) {)";
   for (const Record *opDef : opDefs) {
     Operator op(opDef);
-    std::string opClassName = op.getCppClassName().str();
-    StringRef enumName = opClassName;
-    os << llvm::formatv(dispatchCaseTemplate, enumName, opClassName);
+    StringRef opClassName = op.getCppClassName();
+    os << llvm::formatv(dispatchCaseTemplate, opClassName);
   }
   os << R"(  default:
     return reader.emitError() << "unknown or unimplemented opcode: " << static_cast<int>(opcode);})";
@@ -463,10 +720,46 @@ static bool generateBytecodeReader(const RecordKeeper &records,
   return false;
 }
 
+/// Generate type reader bytecode functions.
+static bool generateTypeReaderBytecode(const RecordKeeper &records,
+                                       raw_ostream &os) {
+  // Phase 1: Analysis - parse TableGen records.
+  auto structureOrError = analyzeBytecodeTypes(records);
+  if (failed(structureOrError)) {
+    PrintFatalError("Failed to analyze bytecode types");
+    return true;
+  }
+  const auto &structure = *structureOrError;
+
+  // Phase 2: Generation - use analyzed structure for all outputs.
+  os << "//===-- Begin Type Reader Implementations --===//\n";
+  os << "#ifdef GEN_TYPE_READERS\n\n";
+  generateTypeDeserializers(structure, os);
+  os << "#undef GEN_TYPE_READERS\n";
+  os << "#endif // GEN_TYPE_READERS\n";
+  os << "//===-- End Type Reader Implementations --===//\n\n";
+
+  os << "//===-- Begin Type Reader Dispatch --===//\n";
+  os << "#ifdef GEN_TYPE_READER_DISPATCH\n\n";
+  generateDeserializerDispatch(structure, os);
+  os << "#undef GEN_TYPE_READER_DISPATCH\n";
+  os << "#endif // GEN_TYPE_READER_DISPATCH\n";
+  os << "//===-- End Type Reader Dispatch --===//\n";
+
+  return false;
+}
+
 /// Register the generator.
 static mlir::GenRegistration genCudaTileBytecodeReader(
     "gen-cuda-tile-bytecode-reader",
     "Generate cuda_tile bytecode reader implementations.",
     [](const RecordKeeper &records, raw_ostream &os) {
       return generateBytecodeReader(records, os);
+    });
+
+static mlir::GenRegistration genCudaTileTypeBytecodeReader(
+    "gen-cuda-tile-type-bytecode-reader",
+    "Generate cuda_tile type bytecode reader implementations.",
+    [](const RecordKeeper &records, raw_ostream &os) {
+      return generateTypeReaderBytecode(records, os);
     });

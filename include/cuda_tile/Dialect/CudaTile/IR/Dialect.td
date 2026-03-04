@@ -1,9 +1,12 @@
 //===- Dialect.td - CUDA Tile Dialect Definitions ----------*- tablegen -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef CUDATILE_DIALECT_CUDATILE_IR_DIALECT_TD
 #define CUDATILE_DIALECT_CUDATILE_IR_DIALECT_TD
 
@@ -105,16 +108,20 @@ class CudaTileEnumAttr<EnumAttrInfo enumInfo, string name = "",
                list <Trait> traits = []> : EnumAttr<CudaTile_Dialect, enumInfo, name, traits>;
 
 // Bitwise Arithmetic Operations
-class CudaTileBitwiseOpDef<string mnemonic, string version, list<Trait> traits = []> :
-    CudaTileOpDef<mnemonic, version, "Bitwise", "", traits>;
+class CudaTileBArithOpDef<string mnemonic, string version, list<Trait> traits = []> :
+    CudaTileOpDef<mnemonic, version, "Arithmetic", "Bitwise", traits>;
 
 // Integer Arithmetic Operations
-class CudaTileIntegerOpDef<string mnemonic, string version, list<Trait> traits = []> :
-    CudaTileOpDef<mnemonic, version, "Integer", "", traits>;
+class CudaTileIArithOpDef<string mnemonic, string version, list<Trait> traits = []> :
+    CudaTileOpDef<mnemonic, version, "Arithmetic", "Integer", traits>;
 
 // Floating Point Arithmetic Operations
-class CudaTileFloatingPointOpDef<string mnemonic, string version, list<Trait> traits = []> :
-    CudaTileOpDef<mnemonic, version, "Floating Point", "", traits>;
+class CudaTileFArithOpDef<string mnemonic, string version, list<Trait> traits = []> :
+    CudaTileOpDef<mnemonic, version, "Arithmetic", "Floating Point", traits>;
+
+// Miscellaneous Arithmetic Operations
+class CudaTileMiscArithOpDef<string mnemonic, string version, list<Trait> traits = []> :
+    CudaTileOpDef<mnemonic, version, "Arithmetic", "Misc", traits>;
 
 // Atomic Operations
 class CudaTileAtomicsOpDef<string mnemonic, string version, list<Trait> traits = []> :
@@ -132,6 +139,10 @@ class CudaTileCoreOpDef<string mnemonic, string version, list<Trait> traits = []
 class CudaTileControlFlowOpDef<string mnemonic, string version, list<Trait> traits = []> :
     CudaTileOpDef<mnemonic, version, "Control Flow", "", traits>;
 
+// Math Operations
+class CudaTileMathOpDef<string mnemonic, string version, list<Trait> traits = []> :
+    CudaTileOpDef<mnemonic, version, "Math", "", traits>;
+
 // Memory Operations
 class CudaTileMemOpDef<string mnemonic, string version, list<Trait> traits = []> :
     CudaTileOpDef<mnemonic, version, "Memory", "", traits>;
@@ -139,6 +150,10 @@ class CudaTileMemOpDef<string mnemonic, string version, list<Trait> traits = []>
 // TensorView Operations
 class CudaTileViewOpDef<string mnemonic, string version, list<Trait> traits = []> :
     CudaTileOpDef<mnemonic, version, "Views", "", traits>;
+
+// Tile Operations
+class CudaTileTileOpDef<string mnemonic, string version, list<Trait> traits = []> :
+    CudaTileOpDef<mnemonic, version, "Tile", "", traits>;
 
 // Miscellaneous Operations
 class CudaTileMiscOpDef<string mnemonic, string version, list<Trait> traits = []> :

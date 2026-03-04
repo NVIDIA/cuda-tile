@@ -134,7 +134,6 @@ cuda_tile.module @kernels {
     %c_tensor_f32 = constant <f32: [[1.0, 2.0], [3.0, 4.0]]> : !cuda_tile.tile<2x2xf32>
     // CHECK: %[[c_tensor_f64:.*]] = constant <f64: {{\[\[}}1.000000e+00, 2.000000e+00], [3.000000e+00, 4.000000e+00]]> : tile<2x2xf64>
     %c_tensor_f64 = constant <f64: [[1.0, 2.0], [3.0, 4.0]]> : !cuda_tile.tile<2x2xf64>
-
     // **** f16 input ****
     // CHECK: ftof %[[c5_f16]] : tile<f16> -> tile<bf16>
     %ftof_f16_bf16_s = ftof %c5_f16 : tile<f16> -> tile<bf16>
@@ -144,7 +143,6 @@ cuda_tile.module @kernels {
     %ftof_f16_f64_s = ftof %c5_f16 : tile<f16> -> tile<f64>
     // CHECK: ftof %[[c_tensor_f16]] : tile<2x2xf16> -> tile<2x2xf32>
     %ftof_f16_f32_t = ftof %c_tensor_f16 : tile<2x2xf16> -> tile<2x2xf32>
-
     // **** bf16 input ****
     // CHECK: ftof %[[c5_bf16]] : tile<bf16> -> tile<f16>
     %ftof_bf16_f16_s = ftof %c5_bf16 : tile<bf16> -> tile<f16>
@@ -154,7 +152,6 @@ cuda_tile.module @kernels {
     %ftof_bf16_f64_s = ftof %c5_bf16 : tile<bf16> -> tile<f64>
     // CHECK: ftof %[[c_tensor_bf16]] : tile<2x2xbf16> -> tile<2x2xf32>
     %ftof_bf16_f32_t = ftof %c_tensor_bf16 : tile<2x2xbf16> -> tile<2x2xf32>
-
     // **** f32 input ****
     // CHECK: ftof %[[c5_f32]] : tile<f32> -> tile<f16>
     %ftof_f32_f16_s = ftof %c5_f32 : tile<f32> -> tile<f16>
@@ -168,7 +165,6 @@ cuda_tile.module @kernels {
     %ftof_f32_bf16_t = ftof %c_tensor_f32 : tile<2x2xf32> -> tile<2x2xbf16>
     // CHECK: ftof %[[c_tensor_f32]] : tile<2x2xf32> -> tile<2x2xf64>
     %ftof_f32_f64_t = ftof %c_tensor_f32 : tile<2x2xf32> -> tile<2x2xf64>
-
     // **** f64 input ****
     // CHECK: ftof %[[c5_f64]] : tile<f64> -> tile<f16>
     %ftof_f64_f16_s = ftof %c5_f64 : tile<f64> -> tile<f16>

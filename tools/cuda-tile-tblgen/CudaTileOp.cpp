@@ -2,9 +2,11 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
 // This file implements the CUDA Tile dialect operations.
 //
 //===----------------------------------------------------------------------===//
@@ -27,52 +29,47 @@ namespace tblgen {
 static std::optional<std::string>
 getTraitConstraint(const std::string &traitName) {
   static const std::unordered_map<std::string, std::string> traitMap = {
-      {"NoMemoryEffect",
-       "The operation is pure and does not perform any memory side effects."},
+      {"NoMemoryEffect", "Operation must not perform any memory side effects."},
       {"RecursiveMemoryEffects",
-       "The operation only has an effect if and only if it the region's "
-       "operation have an effect."},
+       "Operation effects must include all nested operations' effects."},
       {"ConstantLike",
-       "The operation has no operands and may be constant folded."},
+       "Operation must have zero operands and be foldable at compile time."},
       {"AlwaysSpeculatableImplTrait",
-       "The operation may be speculatively executed without side effects."},
-      {"ConditionallySpeculatable",
-       "The operation is conditionally speculatable"
-       "based on the specific operands and attributes."},
-      {"InferTypeOpInterface", "The operation's result type may be inferred "
-                               "from its operands and attributes."},
+       "Operation must be safe to execute speculatively without side effects."},
+      {"ConditionallySpeculatable", "Operation speculation safety must be "
+                                    "determined by operands and attributes."},
+      {"InferTypeOpInterface",
+       "Operation must infer result types from operands and attributes."},
       {"IsolatedFromAbove",
-       "The region must not capture SSA values defined above the operation."},
-      {"AutomaticAllocationScope", "The operation must define scope when stack "
-                                   "allocations are freed automatically."},
-      {"SingleBlock", "Each provided region must contain exactly one block."},
+       "Region must not capture SSA values defined above the operation."},
+      {"AutomaticAllocationScope", "Operation must define scope where stack "
+                                   "allocations are automatically freed."},
+      {"SingleBlock", "Each region must contain exactly one block."},
       {"NoRegionArguments", "All regions must have zero arguments."},
       {"NoTerminator",
-       "The region must not require explicit terminator operations."},
+       "Regions must not require explicit terminator operations."},
       {"HasOnlyGraphRegion",
-       "The operation must contain only dataflow graph regions."},
+       "Operation must contain only dataflow Graph regions."},
       {"FunctionOpInterface",
-       "The operation must implement function-like behavior interface."},
-      {"CallOpInterface", "The operation must implement call interface."},
+       "Operation must implement function-like behavior interface."},
+      {"CallOpInterface", "Operation must implement call site interface."},
       {"CallableOpInterface",
-       "The operation must implement callable target interface."},
-      {"Symbol", "The operation must be a symbol in the global symbol table."},
-      {"SymbolTable", "The operation must define a symbol scope."},
+       "Operation must implement callable target interface."},
+      {"Symbol", "Operation must be a symbol in the global symbol table."},
+      {"SymbolTable", "Operation must define a symbol scope."},
       {"OpAsmOpInterface",
-       "The operation must provide custom parsing and printing methods."},
-      {"AttrSizedOperandSegments", "The operation must encode variadic operand "
-                                   "segment sizes in attributes."},
-      {"Elementwise", "The operation must apply element-wise to its operands."},
+       "Operation must provide custom parsing and printing methods."},
+      {"AttrSizedOperandSegments",
+       "Operation must encode variadic operand segment sizes in attributes."},
+      {"Elementwise", "Operation must apply element-wise to its operands."},
       {"SameOperandsShape", "All operands must have identical shapes."},
-      {"Terminator", "The operation must terminate its parent basic block."},
+      {"Terminator", "Operation must terminate its parent basic block."},
       {"RegionKindInterface",
-       "The operation must specify whether regions are SSACFG or Graph kind."},
-      {"MemoryEffectOpInterface",
-       "The operation must declare its memory effects."},
-      {"Pure",
-       "The operation has no side effects and may be speculatively executed."},
+       "Operation must specify whether regions are SSACFG or Graph kind."},
+      {"MemoryEffectOpInterface", "Operation must declare its memory effects."},
+      {"Pure", "Operation must have no side effects and be speculatable."},
       {"SameOperandsAndResultType",
-       "The operation's operands and results all have the same type."}};
+       "All operands and results must have identical types."}};
 
   auto it = traitMap.find(traitName);
   if (it != traitMap.end()) {

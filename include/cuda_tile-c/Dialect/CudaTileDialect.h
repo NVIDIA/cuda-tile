@@ -1,9 +1,12 @@
 //===- CudaTileDialect.h - CUDA Tile C API Dialect Utilities ----*- C++ -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef CUDA_TILE_C_DIALECT_CUDATILEDIALECT_H
 #define CUDA_TILE_C_DIALECT_CUDATILEDIALECT_H
 
@@ -340,15 +343,6 @@ MLIR_CAPI_EXPORTED bool mlirCudaTileOperationIsAModuleOp(MlirOperation op);
 
 /// Returns true if the operation is a standard MLIR ModuleOp.
 MLIR_CAPI_EXPORTED bool mlirOperationIsAModuleOp(MlirOperation op);
-
-/// Applies TileIR optimizations to a cuda_tile module operation.
-/// Returns true on success, false on failure.
-/// Note: This is a high-level function that would need extensive CAPI
-/// infrastructure.
-MLIR_CAPI_EXPORTED bool
-mlirCudaTileApplyOptimizations(MlirOperation moduleOp,
-                               int32_t loopSplitThreshold, bool enableCSE,
-                               bool canonicalizeBefore, bool canonicalizeAfter);
 
 /// Writes a cuda_tile module to bytecode format using a file descriptor.
 /// Returns true on success, false on failure.

@@ -2,9 +2,11 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #include "mlir/Bytecode/BytecodeOpInterface.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -15,6 +17,7 @@
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/FunctionImplementation.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/DebugStringHelper.h"
 #include "mlir/Transforms/InliningUtils.h"
 
@@ -53,6 +56,24 @@ uint64_t cuda_tile::getMaxUnsignedValueForBitwidth(int64_t n) {
   if (n == 64)
     return std::numeric_limits<uint64_t>::max();
   return (static_cast<int64_t>(1) << n) - 1;
+}
+
+cuda_tile::ModuleOp cuda_tile::extractCudaTileModuleOp(Operation *op) {
+  // Try direct cast first
+  if (auto directCudaTileModule = dyn_cast<cuda_tile::ModuleOp>(op))
+    return directCudaTileModule;
+
+  // Try nested case: look inside a regular ModuleOp
+  if (auto moduleOp = dyn_cast<mlir::ModuleOp>(op)) {
+    if (!moduleOp.getBody()->empty()) {
+      if (auto nestedCudaTileModule =
+              dyn_cast<cuda_tile::ModuleOp>(&moduleOp.getBody()->front()))
+        return nestedCudaTileModule;
+    }
+  }
+
+  // Not found
+  return {};
 }
 
 namespace {
@@ -298,13 +319,14 @@ static bool isValidDenseElementType(Type elementType) {
          elementType.isF64() ||                // f64
          elementType.isTF32() ||               // tf32
          isa<Float8E4M3FNType>(elementType) || // f8E4M3FN
-         isa<Float8E5M2Type>(elementType);     // f8E5M2
+         isa<Float8E5M2Type>(elementType) ||   // f8E5M2
+         isa<Float8E8M0FNUType>(elementType); // f8E8M0FNU
 }
 
 // Parse format: constant <f32: 0x7F800000> : tile<f32>
 static ParseResult parseDenseTypedElementsAttr(OpAsmParser &parser,
-                                               DenseTypedElementsAttr &attr,
-                                               Type &resultType) {
+                                                 DenseTypedElementsAttr &attr,
+                                                 Type &resultType) {
   if (parser.parseLess())
     return failure();
 
@@ -576,8 +598,8 @@ static ParseResult parseDenseTypedElementsAttr(OpAsmParser &parser,
 
 // constant <f32: 42.0> : tile<f32>
 static void printDenseTypedElementsAttr(OpAsmPrinter &p, Operation *op,
-                                        DenseTypedElementsAttr attr,
-                                        Type resultType) {
+                                          DenseTypedElementsAttr attr,
+                                          Type resultType) {
   // Print the dense values part (everything before the colon)
   std::string attrStr;
   llvm::raw_string_ostream attrStream(attrStr);
@@ -606,13 +628,14 @@ static void printDenseTypedElementsAttr(OpAsmPrinter &p, Operation *op,
 
 static ParseResult
 parseDenseTypedElementsAttrNoResult(OpAsmParser &parser,
-                                    DenseTypedElementsAttr &attr) {
+                                      DenseTypedElementsAttr &attr) {
   Type resultType;
   return parseDenseTypedElementsAttr(parser, attr, resultType);
 }
 
-static void printDenseTypedElementsAttrNoResult(OpAsmPrinter &p, Operation *op,
-                                                DenseTypedElementsAttr attr) {
+static void
+printDenseTypedElementsAttrNoResult(OpAsmPrinter &p, Operation *op,
+                                      DenseTypedElementsAttr attr) {
   printDenseTypedElementsAttr(p, op, attr, attr.getType());
 }
 
@@ -772,6 +795,22 @@ static ParseResult parseSqrtOpRoundingMode(OpAsmParser &parser,
 static void printSqrtOpRoundingMode(OpAsmPrinter &p, Operation *op,
                                     RoundingModeAttr attr) {
   printRoundingModeIfNotRN(p, op, attr);
+}
+
+static ParseResult parseTanHOpRoundingMode(OpAsmParser &parser,
+                                           RoundingModeAttr &attr) {
+  static const StringRef allowedModes[] = {"approx", "full"};
+  return parseRoundingModeWithModes(parser, attr, allowedModes, nullptr,
+                                    RoundingMode::FULL);
+}
+
+static void printTanHOpRoundingMode(OpAsmPrinter &p, Operation *op,
+                                    RoundingModeAttr attr) {
+  if (attr.getValue() == RoundingMode::FULL)
+    return;
+  p << "rounding<";
+  p << stringifyRoundingMode(attr.getValue());
+  p << ">";
 }
 
 static void printIEEERoundingMode(OpAsmPrinter &p, Operation *op,
@@ -1220,6 +1259,106 @@ cuda_tile::impl::verifyFuncBodyDebugInfo(FunctionOpInterface funcOp) {
 #include "cuda_tile/Dialect/CudaTile/IR/Ops.cpp.inc"
 
 //===----------------------------------------------------------------------===//
+// Common helpers for canonicalization
+//===----------------------------------------------------------------------===//
+
+/// Try to get constant bool defined by given Value
+/// tile<i1> or tile<...xi1> is expected for defining ConstantOp
+static std::optional<bool> getConstantBoolValue(Value value) {
+  auto cond = value.getDefiningOp<ConstantOp>();
+  if (!cond)
+    return std::nullopt;
+  auto type = cond.getType().getElementType();
+  auto intType = llvm::dyn_cast<IntegerType>(type);
+  if (!intType || intType.getWidth() != 1)
+    return std::nullopt;
+  DenseTypedElementsAttr cstAttr = cond.getValue();
+  if (cstAttr.isSplat() || cstAttr.size() == 1)
+    return *cstAttr.getValues<bool>().begin();
+  return std::nullopt;
+}
+
+static inline bool isConstantTrueVal(mlir::Value value) {
+  auto val = getConstantBoolValue(value);
+  return val && *val;
+}
+
+static inline bool isConstantFalseVal(mlir::Value value) {
+  auto val = getConstantBoolValue(value);
+  return val && !(*val);
+}
+
+static bool isConstantOnesValue(mlir::Value value) {
+  auto constVal = value.getDefiningOp<cuda_tile::ConstantOp>();
+  if (!constVal)
+    return false;
+  auto type = constVal.getType().getElementType();
+  auto intType = llvm::dyn_cast<IntegerType>(type);
+  if (!intType)
+    return false;
+  DenseTypedElementsAttr cstAttr = constVal.getValue();
+  if (cstAttr.isSplat() || cstAttr.size() == 1)
+    return (*cstAttr.getValues<APInt>().begin() == 1);
+  return false;
+}
+
+static bool isConstantZeroValue(mlir::Value value) {
+  auto constVal = value.getDefiningOp<cuda_tile::ConstantOp>();
+  if (!constVal)
+    return false;
+  auto type = constVal.getType().getElementType();
+  auto intType = llvm::dyn_cast<IntegerType>(type);
+  if (!intType)
+    return false;
+  DenseTypedElementsAttr cstAttr = constVal.getValue();
+  if (cstAttr.isSplat() || cstAttr.size() == 1)
+    return (*cstAttr.getValues<APInt>().begin() == 0);
+  return false;
+}
+
+// Helper function to insert SelectOp for given cond & values
+static inline Value createSelectOpByType(PatternRewriter &rewriter,
+                                         Location loc, Value cond,
+                                         Value trueVal, Value falseVal) {
+  Type ty = trueVal.getType();
+  // We should call this function only for TileType
+  // TokenType is handled in IfOp canonicalization patterns
+  // and TensorView & TileView types are not supported as IfOp yield types
+  assert(isa<TileType>(ty) && "Only TileType is supported by SelectOp");
+
+  auto tileType = llvm::cast<TileType>(ty);
+  auto shape = tileType.getShape();
+  if (shape.empty())
+    return SelectOp::create(rewriter, loc, cond, trueVal, falseVal);
+
+  auto condType = llvm::cast<TileType>(cond.getType());
+  auto reshape = ReshapeOp::create(
+      rewriter, loc, reshapeTileTypeToRank(condType, tileType.getRank()), cond);
+  auto broadcast =
+      BroadcastOp::create(rewriter, loc, getI1SameShape(tileType), reshape);
+  return SelectOp::create(rewriter, loc, broadcast, trueVal, falseVal);
+}
+
+// Helper function to insert XOrIOp with tile of ones
+static inline Value createXOrForValue(PatternRewriter &rewriter, Location loc,
+                                      Value cond) {
+  auto condType = llvm::cast<TileType>(cond.getType());
+  TileType constType = getI1SameShape(condType);
+  llvm::APInt val(1, 1);
+  auto constAttr = DenseIntElementsAttr::get(constType, val);
+  auto constOp = ConstantOp::create(rewriter, loc, constType, constAttr);
+  return XOrIOp::create(rewriter, loc, cond, constOp);
+}
+
+//===----------------------------------------------------------------------===//
+// TableGen'd canonicalization patterns
+//===----------------------------------------------------------------------===//
+
+namespace {
+#include "OpsCanonicalization.inc"
+} // namespace
+
+//===----------------------------------------------------------------------===//
 // AddFOp
 //===----------------------------------------------------------------------===//
 
@@ -1230,7 +1369,7 @@ static inline LogicalResult verifyIEEERoundingModes(OpTy op) {
                            RoundingMode::NEGATIVE_INF,
                            RoundingMode::POSITIVE_INF},
                           rounding)) {
-    return op.emitOpError("invalid rounding error specified, expect "
+    return op.emitOpError("invalid rounding mode specified, expect "
                           "one of [nearest_even, zero, negative_inf, "
                           "positive_inf]");
   }
@@ -1737,7 +1876,7 @@ LogicalResult DivFOp::verify() {
                            RoundingMode::POSITIVE_INF, RoundingMode::APPROX,
                            RoundingMode::FULL},
                           rounding)) {
-    return emitOpError("invalid rounding error specified, expect "
+    return emitOpError("invalid rounding mode specified, expect "
                        "one of [nearest_even, zero, negative_inf, "
                        "positive_inf, approx, full]");
   }
@@ -1757,7 +1896,7 @@ LogicalResult DivIOp::verify() {
   if (!llvm::is_contained({RoundingMode::ZERO, RoundingMode::NEGATIVE_INF,
                            RoundingMode::POSITIVE_INF},
                           rounding)) {
-    return emitOpError("invalid rounding error specified, expect "
+    return emitOpError("invalid rounding mode specified, expect "
                        "one of [zero, negative_inf, positive_inf]");
   }
   if (rounding == RoundingMode::NEGATIVE_INF &&
@@ -1808,7 +1947,7 @@ LogicalResult ExtractOp::verify() {
 LogicalResult IToFOp::verify() {
   auto rounding = getRoundingMode();
   if (rounding != RoundingMode::NEAREST_EVEN)
-    return emitOpError("invalid rounding error specified. Only "
+    return emitOpError("invalid rounding mode specified. Only "
                        "'nearest_even' is supported");
   return success();
 }
@@ -2019,11 +2158,15 @@ static void printLoopIteratorValues(OpAsmPrinter &p, OperandRange initVals,
 void ForOp::build(
     OpBuilder &builder, OperationState &result, Value lb, Value ub, Value step,
     ValueRange initArgs,
-    function_ref<void(OpBuilder &, Location, Value, ValueRange)> bodyBuilder) {
+    function_ref<void(OpBuilder &, Location, Value, ValueRange)> bodyBuilder,
+    bool unsignedCmp) {
   OpBuilder::InsertionGuard guard(builder);
 
   result.addOperands({lb, ub, step});
   result.addOperands(initArgs);
+  if (unsignedCmp)
+    result.addAttribute(getUnsignedCmpAttrName(result.name),
+                        builder.getUnitAttr());
   Region *bodyRegion = result.addRegion();
   Block *bodyBlock = builder.createBlock(bodyRegion);
   bodyBlock->addArgument(lb.getType(), result.location);
@@ -2061,6 +2204,8 @@ LogicalResult ForOp::verifyRegions() {
 
 void ForOp::print(OpAsmPrinter &p) {
   Value inductionVar = getInductionVar();
+  if (getUnsignedCmp())
+    p << " unsigned";
   p << " " << inductionVar << " in (" << getLowerBound() << " to "
     << getUpperBound() << ", step " << getStep() << ") : ";
   printCudaTileType(p, inductionVar.getType());
@@ -2069,10 +2214,16 @@ void ForOp::print(OpAsmPrinter &p) {
     printLoopIteratorValues(p, initVals, getRegionIterValues());
 
   printControlFlowRegion<ContinueOp>(p, *this, getRegion());
-  p.printOptionalAttrDict((*this)->getAttrs());
+  p.printOptionalAttrDict((*this)->getAttrs(),
+                          /*elidedAttrs=*/{getUnsignedCmpAttrName()});
 }
 
 ParseResult ForOp::parse(OpAsmParser &parser, OperationState &result) {
+  // Parse the optional 'unsigned' keyword.
+  auto attrName = getUnsignedCmpAttrName(result.name);
+  if (succeeded(parser.parseOptionalKeyword("unsigned")))
+    result.addAttribute(attrName, parser.getBuilder().getUnitAttr());
+
   // Parse the induction variable followed by '='.
   OpAsmParser::Argument inductionVariable;
   OpAsmParser::UnresolvedOperand lb, ub, step;
@@ -2145,7 +2296,7 @@ void ForOp::getAsmBlockArgumentNames(Region &region,
 LogicalResult FToIOp::verify() {
   auto rounding = getRoundingMode();
   if (rounding != RoundingMode::NEAREST_INT_TO_ZERO)
-    return emitOpError("invalid rounding error specified. Only "
+    return emitOpError("invalid rounding mode specified. Only "
                        "'nearest_int_to_zero' is supported");
   return success();
 }
@@ -2389,22 +2540,6 @@ Operation *IfOp::getElseTerminator() {
   return elseBlock ? elseBlock->getTerminator() : nullptr;
 }
 
-/// Get constant bool value or std::nullopt if not const
-/// tile<i1> is expected for defining ConstantOp
-static std::optional<bool> getConstantBoolValue(mlir::Value value) {
-  auto cond = value.getDefiningOp<cuda_tile::ConstantOp>();
-  if (!cond)
-    return std::nullopt;
-  auto type = cond.getType().getElementType();
-  auto intType = llvm::dyn_cast<IntegerType>(type);
-  if (!intType || intType.getWidth() != 1)
-    return std::nullopt;
-  DenseTypedElementsAttr cstAttr = cond.getValue();
-  if (cstAttr.size() != 1)
-    return std::nullopt;
-  return *cstAttr.getValues<bool>().begin();
-}
-
 /// Return True if Terminator is ContinueOp/ReturnOp/BreakOp,
 /// so no operation from parent region will be executed after it
 /// Return False if Terminator is YieldOp or null
@@ -2464,8 +2599,7 @@ LogicalResult IfOp::fold(FoldAdaptor adaptor,
   if (!xorStmt)
     return failure();
 
-  auto one = getConstantBoolValue(xorStmt.getRhs());
-  if (!one || !one.value())
+  if (!isConstantTrueVal(xorStmt.getRhs()))
     return failure();
 
   getConditionMutable().assign(xorStmt.getLhs());
@@ -2538,7 +2672,7 @@ struct ConvertToSelect : public OpRewritePattern<IfOp> {
     // there is no need to check thenYieldArgs & elseYieldArgs separately
     if (!llvm::all_of(op->getResultTypes(), [](Type ty) {
           auto tileType = llvm::dyn_cast<TileType>(ty);
-          return tileType && tileType.getShape().empty();
+          return tileType;
         }))
       return failure();
 
@@ -2580,8 +2714,8 @@ struct ConvertToSelect : public OpRewritePattern<IfOp> {
       } else if (trueVal == falseVal)
         results[it.index()] = trueVal;
       else
-        results[it.index()] =
-            SelectOp::create(rewriter, op.getLoc(), cond, trueVal, falseVal);
+        results[it.index()] = createSelectOpByType(rewriter, op.getLoc(), cond,
+                                                   trueVal, falseVal);
     }
 
     if (thenYield) {
@@ -2715,13 +2849,8 @@ struct ReplaceYieldWithValue : public OpRewritePattern<IfOp> {
         continue;
       if (!*trueVal && *falseVal) {
         if (!opResult.use_empty()) {
-          TileType constType = TileType::get({}, rewriter.getI1Type());
-          llvm::APInt val(1, 1);
-          auto constAttr = DenseIntElementsAttr::get(constType, val);
-          auto constOp =
-              ConstantOp::create(rewriter, op->getLoc(), constType, constAttr);
           Value notCond =
-              XOrIOp::create(rewriter, op.getLoc(), op.getCondition(), constOp);
+              createXOrForValue(rewriter, op.getLoc(), op.getCondition());
           opResult.replaceAllUsesWith(notCond);
           changed = true;
         }
@@ -2764,16 +2893,16 @@ struct CombineIfs : public OpRewritePattern<IfOp> {
         nextElse = nextIf.getElseBlock();
     }
     if (XOrIOp notv = nextIf.getCondition().getDefiningOp<XOrIOp>()) {
-      auto one = getConstantBoolValue(notv.getRhs());
-      if (one && one.value() && notv.getLhs() == prevIf.getCondition()) {
+      if (isConstantTrueVal(notv.getRhs()) &&
+          notv.getLhs() == prevIf.getCondition()) {
         nextElse = nextIf.getThenBlock();
         if (!nextIf.getElseRegion().empty())
           nextThen = nextIf.getElseBlock();
       }
     }
     if (XOrIOp notv = prevIf.getCondition().getDefiningOp<XOrIOp>()) {
-      auto one = getConstantBoolValue(notv.getRhs());
-      if (one && one.value() && notv.getLhs() == nextIf.getCondition()) {
+      if (isConstantTrueVal(notv.getRhs()) &&
+          notv.getLhs() == nextIf.getCondition()) {
         nextElse = nextIf.getThenBlock();
         if (!nextIf.getElseRegion().empty())
           nextThen = nextIf.getElseBlock();
@@ -2991,7 +3120,7 @@ struct CombineNestedIfs : public OpRewritePattern<IfOp> {
         return failure();
       // SelectOp can't be inserted for non-TileType value
       auto tileType = llvm::dyn_cast<TileType>(tup.value().getType());
-      if (!tileType || !tileType.getShape().empty())
+      if (!tileType)
         return failure();
       elseYieldsToUpgradeToSelect.push_back(tup.index());
     }
@@ -3007,8 +3136,9 @@ struct CombineNestedIfs : public OpRewritePattern<IfOp> {
     rewriter.setInsertionPoint(newIf);
 
     for (auto idx : elseYieldsToUpgradeToSelect)
-      results[idx] = SelectOp::create(rewriter, op.getLoc(), op.getCondition(),
-                                      thenYield[idx], elseYield[idx]);
+      results[idx] =
+          createSelectOpByType(rewriter, op.getLoc(), op.getCondition(),
+                               thenYield[idx], elseYield[idx]);
 
     rewriter.mergeBlocks(nestedIf.getThenBlock(), newIfBlock);
     rewriter.setInsertionPointToEnd(newIf.getThenBlock());
@@ -3586,6 +3716,18 @@ LogicalResult MulFOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
+// NegIOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult NegIOp::verify() {
+  if (getOverflow() == cuda_tile::IntegerOverflow::NUW) {
+    // The op has signed semantics.
+    return emitOpError() << "'no_unsigned_wrap' overflow flag is not supported";
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // PermuteOp
 //===----------------------------------------------------------------------===//
 
@@ -3635,11 +3777,11 @@ LogicalResult PermuteOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
-// PrintOp
+// PrintOp / PrintTkoOp
 //===----------------------------------------------------------------------===//
 
-/// Extract a format expression from the given string, assuming that the string
-/// begins directly with the expression.
+/// Extract a format expression from the given string, assuming that the
+/// string begins directly with the expression.
 static StringRef extractFormatExpression(StringRef str) {
   assert(str.front() == '%' && "expect format string to start with '%'");
   for (size_t i = 1, e = str.size(); i < e; ++i) {
@@ -3653,7 +3795,7 @@ static StringRef extractFormatExpression(StringRef str) {
   return "";
 }
 
-LogicalResult PrintOp::verify() {
+LogicalResult PrintTkoOp::verify() {
   int expectedNumArgs = 0;
   for (int pos = 0, end = getStr().size(); pos < end; ++pos) {
     if (getStr()[pos] != '%')
@@ -3765,25 +3907,6 @@ static LogicalResult verifyAggregateOpRegions(Operation *op, Region &region,
              << " but got: " << operandTy.getElementType() << " and "
              << termTy.getElementType();
   }
-#ifndef MIX_CUDA_TILE_TILE_AA
-  // We allow only pure cuda_tile operations.
-  Operation *invalidOp = nullptr;
-  WalkResult status = block.walk([&](Operation *nestedOp) {
-    if (!isPure(nestedOp)) {
-      invalidOp = nestedOp;
-      op->emitOpError("only pure operations allowed");
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
-  if (status.wasInterrupted()) {
-    // Do not use invalidOp->emitRemark, as that may trigger recursive
-    // verification of the reduce op again.
-    mlir::emitRemark(invalidOp->getLoc(), "invalid op: ")
-        << invalidOp->getName();
-    return failure();
-  }
-#endif // MIX_CUDA_TILE_TILE_AA
   return success();
 }
 
@@ -4033,6 +4156,230 @@ ScanOp::inferReturnTypes(MLIRContext *context, std::optional<Location> loc,
 }
 
 //===----------------------------------------------------------------------===//
+// SelectOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult SelectOp::verify() {
+  return success();
+}
+
+struct SelectConsts : public OpRewritePattern<SelectOp> {
+  using OpRewritePattern<SelectOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(SelectOp op,
+                                PatternRewriter &rewriter) const override {
+    Value condition = op.getCond();
+    Value trueVal = op.getValIfTrue();
+    Value falseVal = op.getValIfFalse();
+    TileType resTy = op.getType();
+
+    // Constant-fold constant operands over non-splat constant condition.
+    // select %cst_vec, %cst0, %cst1 => %cst2
+    auto cond = condition.getDefiningOp<ConstantOp>();
+    auto lhs = trueVal.getDefiningOp<ConstantOp>();
+    auto rhs = falseVal.getDefiningOp<ConstantOp>();
+    if (!cond || !lhs || !rhs)
+      return failure();
+    auto numElements = lhs.getType().getNumElements();
+    auto type = lhs.getType().getElementType();
+    auto condVals = cond.getValue().getValues<bool>();
+    if (auto intType = llvm::dyn_cast<IntegerType>(type)) {
+      auto lhsVals = lhs.getValue().getValues<llvm::APInt>();
+      auto rhsVals = rhs.getValue().getValues<llvm::APInt>();
+      llvm::SmallVector<llvm::APInt, 8> out;
+      out.reserve(numElements);
+      for (auto [c, l, r] : llvm::zip_equal(condVals, lhsVals, rhsVals))
+        out.push_back(c ? l : r);
+      auto constAttr = DenseIntElementsAttr::get(resTy, out);
+      rewriter.replaceOpWithNewOp<ConstantOp>(op, resTy, constAttr);
+    } else if (auto floatType = llvm::dyn_cast<FloatType>(type)) {
+      auto lhsVals = lhs.getValue().getValues<llvm::APFloat>();
+      auto rhsVals = rhs.getValue().getValues<llvm::APFloat>();
+      llvm::SmallVector<llvm::APFloat, 8> out;
+      out.reserve(numElements);
+      for (auto [c, l, r] : llvm::zip_equal(condVals, lhsVals, rhsVals))
+        out.push_back(c ? l : r);
+      auto constAttr = DenseFPElementsAttr::get(resTy, out);
+      rewriter.replaceOpWithNewOp<ConstantOp>(op, resTy, constAttr);
+    }
+    return success();
+  }
+};
+
+//  select %arg, %c1, %c0 => exti %arg unsigned
+struct SelectToExtI : public OpRewritePattern<SelectOp> {
+  using OpRewritePattern<SelectOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(SelectOp op,
+                                PatternRewriter &rewriter) const override {
+    // Cannot exti i1 to i1, or i1 to f32
+    TileType ty = op.getType();
+    if (!llvm::isa<IntegerType>(ty.getElementType()) ||
+        ty.getElementType().isInteger(1))
+      return failure();
+
+    // Apply the following folding pattern
+    // select %x, c1, %c0 => extui %arg
+    if (isConstantOnesValue(op.getValIfTrue()) &&
+        isConstantZeroValue(op.getValIfFalse())) {
+      rewriter.replaceOpWithNewOp<ExtIOp>(op, ty, op.getCond(),
+                                          Signedness::Unsigned);
+      return success();
+    }
+
+    // Apply the following folding pattern
+    // select %x, c0, %c1 => extui (xor %arg, true)
+    if (isConstantZeroValue(op.getValIfTrue()) &&
+        isConstantOnesValue(op.getValIfFalse())) {
+      rewriter.replaceOpWithNewOp<ExtIOp>(
+          op, ty, createXOrForValue(rewriter, op.getLoc(), op.getCond()),
+          Signedness::Unsigned);
+      return success();
+    }
+    return failure();
+  }
+};
+
+void SelectOp::getCanonicalizationPatterns(RewritePatternSet &results,
+                                           MLIRContext *context) {
+  results.add<SelectI1ToNot, SelectConsts, SelectToExtI>(context);
+}
+
+// 1) select c, x, x => x
+static OpFoldResult tryFoldSelectSameOperands(SelectOp op,
+                                              SelectOp::FoldAdaptor adaptor) {
+  Value t = op.getValIfTrue();
+  Value f = op.getValIfFalse();
+  if (t == f)
+    return t;
+  return {};
+}
+
+// 2) select true, x, y => x
+//    select false, x, y => y
+static OpFoldResult tryFoldSelectConstCondition(SelectOp op,
+                                                SelectOp::FoldAdaptor adaptor) {
+  Value cond = op.getCond();
+  if (isConstantTrueVal(cond))
+    return op.getValIfTrue();
+  if (isConstantFalseVal(cond))
+    return op.getValIfFalse();
+  return {};
+}
+
+// 3) Boolean identity: select c, true, false => c
+//    (Safe because we return an existing value; the inverse case
+//     `select c, false, true => !c` would require creating an op, so leave
+//     that to canonicalization patterns.)
+static OpFoldResult tryFoldSelectBoolIdentity(SelectOp op,
+                                              SelectOp::FoldAdaptor adaptor) {
+  // select %x, true, false => %x
+  Value t = op.getValIfTrue();
+  Value f = op.getValIfFalse();
+  Value cond = op.getCond();
+  auto tileTy = llvm::dyn_cast_or_null<TileType>(op.getType());
+  if (tileTy && tileTy.getElementType().isSignlessInteger(1) &&
+      isConstantTrueVal(t) && isConstantFalseVal(f))
+    return cond;
+  return {};
+}
+
+static OpFoldResult tryFoldSelectWithCmp(SelectOp op,
+                                         SelectOp::FoldAdaptor adaptor) {
+  Value t = op.getValIfTrue();
+  Value f = op.getValIfFalse();
+  Value cond = op.getCond();
+  if (auto cmp = cond.getDefiningOp<CmpIOp>()) {
+    auto pred = cmp.getComparisonPredicate();
+    if (pred == ComparisonPredicate::EQUAL ||
+        pred == ComparisonPredicate::NOT_EQUAL) {
+      auto cmpLhs = cmp.getLhs();
+      auto cmpRhs = cmp.getRhs();
+
+      // Apply the following folding pattern
+      // %0 = cmpi eq, %arg0, %arg1
+      // %1 = select %0, %arg0, %arg1 => %arg1
+
+      // or the following folding pattern
+      // %0 = cmpi ne, %arg0, %arg1
+      // %1 = select %0, %arg0, %arg1 => %arg0
+      if ((cmpLhs == t && cmpRhs == f) || (cmpRhs == t && cmpLhs == f))
+        return pred == ComparisonPredicate::NOT_EQUAL ? t : f;
+    }
+  }
+  return {};
+}
+
+static OpFoldResult tryFoldSelectWithXor(SelectOp op,
+                                         SelectOp::FoldAdaptor adaptor) {
+  Value t = op.getValIfTrue();
+  Value f = op.getValIfFalse();
+  Value cond = op.getCond();
+
+  // ---- Rule: select (xor pred, true), a, b  =>  select pred, b, a
+  // Matches "Arith::SelectNotCond" pattern.
+  if (auto xorOp = cond.getDefiningOp<XOrIOp>()) {
+    Value lhs = xorOp.getLhs();
+    Value rhs = xorOp.getRhs();
+
+    // Recognize "not" encoded as xor with constant true.
+    // Rhs only, XOrIOp is expected to be canonicalized itself
+    if (isConstantTrueVal(rhs)) {
+      // select(not(pred), a, b) -> select(pred, b, a)
+      op.getCondMutable().assign(lhs);
+      // swap true/false arms
+      op.getValIfTrueMutable().assign(f);
+      op.getValIfFalseMutable().assign(t);
+      return op.getResult(); // in-place fold success
+    }
+  }
+  return {};
+}
+
+static OpFoldResult tryFoldSelectWithSelect(SelectOp op,
+                                            SelectOp::FoldAdaptor adaptor) {
+  Value t = op.getValIfTrue();
+  Value f = op.getValIfFalse();
+  Value cond = op.getCond();
+  // ---- Rule: select(pred, select(pred, a, b), c) => select(pred, a, c)
+  // "RedundantSelectTrue"
+  if (auto innerTrueSel = t.getDefiningOp<SelectOp>()) {
+    if (innerTrueSel.getCond() == cond) {
+      op.getValIfTrueMutable().assign(innerTrueSel.getValIfTrue());
+      return op.getResult(); // in-place
+    }
+  }
+
+  // ---- Rule: select(pred, a, select(pred, b, c)) => select(pred, a, c)
+  // "RedundantSelectFalse"
+  if (auto innerFalseSel = f.getDefiningOp<SelectOp>()) {
+    if (innerFalseSel.getCond() == cond) {
+      op.getValIfFalseMutable().assign(innerFalseSel.getValIfFalse());
+      return op.getResult();
+    }
+  }
+
+  return {};
+}
+
+namespace {
+using SelectFoldRuleFn = OpFoldResult (*)(SelectOp, SelectOp::FoldAdaptor);
+
+static constexpr SelectFoldRuleFn kSelectFoldRules[] = {
+    tryFoldSelectSameOperands, tryFoldSelectConstCondition,
+    tryFoldSelectBoolIdentity, tryFoldSelectWithCmp,
+    tryFoldSelectWithXor,      tryFoldSelectWithSelect,
+};
+} // namespace
+
+OpFoldResult SelectOp::fold(FoldAdaptor adaptor) {
+  for (auto rule : kSelectFoldRules)
+    if (OpFoldResult r = rule(*this, adaptor))
+      return r;
+  return {};
+}
+
+//===----------------------------------------------------------------------===//
 // SqrtOp
 //===----------------------------------------------------------------------===//
 
@@ -4043,7 +4390,7 @@ LogicalResult SqrtOp::verify() {
                            RoundingMode::POSITIVE_INF, RoundingMode::APPROX},
                           rounding)) {
     return emitOpError(
-        "invalid rounding error specified, expect "
+        "invalid rounding mode specified, expect "
         "one of [nearest_even, zero, negative_inf, positive_inf, approx]");
   }
 
@@ -4052,6 +4399,22 @@ LogicalResult SqrtOp::verify() {
 
   return verifySqrtFPModifiers(*this, hasIEEERounding, hasApprox,
                                /*full=*/false, getFlushToZero());
+}
+
+//===----------------------------------------------------------------------===//
+// TanHOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult TanHOp::verify() {
+  auto rounding = getRoundingMode();
+  if (!llvm::is_contained({RoundingMode::FULL, RoundingMode::APPROX},
+                          rounding)) {
+    emitOpError(
+        "invalid rounding mode specified, expect one of [approx, full]");
+  }
+
+  bool hasApprox = rounding == RoundingMode::APPROX;
+  return verifyApprox(*this, hasApprox);
 }
 
 //===----------------------------------------------------------------------===//
@@ -4168,11 +4531,11 @@ struct CudaTileinlinerInterface : public DialectInlinerInterface {
       Operation *call,
       iterator_range<Region::iterator> inlinedBlocks) const final {
     // This callback is invoked right before the blocks are inlined into the
-    // position of the call operation. The main thing we're interested in doing
-    // here is checking for the presence of early returns and handling them
-    // appropriately. The rough transformation we do is to wrap the inlined call
-    // into a loop, and transform the early returns into break operations that
-    // exit the loop.
+    // position of the call operation. The main thing we're interested in
+    // doing here is checking for the presence of early returns and handling
+    // them appropriately. The rough transformation we do is to wrap the
+    // inlined call into a loop, and transform the early returns into break
+    // operations that exit the loop.
     Block &block = *inlinedBlocks.begin();
 
     // Walk the body of the inlined block looking for (and rewriting) early
@@ -4206,7 +4569,7 @@ struct CudaTileinlinerInterface : public DialectInlinerInterface {
     builder.setInsertionPointToStart(&block);
     auto loopOp = LoopOp::create(
         builder, block.front().getLoc(), returnOp->getOperandTypes(),
-        /*operands=*/ValueRange(), /*attributes=*/ArrayRef<NamedAttribute>());
+        /*operands=*/ValueRange());
     returnOp->setOperands(loopOp.getResults());
     returnOp->moveAfter(loopOp);
 

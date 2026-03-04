@@ -1,14 +1,20 @@
 //===- SharedVerifiers.h - CUDA Tile Shared Verifiers -----------*- C++ -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef CUDA_TILE_DIALECT_CUDATILE_IR_SHAREDVERIFIERS_H
 #define CUDA_TILE_DIALECT_CUDATILE_IR_SHAREDVERIFIERS_H
 
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/Support/LogicalResult.h"
+
+#include "llvm/Support/LogicalResult.h"
 
 #include "cuda_tile/Dialect/CudaTile/IR/Types.h"
 
@@ -102,6 +108,16 @@ static inline LogicalResult verifyFtz(OpTy op, bool ftz) {
   if (ftz && !ty.isF32())
     return op.emitOpError("flush_to_zero modifier only supported for f32 data "
                           "type, but got: ")
+           << ty;
+  return success();
+}
+
+template <typename OpTy>
+static inline LogicalResult verifyApprox(OpTy op, bool approx) {
+  Type ty = getElementTypeOrSelf(op.getResult().getType());
+  if (approx && !ty.isF32())
+    return op.emitOpError(
+               "approx modifier only supported for f32 data type, but got: ")
            << ty;
   return success();
 }

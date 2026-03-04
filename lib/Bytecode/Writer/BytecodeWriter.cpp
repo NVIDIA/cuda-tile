@@ -2,12 +2,13 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
 // Implements the BytecodeWriter for the cuda_tile dialect, enabling
 // serialization of a cuda_tile module into a custom bytecode format.
-//
 //===----------------------------------------------------------------------===//
 
 #include "cuda_tile/Bytecode/Writer/BytecodeWriter.h"
@@ -18,8 +19,11 @@
 #include "llvm/ADT/TypeSwitch.h"
 
 #include "../BytecodeEnums.h"
+#include "../Common/VersionUtils.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Attributes.h"
+#include "cuda_tile/Dialect/CudaTile/IR/Ops.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Types.h"
+#include <type_traits>
 
 using namespace mlir;
 using namespace mlir::cuda_tile;
@@ -322,6 +326,8 @@ private:
 namespace {
 struct TypeManager {
 public:
+  TypeManager(const BytecodeWriterConfig &config) : config(config) {}
+
   // Gets or creates an index for a type in the type table.
   uint64_t getTypeIndex(Type type) {
     // Use the type's memory address as a unique key for lookup
@@ -386,150 +392,20 @@ public:
   }
 
 private:
-  LogicalResult serializeType(Type type, EncodingWriter &writer) {
-    return TypeSwitch<Type, LogicalResult>(type)
-        .Case<IntegerType>([&](auto t) -> LogicalResult {
-          return serializeIntegerType(t, writer);
-        })
-        .Case<FloatType>([&](auto t) -> LogicalResult {
-          return serializeFloatType(t, writer);
-        })
-        .Case<cuda_tile::TileType>([&](auto t) -> LogicalResult {
-          return serializeTileType(t, writer);
-        })
-        .Case<cuda_tile::PointerType>([&](auto t) -> LogicalResult {
-          return serializePointerType(t, writer);
-        })
-        .Case<cuda_tile::TensorViewType>([&](auto t) -> LogicalResult {
-          return serializeTensorViewType(t, writer);
-        })
-        .Case<cuda_tile::PartitionViewType>([&](auto t) -> LogicalResult {
-          return serializePartitionViewType(t, writer);
-        })
-        .Case<FunctionType>([&](auto t) -> LogicalResult {
-          return serializeFunctionType(t, writer);
-        })
-        .Case([&](cuda_tile::TokenType t) -> LogicalResult {
-          writer.writeVarInt(Bytecode::TypeTag::Token);
-          return success();
-        })
-        .Default([&](Type) -> LogicalResult {
-          return emitError(UnknownLoc::get(type.getContext()),
-                           "unsupported type in bytecode writer");
-        });
+  // Include generated type serialization functions.
+#define GEN_TYPE_WRITERS
+#include "TypeBytecode.inc"
+
+  LogicalResult serializeType(Type type, EncodingWriter &writer){
+  // Generated type serialization dispatch.
+#define GEN_TYPE_WRITER_DISPATCH
+#include "TypeBytecode.inc"
   }
 
-  LogicalResult serializeIntegerType(IntegerType type, EncodingWriter &writer) {
-    unsigned width = type.getWidth();
-    Bytecode::TypeTag typeTag;
-    if (width == 1)
-      typeTag = Bytecode::TypeTag::I1;
-    else if (width == 8)
-      typeTag = Bytecode::TypeTag::I8;
-    else if (width == 16)
-      typeTag = Bytecode::TypeTag::I16;
-    else if (width == 32)
-      typeTag = Bytecode::TypeTag::I32;
-    else if (width == 64)
-      typeTag = Bytecode::TypeTag::I64;
-    else
-      return emitError(UnknownLoc::get(type.getContext()),
-                       "unsupported integer type width");
-    writer.writeVarInt(typeTag);
-    return success();
-  }
-
-  LogicalResult serializeFloatType(FloatType type, EncodingWriter &writer) {
-    unsigned width = type.getWidth();
-    Bytecode::TypeTag typeTag;
-    if (type.isTF32()) {
-      typeTag = Bytecode::TypeTag::TF32;
-    } else if (width == 16) {
-      if (mlir::isa<BFloat16Type>(type))
-        typeTag = Bytecode::TypeTag::BF16;
-      else
-        typeTag = Bytecode::TypeTag::F16;
-    } else if (width == 32) {
-      typeTag = Bytecode::TypeTag::F32;
-    } else if (width == 64)
-      typeTag = Bytecode::TypeTag::F64;
-    else if (width == 8) {
-      if (isa<Float8E4M3FNType>(type))
-        typeTag = Bytecode::TypeTag::F8E4M3FN;
-      else if (isa<Float8E5M2Type>(type))
-        typeTag = Bytecode::TypeTag::F8E5M2;
-      else
-        return emitError(UnknownLoc::get(type.getContext()),
-                         "unsupported float8 type format");
-    } else
-      return emitError(UnknownLoc::get(type.getContext()),
-                       "unsupported float type width");
-    writer.writeVarInt(typeTag);
-    return success();
-  }
-
-  LogicalResult serializeTileType(cuda_tile::TileType type,
-                                  EncodingWriter &writer) {
-    writer.writeVarInt(Bytecode::TypeTag::Tile);
-    // Element type should already be registered in typeIndexMap by getTypeIndex
-    if (failed(writeTypeIndex(type.getElementType(), writer)))
-      return failure();
-    // Write the tile shape
-    ArrayRef<int64_t> shape = type.getShape();
-    writer.writeLEVarSize(shape);
-    return success();
-  }
-
-  LogicalResult serializePointerType(cuda_tile::PointerType type,
-                                     EncodingWriter &writer) {
-    writer.writeVarInt(Bytecode::TypeTag::Pointer);
-    // Pointee type should already be registered in typeIndexMap by getTypeIndex
-    if (failed(writeTypeIndex(type.getPointeeType(), writer)))
-      return failure();
-    return success();
-  }
-
-  LogicalResult serializeTensorViewType(cuda_tile::TensorViewType type,
-                                        EncodingWriter &writer) {
-    writer.writeVarInt(Bytecode::TypeTag::TensorView);
-    // Element type should already be registered
-    if (failed(writeTypeIndex(type.getElementType(), writer)))
-      return failure();
-    // Write the shape
-    ArrayRef<int64_t> shape = type.getShape();
-    writer.writeLEVarSize(shape);
-    // Write the strides
-    ArrayRef<int64_t> strides = type.getStrides();
-    writer.writeLEVarSize(strides);
-
-    return success();
-  }
-
-  LogicalResult serializePartitionViewType(cuda_tile::PartitionViewType type,
-                                           EncodingWriter &writer) {
-    writer.writeVarInt(Bytecode::TypeTag::PartitionView);
-    // Write the tile shape from DenseI32ArrayAttr
-    auto tileShape = type.getTileShape();
-    auto values = tileShape.asArrayRef();
-    writer.writeLEVarSize(values);
-    // TensorView type should already be registered
-    if (failed(writeTypeIndex(type.getTensorView(), writer)))
-      return failure();
-    // Write the dimension map
-    ArrayRef<int32_t> dimMap = type.getDimMap();
-    writer.writeLEVarSize(dimMap);
-    // Write the padding attribute if present.
-    writer.writeByte(type.getPaddingValue() != nullptr);
-    if (type.getPaddingValue())
-      writer.writeVarInt(static_cast<std::underlying_type_t<PaddingValue>>(
-          type.getPaddingValue().getValue()));
-    return success();
-  }
-
-  LogicalResult serializeFunctionType(FunctionType type,
-                                      EncodingWriter &writer) {
+  LogicalResult
+      serializeFunctionType(FunctionType type, EncodingWriter &writer) {
     // Write the function type with tag
-    writer.writeVarInt(Bytecode::TypeTag::Func);
+    writer.writeVarInt(Bytecode::TypeTag::FunctionType);
     // Using VarInt for numParams per spec
     uint64_t numInputs = type.getNumInputs();
     writer.writeVarInt(numInputs);
@@ -574,6 +450,7 @@ private:
 
   llvm::MapVector<const void *, uint64_t> typeIndexMap;
   SmallVector<Type> typeList;
+  const BytecodeWriterConfig &config;
 };
 } // end anonymous namespace
 
@@ -834,6 +711,23 @@ public:
     return success();
   }
 
+  LogicalResult validateDebugInfo(Operation *op) {
+    return validateDebugInfo(op, op->getLoc());
+  }
+
+  LogicalResult validateDebugInfo(Operation *op, Attribute attr) {
+    return TypeSwitch<Attribute, LogicalResult>(attr)
+        .Case<DILocAttr, FileLineColLoc, UnknownLoc>(
+            [&](Attribute attr) { return success(); })
+        .Case([&](CallSiteLoc attr) {
+          if (failed(validateDebugInfo(op, attr.getCaller())) ||
+              failed(validateDebugInfo(op, attr.getCallee())))
+            return failure();
+          return success();
+        })
+        .Default([&](Attribute attr) { return invalidLocError(op, attr); });
+  }
+
 private:
   /// This method gets or creates an index for a debug info attribute.
   uint64_t getDebugInfoIndex(Attribute attr) {
@@ -857,6 +751,19 @@ private:
     diIndexMap[key] = diIndex;
     debuginfoList.push_back(attr);
     return diIndex;
+  }
+
+  LogicalResult invalidLocError(Operation *op, Attribute attr) {
+    return op->emitError()
+           << "unsupported location, got "
+           << TypeSwitch<Attribute, StringRef>(attr)
+                  .Case([&](OpaqueLoc loc) { return "OpaqueLoc"; })
+                  .Case([&](NameLoc loc) { return "NameLoc"; })
+                  .Case([&](FusedLoc loc) { return "FusedLoc"; })
+                  .Case([&](UnknownLoc loc) { return "UnknownLoc"; })
+                  .Case([&](FileLineColLoc loc) { return "FileLineColLoc"; })
+                  .Default([&](Attribute loc) { return "Unknown Attribute"; })
+           << ", expected DILocAttr or CallSiteLoc";
   }
 
   Bytecode::DebugReserved getDebugReserved(Attribute attr) {
@@ -893,7 +800,7 @@ private:
         .Case([&](OpaqueLoc opaqueLoc) {
           getDebugInfoIndex(opaqueLoc.getFallbackLocation());
         })
-        .Default([&](Attribute) -> LogicalResult { return success(); });
+        .Default([](Attribute) {});
   }
 
   // di-compile-unit =:
@@ -983,35 +890,6 @@ private:
     return success();
   }
 
-  // This function canonicalizes a location prior to serialization returning one
-  // of three things:
-  //   1. DILocAttr
-  //   2. CallSiteLoc with both callee / caller a DILocAttr
-  //   3. NULL LocationAttr which indicates location type UnknownLoc
-  LocationAttr canonicalizeLoc(LocationAttr loc) {
-    return TypeSwitch<LocationAttr, LocationAttr>(loc)
-        .Case([&](OpaqueLoc opaqueLoc) {
-          return canonicalizeLoc(opaqueLoc.getFallbackLocation());
-        })
-        .Case([&](NameLoc nameLoc) {
-          return canonicalizeLoc(nameLoc.getChildLoc());
-        })
-        .Case([&](FusedLoc fusedLoc) {
-          for (auto subLoc : fusedLoc.getLocations())
-            if (auto canonicalLoc = canonicalizeLoc(subLoc))
-              return canonicalLoc;
-          return LocationAttr();
-        })
-        .Case([&](CallSiteLoc callSiteLoc) {
-          if (auto canonicalCallee = canonicalizeLoc(callSiteLoc.getCallee()))
-            if (auto canonicalCaller = canonicalizeLoc(callSiteLoc.getCaller()))
-              return CallSiteLoc::get(canonicalCallee, canonicalCaller);
-          return CallSiteLoc();
-        })
-        .Case([&](DILocAttr diLoc) { return diLoc; })
-        .Default([](LocationAttr) { return LocationAttr(); });
-  }
-
   LogicalResult serializeDebugInfo(Attribute attr, EncodingWriter &writer) {
     return TypeSwitch<Attribute, LogicalResult>(attr)
         // Serialize known debug info attributes.
@@ -1019,24 +897,10 @@ private:
               DISubprogramAttr>(
             [&](auto attr) -> LogicalResult { return serialize(attr, writer); })
         // Serialize known locations types.
-        .Case<DILocAttr, CallSiteLoc, FusedLoc, NameLoc, OpaqueLoc>(
-            [&](auto loc) -> LogicalResult {
-              // If the canonicalizer return a DILocAttr or CallSiteLoc then
-              // serialize it the location.
-              if (auto canolicalLoc = canonicalizeLoc(loc))
-                return TypeSwitch<LocationAttr, LogicalResult>(canolicalLoc)
-                    .Case<DILocAttr, CallSiteLoc>(
-                        [&](auto loc) { return serialize(loc, writer); });
-              // If the canonicalizer returns NULL then serialize as Unknown.
-              return serializeUnknown(writer);
-            })
-        // Skip serialization for reserved debug info attributes.
-        .Case<FileLineColLoc, UnknownLoc>(
-            [&](auto loc) -> LogicalResult { return success(); })
-        // Serialize unknown attributes as Unknown.
-        .Default([&](Attribute) -> LogicalResult {
-          return serializeUnknown(writer);
-        });
+        .Case<DILocAttr, CallSiteLoc>(
+            [&](auto loc) { return serialize(loc, writer); })
+        .Case<UnknownLoc, FileLineColLoc>([&](auto loc) { return success(); })
+        .Default([&](Attribute) -> LogicalResult { return failure(); });
   }
 
   StringManager &strMgr;
@@ -1085,24 +949,40 @@ private:
 namespace {
 struct FunctionTableWriter {
   FunctionTableWriter(TypeManager &tm, ConstantManager &cm, StringManager &sm,
-                      DebugInfoWriter &dm)
-      : typeMgr(tm), constMgr(cm), strMgr(sm), debuginfo(dm) {}
+                      DebugInfoWriter &dm, const BytecodeWriterConfig &cfg)
+      : typeMgr(tm), constMgr(cm), strMgr(sm), debuginfo(dm), config(cfg) {}
 
   LogicalResult writeOperation(Operation *op, EncodingWriter &writer) {
     auto opcode = getOpcodeForOperation(op);
     if (!opcode)
       return op->emitError("operation not supported in bytecode (missing from "
                            "BytecodeOpcodes.td)");
+
+    // Version checking for public operations.
+    uint32_t opcodeValue = static_cast<uint32_t>(*opcode);
+    if (!mlir::cuda_tile::detail::isOpcodeAvailableInVersion(
+            opcodeValue, config.bytecodeVersion))
+      return op->emitError() << "operation '" << op->getName().getStringRef()
+                             << "' is not available in bytecode version "
+                             << config.bytecodeVersion.toString();
+
     writer.writeVarInt(*opcode);
+
+    if (failed(debuginfo.validateDebugInfo(op)))
+      return failure();
 
     uint64_t functionLocIndex =
         debuginfo.getOpIndex(op->getParentOfType<FunctionOpInterface>());
     debuginfo.addDebugInfo(functionLocIndex, op->getLoc());
 
-    if (failed(dispatchOpWriter(op, writer, typeMgr, constMgr, strMgr)))
+    auto numSerializedResults =
+        dispatchOpWriter(op, writer, typeMgr, constMgr, strMgr, config);
+    if (failed(numSerializedResults))
       return failure();
-    for (Value result : op->getResults())
-      valueIndexMap[result] = nextValueIndex++;
+    // Only add serialized results to valueIndexMap. Results that were not
+    // serialized (due to version compatibility) should not be indexed.
+    for (size_t i = 0; i < *numSerializedResults; ++i)
+      valueIndexMap[op->getResult(i)] = nextValueIndex++;
     return success();
   }
 
@@ -1124,13 +1004,19 @@ struct FunctionTableWriter {
     }
   }
 
-  // Writes the result types of an operation to the bytecode.
-  LogicalResult writeResultTypes(Operation *op, EncodingWriter &writer,
+  // Writes result types from a TypeRange to the bytecode.
+  LogicalResult writeResultTypes(TypeRange resultTypes, EncodingWriter &writer,
                                  TypeManager &typeMgr) {
-    for (Type type : op->getResultTypes())
+    for (Type type : resultTypes)
       if (failed(typeMgr.writeTypeIndex(type, writer)))
         return failure();
     return success();
+  }
+
+  // Writes the result types of an operation to the bytecode.
+  LogicalResult writeResultTypes(Operation *op, EncodingWriter &writer,
+                                 TypeManager &typeMgr) {
+    return writeResultTypes(op->getResultTypes(), writer, typeMgr);
   }
 
   // Writes the index or inline representation of an attribute.
@@ -1190,7 +1076,8 @@ struct FunctionTableWriter {
                   "failed to write type index for DenseElementsAttr");
           }
 
-          if (auto intOrFPAttr = dyn_cast<DenseTypedElementsAttr>(denseAttr)) {
+          if (auto intOrFPAttr =
+                  dyn_cast<DenseTypedElementsAttr>(denseAttr)) {
             uint64_t constantIndex;
             if (failed(constMgr.addConstant(intOrFPAttr, constantIndex)))
               return op->emitError("failed to add constant attribute '")
@@ -1350,6 +1237,8 @@ struct FunctionTableWriter {
     } else if constexpr (std::is_same_v<std::decay_t<T>,
                                         ::llvm::ArrayRef<int32_t>> ||
                          std::is_same_v<std::decay_t<T>,
+                                        ::llvm::ArrayRef<int64_t>> ||
+                         std::is_same_v<std::decay_t<T>,
                                         ::llvm::ArrayRef<int>>) {
       writer.writeLEVarSize(nativeValue);
       return success();
@@ -1385,15 +1274,18 @@ struct FunctionTableWriter {
 #include "Bytecode.inc"
 
   // Dispatch to the correct op writer.
-  LogicalResult dispatchOpWriter(Operation *op, EncodingWriter &writer,
-                                 TypeManager &typeMgr,
-                                 ConstantManager &constMgr,
-                                 StringManager &strMgr) {
+  // Returns the number of results that were serialized.
+  FailureOr<size_t> dispatchOpWriter(Operation *op, EncodingWriter &writer,
+                                     TypeManager &typeMgr,
+                                     ConstantManager &constMgr,
+                                     StringManager &strMgr,
+                                     const BytecodeWriterConfig &config) {
     // Includes the generated TypeSwitch statement for dispatching to the
-    // appropriate 'write<OpName>' function.
+    // appropriate 'write<OpName>' function. The generated code returns
+    // directly.
 #define GEN_OP_WRITER_DISPATCH
 #include "Bytecode.inc"
-    return success();
+    llvm_unreachable("TypeSwitch should handle all cases");
   }
 
   // Serializes the body of an op with a function interface to bytecode
@@ -1573,6 +1465,7 @@ private:
   ConstantManager &constMgr;
   StringManager &strMgr;
   DebugInfoWriter &debuginfo;
+  const BytecodeWriterConfig &config;
 };
 } // end anonymous namespace
 
@@ -1626,9 +1519,15 @@ writeGlobalSection(raw_ostream &stream, cuda_tile::ModuleOp module,
 // layers.
 //===----------------------------------------------------------------------===//
 
-/// Verify that the given module is self-contained, only containing constructs
-/// that can be serialized into bytecode without external dependencies.
-static LogicalResult verifySelfContainedModule(cuda_tile::ModuleOp module) {
+/// Verify that the given module is self-contained and can be serialized into
+/// bytecode without external dependencies. This function performs two main
+/// checks:
+/// 1. Ensures the module only contains function and global operations at the
+///    top level (no other operation types are allowed in the module body).
+/// 2. Validates invariants for some operations. For example, ReduceOp currently
+///    requires only Pure operation in its region.
+static LogicalResult
+verifySelfContainedModuleAndOperationInvariants(cuda_tile::ModuleOp module) {
   // Validate that we have a self-contained module that matches what we can
   // encode within the bytecode (e.g. no-non functions/globals/etc. nested in
   // the module).
@@ -1644,24 +1543,30 @@ static LogicalResult verifySelfContainedModule(cuda_tile::ModuleOp module) {
 
   // Allow only ops from the CudaTile dialect inside of the module (at any
   // nesting level).
+  auto emitInvalidOpRemark = [&](Operation *invalidOp) {
+    emitRemark(invalidOp->getLoc(), "invalid op: ") << invalidOp->getName();
+  };
+
   Dialect *dialect = module->getDialect();
-  Operation *invalidOp = nullptr;
   WalkResult status = module->walk([&](Operation *op) {
     if (op->getDialect() != dialect) {
-      invalidOp = op;
+      emitInvalidOpRemark(op);
+      module.emitOpError("only ops from the '")
+          << dialect->getNamespace() << "' dialect are allowed";
       return WalkResult::interrupt();
+    }
+    if (op->getParentOfType<cuda_tile::ReduceOp>() ||
+        op->getParentOfType<cuda_tile::ScanOp>()) {
+      if (!isPure(op)) {
+        emitInvalidOpRemark(op);
+        op->getParentOp()->emitOpError("only pure operations allowed");
+        return WalkResult::interrupt();
+      }
     }
     return WalkResult::advance();
   });
-  if (status.wasInterrupted()) {
-    // Do not use invalidOp->emitRemark, as that may trigger recursive
-    // verification of the module again.
-    mlir::emitRemark(invalidOp->getLoc(), "invalid op: ")
-        << invalidOp->getName();
-    return module.emitOpError("only ops from the '")
-           << dialect->getNamespace() << "' dialect are allowed";
-  }
-
+  if (status.wasInterrupted())
+    return failure();
   return success();
 }
 
@@ -1671,7 +1576,7 @@ LogicalResult cuda_tile::writeBytecode(raw_ostream &os,
   // Before trying to write the bytecode, verify that the module is
   // self-contained, meaning it does not have any external dependencies that
   // cannot be serialized into bytecode.
-  if (failed(verifySelfContainedModule(module)))
+  if (failed(verifySelfContainedModuleAndOperationInvariants(module)))
     return failure();
 
   // Write the header of the bytecode file.
@@ -1681,13 +1586,14 @@ LogicalResult cuda_tile::writeBytecode(raw_ostream &os,
 
   // Initialize Managers
   StringManager stringMgr;
-  TypeManager typeMgr;
+  TypeManager typeMgr(config);
   ConstantManager constantMgr;
   DebugInfoWriter debuginfo(stringMgr);
 
   // Collect all function information to populate the type, string, and constant
   // tables
-  FunctionTableWriter funcWriter(typeMgr, constantMgr, stringMgr, debuginfo);
+  FunctionTableWriter funcWriter(typeMgr, constantMgr, stringMgr, debuginfo,
+                                 config);
   if (failed(funcWriter.buildFunctionMap(module)))
     return failure();
   if (failed(writeGlobalSection(os, module, stringMgr, typeMgr, constantMgr,

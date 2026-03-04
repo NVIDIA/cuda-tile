@@ -21,6 +21,7 @@ set(CUDA_TILE_INSTALL_DIR ${CMAKE_INSTALL_PREFIX} CACHE PATH
    "Path to CUDA Tile install directory")
 option(CUDA_TILE_ENABLE_TESTING "Enable CUDA Tile testing" OFF)
 option(CUDA_TILE_ENABLE_CCACHE "Enable ccache for faster rebuilds" OFF)
+option(CUDA_TILE_BUILD_IN_LLVM "Build Cuda Tile as an external project in an LLVM build" OFF)
 
 message(STATUS "CUDA Tile source directory: ${CUDA_TILE_SOURCE_DIR}")
 message(STATUS "CUDA Tile binary directory: ${CUDA_TILE_BINARY_DIR}")
@@ -43,6 +44,12 @@ endif()
 # Project-level compilation flags.
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Add /bigobj flag for Windows to handle large object files
+if(MSVC)
+  string(APPEND CMAKE_CXX_FLAGS " /bigobj")
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /bigobj")
+endif()
+
 # ------------------------------------------------------------------------------
 # TEMPORARY HACKS!
 # ------------------------------------------------------------------------------
@@ -51,30 +58,46 @@ add_definitions(-DUSE_12_9_COMPATIBLE_LLVM=0)
 # ------------------------------------------------------------------------------
 # LLVM/MLIR Configuration
 # ------------------------------------------------------------------------------
-include(cmake/IncludeLLVM.cmake)
+if(NOT CUDA_TILE_BUILD_IN_LLVM)
+  include(cmake/IncludeLLVM.cmake)
 
-# Check that none or either CUDA_TILE_USE_LLVM_INSTALL_DIR or
-# CUDA_TILE_USE_LLVM_SOURCE_DIR is set.
-if (DEFINED CUDA_TILE_USE_LLVM_INSTALL_DIR AND
-    DEFINED CUDA_TILE_USE_LLVM_SOURCE_DIR)
-  message(FATAL_ERROR "Either CUDA_TILE_USE_LLVM_INSTALL_DIR or "
-          "CUDA_TILE_USE_LLVM_SOURCE_DIR may be set, but not both")
+  # Check that none or either CUDA_TILE_USE_LLVM_INSTALL_DIR or
+  # CUDA_TILE_USE_LLVM_SOURCE_DIR is set.
+  if (DEFINED CUDA_TILE_USE_LLVM_INSTALL_DIR AND
+      DEFINED CUDA_TILE_USE_LLVM_SOURCE_DIR)
+    message(FATAL_ERROR "Either CUDA_TILE_USE_LLVM_INSTALL_DIR or "
+            "CUDA_TILE_USE_LLVM_SOURCE_DIR may be set, but not both")
+  endif()
+
+  # Configure build to use a pre-installed version of LLVM or build it from
+  # source by downloading them or using the ones provided by the user.
+  if (CUDA_TILE_USE_LLVM_INSTALL_DIR)
+    configure_pre_installed_llvm()
+  else()
+    configure_llvm_from_sources()
+  endif()
+
+  # Search for the MLIR package based on the previous cmake configuration.
+  message(STATUS "LLVM_CMAKE_DIR: ${LLVM_CMAKE_DIR}")
+  message(STATUS "MLIR_CMAKE_DIR: ${MLIR_CMAKE_DIR}")
+  list(APPEND CMAKE_MODULE_PATH ${LLVM_CMAKE_DIR})
+  list(APPEND CMAKE_MODULE_PATH ${MLIR_CMAKE_DIR})
+  find_package(MLIR REQUIRED CONFIG PATHS ${MLIR_CMAKE_DIR} NO_DEFAULT_PATH)
+
+  # Components needed from LLVM and MLIR.
+  include(TableGen)
+  include(AddLLVM)
+  include(AddMLIR)
+
+  print_llvm_config()
 endif()
 
-# Configure build to use a pre-installed version of LLVM or build it from
-# source by downloading them or using the ones provided by the user.
-if (CUDA_TILE_USE_LLVM_INSTALL_DIR)
-  configure_pre_installed_llvm()
-else()
-  configure_llvm_from_sources()
-endif()
+# Option to disable CAPI targets.
+option(CUDA_TILE_ENABLE_CAPI "Enable CUDA Tile C API" ON)
+option(CUDA_TILE_ENABLE_TOOLS "Enable CUDA Tile tools" ON)
 
-# Search for the MLIR package based on the previous cmake configuration.
-message(STATUS "LLVM_CMAKE_DIR: ${LLVM_CMAKE_DIR}")
-message(STATUS "MLIR_CMAKE_DIR: ${MLIR_CMAKE_DIR}")
-list(APPEND CMAKE_MODULE_PATH ${LLVM_CMAKE_DIR})
-list(APPEND CMAKE_MODULE_PATH ${MLIR_CMAKE_DIR})
-find_package(MLIR REQUIRED CONFIG PATHS ${MLIR_CMAKE_DIR} NO_DEFAULT_PATH)
+message(STATUS "CUDA_TILE_ENABLE_CAPI: ${CUDA_TILE_ENABLE_CAPI}")
+message(STATUS "CUDA_TILE_ENABLE_TOOLS: ${CUDA_TILE_ENABLE_TOOLS}")
 
 # Configure CUDA Tile and MLIR python bindings. These checks need to happen after
 # `find_package(MLIR)` as some MLIR CMake variables can be overridden.
@@ -93,12 +116,6 @@ if (CUDA_TILE_ENABLE_BINDINGS_PYTHON)
   include(MLIRDetectPythonEnv)
   mlir_configure_python_dev_packages()
 endif()
-
-# Components needed from LLVM and MLIR.
-
-include(TableGen)
-include(AddLLVM)
-include(AddMLIR)
 
 # Include directories for LLVM and MLIR.
 include_directories(${LLVM_INCLUDE_DIRS})
@@ -121,10 +138,10 @@ if(CMAKE_CROSSCOMPILING)
     -DCMAKE_C_COMPILER=${NATIVE_C_COMPILER}
     -DCMAKE_CXX_COMPILER=${NATIVE_CXX_COMPILER}
     -DPython3_EXECUTABLE=${Python3_EXECUTABLE}
+    -DCUDA_TILE_ENABLE_TOOLS=${CUDA_TILE_ENABLE_TOOLS}
+    -DCUDA_TILE_ENABLE_CAPI=${CUDA_TILE_ENABLE_CAPI}
   )
 endif()
-
-print_llvm_config()
 
 #-------------------------------------------------------------------------------
 # CUDA Tile Configuration
@@ -171,13 +188,16 @@ endif()
 
 add_subdirectory(include)
 add_subdirectory(lib)
-add_subdirectory(tools)
-if (CUDA_TILE_ENABLE_BINDINGS_PYTHON)
-  add_subdirectory(python)
-endif()
 
 if(CUDA_TILE_ENABLE_TESTING)
   add_subdirectory(test)
+endif()
+
+if (CUDA_TILE_ENABLE_TOOLS)
+  add_subdirectory(tools)
+endif()
+if (CUDA_TILE_ENABLE_BINDINGS_PYTHON)
+  add_subdirectory(python)
 endif()
 
 # ------------------------------------------------------------------------------

@@ -76,6 +76,7 @@ cuda_tile.module @kernels {
     // f64 tests
     // CHECK: %{{.*}} = constant <f64: 1.000000e+00> : tile<f64>
     %5 = constant <f64: 0x3FF0000000000000> : tile<f64>  // 1.0 in f64
+
     return
   }
 }

@@ -14,7 +14,9 @@ testing$func @test_tile_types(
     // CHECK-SAME: tile<2xf32>
     %arg0: !cuda_tile.tile<2xf32>,
     // CHECK-SAME: tile<f32>
-    %arg1: !cuda_tile.tile<f32>) {
+    %arg1: !cuda_tile.tile<f32>
+    )
+    {
   return
 }
 

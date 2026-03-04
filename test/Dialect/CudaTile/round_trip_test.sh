@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -ex # if anything errors, exit
 # Get additional flags (everything after the first two arguments)
 EXTRA_FLAGS="${@:3}"
 

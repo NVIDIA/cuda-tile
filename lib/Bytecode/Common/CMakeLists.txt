@@ -1,5 +1,6 @@
 
 add_mlir_library(CudaTileBytecodeCommon
+  CommandLineOptions.cpp
   Version.cpp
 
   DEPENDS

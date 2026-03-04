@@ -2,9 +2,11 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef CUDA_TILE_BYTECODE_ENUMS_H
 #define CUDA_TILE_BYTECODE_ENUMS_H
 
@@ -39,27 +41,10 @@ enum : uint8_t {
 } // namespace Section
 
 /// Enum representing different type tags in the bytecode.
-enum class TypeTag : uint8_t {
-  I1 = 0,
-  I8 = 1,
-  I16 = 2,
-  I32 = 3,
-  I64 = 4,
-  F16 = 5,
-  BF16 = 6,
-  F32 = 7,
-  TF32 = 8,
-  F64 = 9,
-  F8E4M3FN = 10,
-  F8E5M2 = 11,
-  Pointer = 12,
-  Tile = 13,
-  TensorView = 14,
-  PartitionView = 15,
-  Func = 16,
-  Token = 17,
-  Unknown = 18
-};
+/// This enum is auto-generated from BytecodeTypeOpcodes.td.
+#define GEN_TYPE_TAG_ENUM
+#include "../Writer/TypeBytecode.inc"
+#undef GEN_TYPE_TAG_ENUM
 
 enum class DebugTag : uint8_t {
   Unknown = 0,

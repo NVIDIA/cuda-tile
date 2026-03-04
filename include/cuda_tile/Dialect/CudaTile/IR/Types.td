@@ -1,9 +1,12 @@
 //===- Types.td - CUDA Tile Type Definitions ---------------*- tablegen -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #ifndef CUDATILE_DIALECT_CUDATILE_IR_TYPES_TD
 #define CUDATILE_DIALECT_CUDATILE_IR_TYPES_TD
 
@@ -51,13 +54,15 @@ def CudaTile_Float64  : TypeAlias<F64, "f64">;
 
 def CudaTile_Float8E4M3FN : TypeAlias<F8E4M3FN, "f8E4M3FN">;
 def CudaTile_Float8E5M2   : TypeAlias<F8E5M2, "f8E5M2">;
+def CudaTile_Float8E8M0FNU : TypeAlias<F8E8M0FNU, "f8E8M0FNU">;
 def CudaTile_AnyFloat : AnyTypeOf<[CudaTile_Float16,
                                    CudaTile_BFloat16,
                                    CudaTile_Float32,
                                    CudaTile_TFloat32,
                                    CudaTile_Float64,
                                    CudaTile_Float8E4M3FN,
-                                   CudaTile_Float8E5M2
+                                   CudaTile_Float8E5M2,
+                                   CudaTile_Float8E8M0FNU,
                                   ]> {
   let cppFunctionName = "isAnyFloat";
 }
@@ -81,7 +86,9 @@ def CudaTile_PointerType : CudaTileTypeDef<"Pointer", "ptr", "pointerType"> {
   }];
 
   let builders = [
-    TypeBuilderWithInferredContext<(ins "Type":$pointeeType)>
+    TypeBuilderWithInferredContext<(ins "Type":$pointeeType), [{
+      return $_get(pointeeType.getContext(), pointeeType);
+    }]>
   ];
 
   let parameters = (ins CudaTile_NumberType:$pointeeType);
@@ -181,28 +188,47 @@ def CudaTile_TensorViewType : CudaTileTypeDef<
   let summary = "tensor view type";
 
   let description = [{
-    `!cuda_tile.tensor_view` represents a reference to a tensor in global
+    :code:`!cuda_tile.tensor_view` represents a reference to a tensor in global
     memory.
 
-    It consists of
-      * elementType, the type of the elements in the tensor_view,
-      * shape, an int64_t array, describes the size of each dimension,
-      * strides, an int64_t array, describes the stride of each dimension,
-          corresponding to how many elements are offset in memory when
-          increasing the index on each dimension by one.
+    It consists of:
+    * :code:`elementType`: the type of the elements in the :code:`tensor_view`.
+    * :code`shape`: an integer array that specifies the size of each dimension.
+      Sizes must be strictly positive.
+    * :code:`strides`: an integer array that describes the stride of each
+      dimension. The stride is the number of elements to offset in memory when
+      increasing the corresponding index by one. Strides must be strictly
+      positive.
 
     The shape and the stride can be dynamic on a per-dimension basis. In those
-    cases, their values are printed as `?`.
+    cases, their values are printed as :code:`?`.
 
-    Only power-of-two shape dimensions are supported.
+    .. note::
+
+      Only power-of-two tile dimensions are supported.
 
     Examples:
 
     ```
-      !cuda_tile.tensor_view<1024x1024xf16, strides=[1024,1]>
-      !cuda_tile.tensor_view<32x16x32xf16, strides=[512,1,16]>
-      !cuda_tile.tensor_view<?x?xf16, strides=[?,1]>
-      !cuda_tile.tensor_view<?x16xf32, strides=[1,?]>
+    // A 512x1024 global memory tensor in row-major (lexicographic) order.
+    !cuda_tile.tensor_view<512x1024xf16, strides=[1024, 1]>
+
+    // A 512x1024 global memory tensor in column-major (colexicographic) order.
+    !cuda_tile.tensor_view<512x1024xf16, strides=[1, 512]>
+
+    // A 512x1024 global memory tensor that enumerates the same memory location
+    // multiple times.
+    !cuda_tile.tensor_view<512x1024xf16, strides=[1, 1]>
+
+    // A 32x16x32 global memory tensor that is neither row-major nor
+    // column-major.
+    !cuda_tile.tensor_view<32x16x32xf16, strides=[512, 1, 16]>
+
+    // A ?x? global memory tensor with a unit stride at the last dimension.
+    !cuda_tile.tensor_view<?x?xf16, strides=[?, 1]>
+
+    // A ?x16 global memory tensor with a unit stride at the first dimension.
+    !cuda_tile.tensor_view<?x16xf32, strides=[1, ?]>
     ```
   }];
 
@@ -239,63 +265,149 @@ def CudaTile_PartitionViewType : CudaTileTypeDef<
   let summary = "partition view type";
 
   let description = [{
-    `!cuda_tile.partition_view` represents a view into a tensor_view where
-    tiles are laid out in a grid pattern over the original layout of the
-    tensor_view.
+    :code:`!cuda_tile.partition_view` represents a view into a
+    :code:`tensor_view` where tiles are laid out in a grid pattern across the
+    original :code:`tensor_view`.
 
-    It consists of
-      * tileShape, a dense integer array, describes the shape of tiles in the
-          view,
-      * tensor_view, the type of the tensor_view in which the view is looking,
-      * dimMap, an int32_t array, a mapping from the dimensions of the tiles to
-          the dimensions of the underlying tensor_view.
-      * padding_value, an optional enum, specifying the value that should be
-        loaded for accesses outside of tensor_view bounds.
+    :code:`!cuda_tile.partition_view` is a :code:`TileView` with the following
+    specification:
+    * Index space rank: as many dimensions as the underlying
+      :code:`tensor_view`.
+    * Tile sizes: as specified by :code:`tile_shape`.
 
-    The shape of tiles and associated dimMap are encoded at the type level,
-    while instances of the type carry information about the shape of the
-    associated tensor_view.
-
-    Loading values outside the bounds of the underlying tensor_view is defined
-    and returns the value specified by :code:`padding_value`, or an unspecified
-    value if :code:`padding_value` is not present.
+    It consists of:
+    * :code:`tile_shape`: a dense integer array that describes the shape of the
+      tiles in the view.
+    * :code:`tensor_view`: the type of the :code:`tensor_view` into which the
+      view is looking.
+    * :code:`dim_map`: an integer array that specifies for each tile dimension
+      the corresponding dimension in the underlying :code:`tensor_view`.
+    * :code:`padding_value`: an optional enum, specifying the value that should
+      be used for out-of-bounds accesses (loads) into the :code:`tensor_view`.
 
     Supported padding values include:
-    - :code:`zero`: Zero for out-of-bounds elements
-    - :code:`neg_zero`: Negative zero
-    - :code:`nan`: NaN
-    - :code:`pos_inf`: Positive infinity
-    - :code:`neg_inf`: Negative infinity
+    * :code:`zero`: zero
+    * :code:`neg_zero`: negative zero
+    * :code:`nan`: NaN
+    * :code:`pos_inf`: positive infinity
+    * :code:`neg_inf`: negative infinity
 
-    Only power-of-two tile dimensions are supported.
+    .. note::
 
-    This type is a TileView, with the following specification:
-    - Index space rank: as many dimensions as the attached tensor_view.
-    - Tile size: as specified by tileShape.
+      Only power-of-two tile dimensions are supported.
 
     Examples:
 
     ```
-    !cuda_tile.partition_view<
+    // (1) A view into a 16xf32 tensor_view with a tile size of 2. The table
+    // below visualizes for each element of the tensor_view the corresponding
+    // tile, as indicated by its index.
+    //
+    //                               16
+    // ←─────────────────────────────────────────────────────────────→
+    // (0) (0) (1) (1) (2) (2) (3) (3) (4) (4) (5) (5) (6) (6) (7) (7)
+    //
+    !pv_1d = !cuda_tile.partition_view<
       tile=(2),
       tensor_view=!cuda_tile.tensor_view<16xf32, strides=[1]>
     >
 
-    !cuda_tile.partition_view<
-      tile=(2x2),
-      tensor_view=!cuda_tile.tensor_view<16x16xf32, strides=[16,1]>
+    // (2) A view into a 32x16xf32 tensor_view with a tile size of 4x2. By
+    // convention, in the below table, the Y axis corresponds to the first
+    // tensor_view dimension and the X axis corresponds to the second one.
+    //
+    //                                   16
+    //       ←────────────────────────────────────────────────────────── ...
+    //     ↑ (0,0) (0,0) (0,1) (0,1) (0,2) (0,2) (0,3) (0,3) (0,4) (0,4) ...
+    //     │ (0,0) (0,0) (0,1) (0,1) (0,2) (0,2) (0,3) (0,3) (0,4) (0,4) ...
+    //     │ (0,0) (0,0) (0,1) (0,1) (0,2) (0,2) (0,3) (0,3) (0,4) (0,4) ...
+    //     │ (0,0) (0,0) (0,1) (0,1) (0,2) (0,2) (0,3) (0,3) (0,4) (0,4) ...
+    //  64 │ (1,0) (1,0) (1,1) (1,1) (1,2) (1,2) (1,3) (1,3) (1,4) (1,4) ...
+    //     │ (1,0) (1,0) (1,1) (1,1) (1,2) (1,2) (1,3) (1,3) (1,4) (1,4) ...
+    //     │ (1,0) (1,0) (1,1) (1,1) (1,2) (1,2) (1,3) (1,3) (1,4) (1,4) ...
+    //     │ (1,0) (1,0) (1,1) (1,1) (1,2) (1,2) (1,3) (1,3) (1,4) (1,4) ...
+    //     │ (2,0) (2,0) (2,1) (2,1) (2,2) (2,2) (2,3) (2,3) (2,4) (2,4) ...
+    //    ...
+    //
+    !pv_2d = !cuda_tile.partition_view<
+      tile=(4x2),
+      tensor_view=!cuda_tile.tensor_view<64x16xf32, strides=[16, 1]>
     >
 
-    !cuda_tile.partition_view<
-      tile=(2x2),
-      tensor_view=!cuda_tile.tensor_view<16x16xf32, strides=[16,1]>,
+    // (3) A view into a 32x16xf32 tensor_view with a tile size of 4x2. The
+    // first tile dimension is mapped to the second tensor_view dimension. The
+    // second tile dimension is mapped to the first tensor_view dimension.
+    //
+    //                                   16
+    //       ←────────────────────────────────────────────────────────── ...
+    //     ↑ (0,0) (0,0) (0,0) (0,0) (1,0) (1,0) (1,0) (1,0) (2,0) (2,0) ...
+    //     │ (0,0) (0,0) (0,0) (0,0) (1,0) (1,0) (1,0) (1,0) (2,0) (2,0) ...
+    //     │ (0,1) (0,1) (0,1) (0,1) (1,1) (1,1) (1,1) (1,1) (2,1) (2,1) ...
+    //  64 │ (0,1) (0,1) (0,1) (0,1) (1,1) (1,1) (1,1) (1,1) (2,1) (2,1) ...
+    //     │ (0,2) (0,2) (0,2) (0,2) (1,2) (1,2) (1,2) (1,2) (2,2) (2,2) ...
+    //     │ (0,2) (0,2) (0,2) (0,2) (1,2) (1,2) (1,2) (1,2) (2,2) (2,2) ...
+    //    ...
+    //
+    !pv_2d_transposed = !cuda_tile.partition_view<
+      tile=(4x2),
+      tensor_view=!cuda_tile.tensor_view<64x16xf32, strides=[16, 1]>,
       dim_map=[1, 0]
     >
 
-    !cuda_tile.partition_view<
-      tile=(2x2),
+    // Note: A load from partition_view with non-default dim_map is
+    // semantically identical to a load with default dim_map followed by a
+    // permutation.
+    //
+    // %0 = load_view_tko ... %view[%a, %b]
+    //     : partition_view<tile=(4x2), ..., dim_map=[1, 0]> -> tile<4x2xf32>
+    //
+    // Is identical to:
+    //
+    // %0 = load_view_tko ... %view[%b, %a]
+    //     : partition_view<tile=(2x4), ..., dim_map=[0, 1]> -> tile<2x4xf32>
+    // %1 = permute %0 [1, 0] : tile<2x4xf32> -> tile<4x2xf32>
+    ```
+
+    The partition view index space is determined by the :code:`tile_shape`, the
+    :code:`tensor_view` shape and :code:`dim_map`. In the above examples,
+    :code:`!pv_2d` has an index space shape of :code:`16x8`, whereas
+    :code:`!pv_2d_transposed` has an index space shape of :code:`4x32`.
+
+    Indices into the partition view must lie within the index space of the
+    partition view. Otherwise, the behavior is undefined. For example, loading
+    the tile at index :code:`(0, 8)` from a partition view of type :`!pv_2d` is
+    invalid.
+
+    While partition view indices must be in-bounds, the tile itself may run
+    out-of-bounds. I.e., it may fully or partially overlap with the underlying
+    :code:`tensor_view`. Tiles cannot be fully outside of the underlying
+    :code:`tensor_view` because that would require the partition view indices
+    to lie outside of the the partition view index space.
+    * **Load operations**: If :code:`padding_value` is set, out-of-bounds tile
+      elements yield the padding value. If not set, out-of-bounds elements yield
+      unspecified values.
+    * **Store operations**: Out-of-bounds tile elements are masked during stores.
+
+    Example:
+
+    ```
+    // (4) A view into a 8x2xf32 tensor_view with a tile size of 1x4 and NaN
+    // padding. The right half of the below table consists of padded NaN
+    // values.
+    //
+    //            2
+    //       ←─────────→
+    //     ↑ (0,0) (0,0) (0,0) (0,0)
+    //     │ (1,0) (1,0) (1,0) (1,0)
+    //   8 │ (2,0) (2,0) (2,0) (2,0)
+    //     │ (3,0) (3,0) (3,0) (3,0)
+    //     │ (4,0) (4,0) (4,0) (4,0)
+    //    ...
+    //
+    !pv_2d_padded = !cuda_tile.partition_view<
+      tile=(1x4),
       padding_value = nan,
-      tensor_view=!cuda_tile.tensor_view<16x16xf32, strides=[16,1]>,
+      tensor_view=!cuda_tile.tensor_view<8x2xf32, strides=[2,1]>,
     >
     ```
   }];
@@ -346,13 +458,15 @@ def CudaTile_BaseFloatTileType : CudaTile_TileOf<[
 
 def CudaTile_FloatTileType : CudaTile_TileOf<[
   CudaTile_Float16, CudaTile_BFloat16, CudaTile_Float32, CudaTile_Float64,
-  CudaTile_TFloat32, CudaTile_Float8E4M3FN, CudaTile_Float8E5M2
+  CudaTile_TFloat32, CudaTile_Float8E4M3FN, CudaTile_Float8E5M2,
+  CudaTile_Float8E8M0FNU,
 ]>;
 
 def CudaTile_NumberTileType : CudaTile_TileOf<[
   CudaTile_Int1, CudaTile_Int8, CudaTile_Int16, CudaTile_Int32, CudaTile_Int64,
   CudaTile_Float16, CudaTile_BFloat16, CudaTile_Float32, CudaTile_Float64,
-  CudaTile_TFloat32, CudaTile_Float8E4M3FN, CudaTile_Float8E5M2
+  CudaTile_TFloat32, CudaTile_Float8E4M3FN, CudaTile_Float8E5M2,
+  CudaTile_Float8E8M0FNU,
 ]>;
 
 def CudaTile_PointerTileType : CudaTile_TileOf<[CudaTile_PointerType]>;

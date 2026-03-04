@@ -103,7 +103,7 @@ cuda_tile.module @ftof_no_op {
 cuda_tile.module @ftof_non_float_result {
   cuda_tile.entry @func() {
     %0 = cuda_tile.constant <f16: [1.1, 2.2]> : !cuda_tile.tile<2xf16>
-    // expected-error-re @below{{result #0 must be tile of f16 or bf16 or f32 or f64 or tf32 or f8E4M3FN or f8E5M2 {{(or f4E2M1FN )?}}values}}
+    // expected-error-re @below{{result #0 must be tile of f16 or bf16 or f32 or f64 or tf32 or f8E4M3FN or f8E5M2 or f8E8M0FNU values}}
     cuda_tile.ftof %0 : !cuda_tile.tile<2xf16> -> !cuda_tile.tile<2xi32>
   }
 }
@@ -123,7 +123,7 @@ cuda_tile.module @ftoi_mismatched_shape {
 cuda_tile.module @ftoi_non_float_operand {
   cuda_tile.entry @func() {
     %0 = cuda_tile.constant <i16: [1, 2]> : !cuda_tile.tile<2xi16>
-    // expected-error-re @below{{operand #0 must be tile of f16 or bf16 or f32 or f64 or tf32 or f8E4M3FN or f8E5M2 {{(or f4E2M1FN )?}}values}}
+    // expected-error-re @below{{operand #0 must be tile of f16 or bf16 or f32 or f64 or tf32 or f8E4M3FN or f8E5M2 or f8E8M0FNU values}}
     cuda_tile.ftoi %0 signed : !cuda_tile.tile<2xi16> -> !cuda_tile.tile<2xi32>
   }
 }

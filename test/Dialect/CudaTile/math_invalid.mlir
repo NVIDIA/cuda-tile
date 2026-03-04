@@ -649,7 +649,7 @@ cuda_tile.module @sqrt_invalid_flush_to_zero_f16_element {
   "cuda_tile.module"() <{sym_name = "sqrt_invalid_rnd_modifier"}> ({
     "cuda_tile.testing$func"() <{arg_attrs = [{}], function_type = (!cuda_tile.tile<2x4x8xf32>) -> (), sym_name = "func"}> ({
     ^bb0(%arg0: !cuda_tile.tile<2x4x8xf32>):
-      // expected-error @below{{op invalid rounding error specified, expect one of [nearest_even, zero, negative_inf, positive_inf, approx]}}
+      // expected-error @below{{op invalid rounding mode specified, expect one of [nearest_even, zero, negative_inf, positive_inf, approx]}}
       %0 = "cuda_tile.sqrt"(%arg0) <{rounding_mode = #cuda_tile.rounding<full>}> : (!cuda_tile.tile<2x4x8xf32>) -> !cuda_tile.tile<2x4x8xf32>
       "cuda_tile.return"() : () -> ()
     }) : () -> ()

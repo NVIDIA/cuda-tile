@@ -1,13 +1,15 @@
 //===- BytecodeOpcodes.td - CUDA Tile Bytecode Opcodes -----*- tablegen -*-===//
+//
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
 // Bytecode Opcode Assignments for CudaTile Operations
 // This file defines the explicit opcode assignments to ensure backward
 // compatibility across versions.
-//
 //===----------------------------------------------------------------------===//
 
 #ifndef CUDATILE_DIALECT_CUDATILE_IR_BYTECODE_OPCODES_TD
@@ -39,10 +41,12 @@ class SupportedVersion<int major, int minor> {
 //===----------------------------------------------------------------------===//
 
 def : SupportedVersion<13, 1>;
+def : SupportedVersion<13, 2>;
 
 // Testing versions - only available when TILE_IR_INCLUDE_TESTS is defined
 #ifdef TILE_IR_INCLUDE_TESTS
 def : SupportedVersion<250, 0>;
+def : SupportedVersion<250, 1>;
 #endif // TILE_IR_INCLUDE_TESTS
 
 //===----------------------------------------------------------------------===//
@@ -118,7 +122,7 @@ def : PublicOpcode<CudaTile_OffsetOp, 0x51>;
 def : PublicOpcode<CudaTile_OrIOp, 0x52>;
 def : PublicOpcode<CudaTile_PermuteOp, 0x53>;
 def : PublicOpcode<CudaTile_PowOp, 0x54>;
-def : PublicOpcode<CudaTile_PrintOp, 0x55>;
+def : PublicOpcode<CudaTile_PrintTkoOp, 0x55>;
 def : PublicOpcode<CudaTile_PtrToIntOp, 0x56>;
 def : PublicOpcode<CudaTile_PtrToPtrOp, 0x57>;
 def : PublicOpcode<CudaTile_ReduceOp, 0x58>;
@@ -143,10 +147,13 @@ def : PublicOpcode<CudaTile_TanHOp, 0x6A>;
 def : PublicOpcode<CudaTile_TruncIOp, 0x6B>;
 def : PublicOpcode<CudaTile_XOrIOp, 0x6C>;
 def : PublicOpcode<CudaTile_YieldOp, 0x6D>;
+def : PublicOpcode<CudaTile_Atan2Op, 0x6E>;
 
 #ifdef TILE_IR_INCLUDE_TESTS
 // TESTING OPERATIONS (0x3000+) - Only available when TILE_IR_INCLUDE_TESTS is defined.
+def : PublicOpcode<CudaTile_BytecodeTest_NewAttributeOp, 0x3000>;
 def : PublicOpcode<CudaTile_Test_FuncOp, 0x3001>;
+def : PublicOpcode<CudaTile_BytecodeTest_EvolutionOp, 0x3002>;
 #endif // TILE_IR_INCLUDE_TESTS
 
 #endif // CUDATILE_DIALECT_CUDATILE_IR_BYTECODE_OPCODES_TD

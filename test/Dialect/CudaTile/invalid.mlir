@@ -11,7 +11,7 @@
 // -----
 
 // No MLIR tensor types. Only !cuda_tile.tile is allowed
-// expected-error-re @below{{custom op 'cuda_tile.constant' result #0 must be tile of i1 or i8 or i16 or i32 or i64 or f16 or bf16 or f32 or f64 or tf32 or f8E4M3FN or f8E5M2 {{(or f4E2M1FN )?}}values, but got 'tensor<f32>'}}
+// expected-error-re @below{{custom op 'cuda_tile.constant' result #0 must be tile of i1 or i8 or i16 or i32 or i64 or f16 or bf16 or f32 or f64 or tf32 or f8E4M3FN or f8E5M2 values, but got 'tensor<f32>'}}
 %0 = cuda_tile.constant <f32: 10.0> : tensor<f32>
 
 // -----
@@ -28,7 +28,7 @@
 
 cuda_tile.module @kernels {
   // expected-error @below{{expected valid keyword}}
-  // expected-error-re @below{{failed to verify 'pointeeType': f16 or bf16 or f32 or tf32 or f64 or f8E4M3FN or f8E5M2 {{(or f4E2M1FN )?}}or i1 or i8 or i16 or i32 or i64}}
+  // expected-error-re @below{{failed to verify 'pointeeType': f16 or bf16 or f32 or tf32 or f64 or f8E4M3FN or f8E5M2 or f8E8M0FNU or i1 or i8 or i16 or i32 or i64}}
   testing$func @kernel(%arg0: !cuda_tile.tile<ptr<tile<2x2xf32>>>) {
   }
 }
@@ -79,6 +79,12 @@ cuda_tile.for %iv in (%c0_i32 to %c1_i32, step %c1_i32) : !cuda_tile.tile<i32> {
 
 // -----
 
+%0 = cuda_tile.constant <i16: 1> : !cuda_tile.tile<i16>
+// expected-error @below{{'no_unsigned_wrap' overflow flag is not supported}}
+%1 = cuda_tile.negi %0 overflow<no_unsigned_wrap> : !cuda_tile.tile<i16>
+
+// -----
+
 %c0_i32 = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
 // expected-error @below{{`loop` is missing a valid terminator. `continue` op should have operand types that match the parent loop iter_values: ('!cuda_tile.tile<i32>'), but found: ()}}
 cuda_tile.loop iter_values(%arg0 = %c0_i32) : tile<i32> { }
@@ -109,6 +115,16 @@ cuda_tile.loop {
   // expected-error @below{{operand types must correspond to the parent loop result types}}
   cuda_tile.break %c0_i32 : !cuda_tile.tile<i32>
 }
+
+// -----
+
+%c0_i32 = cuda_tile.constant <i32: 0> : !cuda_tile.tile<1xi32>
+
+// expected-error@+1 {{op operand #0 must be 0D tile of i1 or i8 or i16 or i32 or i64 values, but got '!cuda_tile.tile<1xi32>'}}
+"cuda_tile.for"(%c0_i32, %c0_i32, %c0_i32) ({
+  ^bb0(%i0 : !cuda_tile.tile<1xf32>):
+    cuda_tile.continue
+}) : (!cuda_tile.tile<1xi32>, !cuda_tile.tile<1xi32>, !cuda_tile.tile<1xi32>) -> ()
 
 // -----
 
@@ -145,7 +161,7 @@ cuda_tile.loop {
 // -----
 
 // expected-error @below{{incorrect number of operands: expected 1, found 0}}
-cuda_tile.print "Expect one parameter %i"
+cuda_tile.print_tko "Expect one parameter %i" -> !cuda_tile.token
 
 // -----
 
@@ -154,7 +170,7 @@ cuda_tile.print "Expect one parameter %i"
 
 // -----
 
-// expected-error-re @below{{failed to verify 'elementType': f16 or bf16 or f32 or tf32 or f64 or f8E4M3FN or f8E5M2 {{(or f4E2M1FN )?}}or i1 or i8 or i16 or i32 or i64 or Pointer type}}
+// expected-error-re @below{{failed to verify 'elementType': f16 or bf16 or f32 or tf32 or f64 or f8E4M3FN or f8E5M2 or f8E8M0FNU or i1 or i8 or i16 or i32 or i64 or Pointer type{{( or cuda_tile.program_id type)?}}}}
 %1 = "use_type"() : () -> !cuda_tile.tile<8x4xi28>
 
 // -----
@@ -456,7 +472,7 @@ cuda_tile.module @kernels {
 // -----
 cuda_tile.module @kernels {
   testing$func @mmaf_int_types(%arg0: !cuda_tile.tile<2x2xi8>, %arg1: !cuda_tile.tile<2x2xi8>, %arg2: !cuda_tile.tile<2x2xi32>) {
-    // expected-error-re @below{{op operand #0 must be mmaf operand tile type of f16 or bf16 or f32 or f64 or tf32 or f8E4M3FN or f8E5M2 {{(or f4E2M1FN )?}}values, but got '!cuda_tile.tile<2x2xi8>'}}
+    // expected-error-re @below{{op operand #0 must be mmaf operand tile type of f16 or bf16 or f32 or f64 or tf32 or f8E4M3FN or f8E5M2 values, but got '!cuda_tile.tile<2x2xi8>'}}
     %0 = cuda_tile.mmaf %arg0, %arg1, %arg2 : !cuda_tile.tile<2x2xi8>, !cuda_tile.tile<2x2xi8>, !cuda_tile.tile<2x2xi32>
   }
 }
@@ -961,23 +977,6 @@ cuda_tile.module @kernels {
 // -----
 
 cuda_tile.module @kernels {
-  testing$func @reduce_operation(%arg0: !cuda_tile.tile<8xf32>, %arg1: !cuda_tile.tile<8xf32>) {
-    // expected-error @below{{only pure operations allowed}}
-    %0:2 = cuda_tile.reduce %arg0, %arg1
-    dim=0 identities=[0.000000e+0 : f32, 0.000000e+0 : f32]
-    : !cuda_tile.tile<8xf32>, !cuda_tile.tile<8xf32> -> !cuda_tile.tile<f32>, !cuda_tile.tile<f32>
-    (%arg0_iter_arg : !cuda_tile.tile<f32>, %arg0_prev_iter_arg : !cuda_tile.tile<f32>,
-     %arg1_iter_arg : !cuda_tile.tile<f32>, %arg1_prev_iter_arg : !cuda_tile.tile<f32>) {
-      // expected-remark @below{{invalid op}}
-      cuda_tile.print "hello_world"
-      cuda_tile.yield %arg0_iter_arg, %arg1_iter_arg : !cuda_tile.tile<f32>, !cuda_tile.tile<f32>
-    }
-  }
-}
-
-// -----
-
-cuda_tile.module @kernels {
   testing$func @reduce_operation(%arg0: !cuda_tile.tile<8xf32>, %arg1: !cuda_tile.tile<8xi32>) {
     // expected-error @below{{'cuda_tile.reduce' op dimension (10) is out of bound [0, 1)}}
     %0:2 = cuda_tile.reduce %arg0, %arg1
@@ -1193,23 +1192,6 @@ cuda_tile.module @kernels {
     (%arg0_iter_arg : !cuda_tile.tile<f32>, %arg0_prev_iter_arg : !cuda_tile.tile<f32>,
      %arg1_iter_arg : !cuda_tile.tile<i32>, %arg1_prev_iter_arg : !cuda_tile.tile<i32>) {
       cuda_tile.yield %arg0_iter_arg, %arg1_iter_arg : !cuda_tile.tile<f32>, !cuda_tile.tile<i32>
-    }
-  }
-}
-
-// -----
-
-cuda_tile.module @kernels {
-  testing$func @scan_operation(%arg0: !cuda_tile.tile<8xf32>, %arg1: !cuda_tile.tile<8xf32>) {
-    // expected-error @below{{only pure operations allowed}}
-    %0:2 = cuda_tile.scan %arg0, %arg1
-    dim=0 reverse=false identities=[0.000000e+0 : f32, 0.000000e+0 : f32]
-    : !cuda_tile.tile<8xf32>, !cuda_tile.tile<8xf32> -> !cuda_tile.tile<8xf32>, !cuda_tile.tile<8xf32>
-    (%arg0_iter_arg : !cuda_tile.tile<f32>, %arg0_prev_iter_arg : !cuda_tile.tile<f32>,
-     %arg1_iter_arg : !cuda_tile.tile<f32>, %arg1_prev_iter_arg : !cuda_tile.tile<f32>) {
-      // expected-remark @below{{invalid op}}
-      cuda_tile.print "hello_world"
-      cuda_tile.yield %arg0_iter_arg, %arg1_iter_arg : !cuda_tile.tile<f32>, !cuda_tile.tile<f32>
     }
   }
 }
@@ -1707,7 +1689,7 @@ cuda_tile.loop {
 %if_val = cuda_tile.if %cond -> (!cuda_tile.tile<i32>) {
   cuda_tile.yield %value : !cuda_tile.tile<i32>
 } else {
-  cuda_tile.print "if else"
+  cuda_tile.print_tko "if else" -> !cuda_tile.token
 }
 
 // -----
@@ -1718,7 +1700,7 @@ cuda_tile.loop {
 cuda_tile.if %cond {
   cuda_tile.yield %value : !cuda_tile.tile<i32>
 } else {
-  cuda_tile.print "if else"
+  cuda_tile.print_tko "if else" -> !cuda_tile.token
 }
 
 // -----
@@ -1727,7 +1709,7 @@ cuda_tile.if %cond {
 %value = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
 // expected-error @below{{op does not return a value, but else branch yields '!cuda_tile.tile<i32>'}}
 cuda_tile.if %cond {
-  cuda_tile.print "if then"
+  cuda_tile.print_tko "if then" -> !cuda_tile.token
 } else {
   cuda_tile.yield %value : !cuda_tile.tile<i32>
 }
@@ -2159,7 +2141,7 @@ cuda_tile.module @get_num_tile_blocks_invalid_type {
 cuda_tile.module @print_expected_attribute_value {
   cuda_tile.entry @func() {
     // expected-error @below{{expected attribute value}}
-    cuda_tile.print : !cuda_tile.tile<2xf16>
+    cuda_tile.print_tko : !cuda_tile.tile<2xf16> -> !cuda_tile.token
   }
 }
 
@@ -2169,7 +2151,7 @@ cuda_tile.module @print_invalid_operand {
   cuda_tile.entry @func() {
     %0 = cuda_tile.constant <f16: [1.1, 2.2]> : !cuda_tile.tile<2xf16>
     // expected-error @below{{incorrect number of operands: expected 2, found 1}}
-    cuda_tile.print "hello_world, %f, %f", %0 : !cuda_tile.tile<2xf16>
+    cuda_tile.print_tko "hello_world, %f, %f", %0 : !cuda_tile.tile<2xf16> -> !cuda_tile.token
   }
 }
 
@@ -2179,7 +2161,7 @@ cuda_tile.module @print_invalid_format_string {
   cuda_tile.entry @func() {
     %0 = cuda_tile.constant <f16: [1.1, 2.2]> : !cuda_tile.tile<2xf16>
     // expected-error @below{{found unterminated format expression}}
-    cuda_tile.print "hello_world, %", %0 : !cuda_tile.tile<2xf16>
+    cuda_tile.print_tko "hello_world, %", %0 : !cuda_tile.tile<2xf16> -> !cuda_tile.token
   }
 }
 
@@ -2329,7 +2311,7 @@ cuda_tile.testing$func @ftoi_test(%arg0: !cuda_tile.tile<2x2xf32>) -> !cuda_tile
 // -----
 
 cuda_tile.testing$func @itof_test(%arg0: !cuda_tile.tile<2x2xi32>) -> !cuda_tile.tile<2x2xf32> {
-  // expected-error @below {{op invalid rounding error specified. Only 'nearest_even' is supported}}
+  // expected-error @below {{op invalid rounding mode specified. Only 'nearest_even' is supported}}
   %f = itof %arg0 unsigned rounding<negative_inf> : tile<2x2xi32> -> tile<2x2xf32>
   cuda_tile.return %f : tile<2x2xf32>
 }
@@ -2350,3 +2332,4 @@ cuda_tile.entry @tensor_view_store_dynamic(%tensor_view: !cuda_tile.tensor_view<
     : !cuda_tile.tensor_view<?x4096xf64, strides=[4096,1]> 
     -> !cuda_tile.partition_view<tile=(1024x1024), tensor_view<?x4096xf64, strides=[4096,1]>>
 }
+

@@ -51,3 +51,12 @@ cuda_tile.module @occupancy_invalid {
     return
   }
 }
+
+// -----
+
+cuda_tile.module @ampere_invalid_cta {
+  // expected-error @below{{custom op 'cuda_tile.entry' expected 1 for sm_80.num_cta_in_cga}}
+  entry @test_optimization_hints(%arg0: !cuda_tile.tile<ptr<f32>>) optimization_hints=<sm_80={num_cta_in_cga=2}> {
+    return
+  }
+}

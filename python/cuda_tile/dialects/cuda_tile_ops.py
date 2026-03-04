@@ -19,6 +19,13 @@ from . import _cuda_tile_ops_gen as _cuda_tile
 from .._mlir_libs import _cuda_tile as _cuda_tile_capi
 
 
+# =============================================================================
+# Minimal Element Type Wrappers (for MmaDescriptor and make_tile_type)
+# =============================================================================
+# These provide simple wrappers with .mlir_type property for user-facing APIs.
+# CUDA Tile code should use MLIR types directly where possible.
+
+
 class _ElementTypeMeta(type):
     """Metaclass providing mlir_type as a class property."""
 
@@ -1326,6 +1333,18 @@ def broadcast(shape: List[int], source: Tile, *, loc=None, ip=None) -> Tile:
     """Broadcasts the source tile to the given shape."""
     result_type = TileType.get(shape, source.element_type)
     return return_results(_cuda_tile.BroadcastOp(result_type, source, loc=loc, ip=ip))
+
+
+@cuda_tile_op
+def print_tko(str, args: Iterable[Tile], *, input_token=None, loc=None, ip=None):
+    """Prints the provided string and arguments to the output."""
+    if not all(isinstance(arg, Tile) for arg in args):
+        raise TypeError(
+            "All elements in 'args' must be of type Tile. Constexpr cannot be printed direclty."
+        )
+    return return_results(
+        _cuda_tile.PrintTkoOp(str, args, token=input_token, loc=loc, ip=ip)
+    )
 
 
 @cuda_tile_op

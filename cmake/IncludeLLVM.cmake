@@ -81,9 +81,6 @@ macro(configure_llvm_from_sources)
   set(LLVM_ENABLE_ASSERTIONS OFF CACHE BOOL "")
   set(LLVM_ENABLE_PROJECTS "mlir" CACHE STRING "")
   set(LLVM_TARGETS_TO_BUILD "" CACHE STRING "")
-  # Disable PCH to avoid flag mismatches between LLVM and CUDA Tile targets
-  # (e.g. NDEBUG differences).
-  set(CMAKE_DISABLE_PRECOMPILE_HEADERS ON)
   set(LLVM_BUILD_UTILS ON CACHE BOOL "")
   set(LLVM_INSTALL_UTILS ON CACHE BOOL "")
 
@@ -140,7 +137,6 @@ macro(configure_pre_installed_llvm)
               " a pre-built version of LLVM and CUDA_TILE_ENABLE_TESTING is enabled")
     endif()
   endif()
-
 
   # Install LLVM tools to third_party/llvm/bin.
   if (CUDA_TILE_ENABLE_TESTING)

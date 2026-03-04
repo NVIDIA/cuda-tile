@@ -1,11 +1,16 @@
-//===- CudaTileAttr.h - CUDA Tile IR Attribute wrapper for TableGen ----*- C++
-//-*-===//
+//===- CudaTileAttr.h - CUDA Tile IR Attr TableGen Wrapper ------*- C++ -*-===//
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file defines the CUDA Tile IR Attribute wrapper for TableGen.
+//
+//===----------------------------------------------------------------------===//
+
 #ifndef CUDA_TILE_TOOLS_CUDATILETBLGEN_TILEIRATTR_H_
 #define CUDA_TILE_TOOLS_CUDATILETBLGEN_TILEIRATTR_H_
 
