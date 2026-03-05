@@ -1,0 +1,10 @@
+10 REM Array sum example
+20 DIM A(5)
+30 DATA 10, 20, 30, 40, 50
+40 LET SUM = 0
+50 FOR I = 1 TO 5
+60   READ X
+70   LET SUM = SUM + X
+80 NEXT I
+90 PRINT "Sum = "; SUM
+100 END

@@ -1,0 +1,6 @@
+10 REM Vector Add: C = A + B
+20 DIM A(128), B(128), C(128)
+30 INPUT A(), B()
+40 LET C(BID) = A(BID) + B(BID)
+50 OUTPUT C
+60 END
