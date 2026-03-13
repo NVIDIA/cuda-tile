@@ -935,10 +935,10 @@ def CudaTile_ConstantOp : CudaTileCoreOpDef<"constant", "13.1",
     The annotated type of the tile constrains its rank, shape, and element type.
   }];
 
-  let arguments = (ins CudaTileArg<Builtin_DenseIntOrFPElementsAttr, "The constant value to create.", "13.1">:$value);
+  let arguments = (ins CudaTileArg<Builtin_DenseTypedElementsAttr, "The constant value to create.", "13.1">:$value);
   let results = (outs CudaTileArg<CudaTile_NumberTileType, "The constant tile.", "13.1">:$result);
   let hasFolder = 1;
-  let assemblyFormat = [{ custom<DenseIntOrFPElementsAttr>($value, type($result)) attr-dict }];
+  let assemblyFormat = [{ custom<DenseTypedElementsAttr>($value, type($result)) attr-dict }];
 
   let mlirExamples = [[{
     # cuda_tile.module @module {
@@ -1958,10 +1958,10 @@ def CudaTile_GlobalOp : CudaTileCoreOpDef<"global", "13.1", [Symbol]> {
   }]];
 
   let arguments = (ins CudaTileArg<SymbolNameAttr, "The name of the global variable.", "13.1">:$sym_name,
-                       CudaTileArg<Builtin_DenseIntOrFPElementsAttr, "The value to initialize the allocation with.", "13.1">:$value,
+                       CudaTileArg<Builtin_DenseTypedElementsAttr, "The value to initialize the allocation with.", "13.1">:$value,
                        CudaTileArg<DefaultValuedAttr<I64Attr, "0">, "The alignment of the buffer.", "13.1">:$alignment);
 
-  let assemblyFormat = "$sym_name (`alignment` `=` $alignment^)? attr-dict custom<DenseIntOrFPElementsAttrNoResult>($value)";
+  let assemblyFormat = "$sym_name (`alignment` `=` $alignment^)? attr-dict custom<DenseTypedElementsAttrNoResult>($value)";
   let hasVerifier = 1;
 }
 

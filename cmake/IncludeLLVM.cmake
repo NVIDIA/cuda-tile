@@ -26,7 +26,7 @@ macro(download_llvm_sources)
   include(FetchContent)
 
   set(LLVM_GIT_REPO "https://github.com/llvm/llvm-project.git")
-  set(LLVM_BUILD_COMMIT_HASH 5a4a5db4776f50a43624392eb2e18863504e5372)
+  set(LLVM_BUILD_COMMIT_HASH 13c00cbc2aa2ddc9aae2e72b02bc6cb2a482e0e7)
   message(STATUS "Downloading LLVM sources from ${LLVM_GIT_REPO}@${LLVM_BUILD_COMMIT_HASH} to ${LLVM_SOURCE_DIR}")
 
   # Set FetchContent directories. SOURCE_DIR and BINARY_DIR and SUBBUILD_DIR

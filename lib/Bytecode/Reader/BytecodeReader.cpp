@@ -936,7 +936,7 @@ public:
       // Convert endianess.
       SmallVector<char, 64> outDataVec(rawData.size());
       MutableArrayRef<char> convRawData(outDataVec);
-      DenseIntOrFPElementsAttr::convertEndianOfArrayRefForBEmachine(
+      DenseTypedElementsAttr::convertEndianOfArrayRefForBEmachine(
           rawData, convRawData, tileType);
       attr = DenseElementsAttr::getFromRawBuffer(tileType, convRawData);
     } else {
@@ -1810,7 +1810,7 @@ class InstructionParser {
                                        "self-contained DenseElementsAttr";
       }
 
-      if (std::is_same_v<T, DenseIntOrFPElementsAttr>) {
+      if (std::is_same_v<T, DenseTypedElementsAttr>) {
         if (failed(parseConstantAttrIndex(reader, context, expectedType,
                                           constants, constCache, parsedAttr)))
           return failure();
@@ -1819,8 +1819,9 @@ class InstructionParser {
           return reader.emitError() << "parsed constant attribute is not the "
                                        "expected type derived "
                                        "from DenseElementsAttr";
-      } else
+      } else {
         return reader.emitError() << "unknown DenseElementsAttr based Attr";
+      }
       return success();
     } else if constexpr (std::is_same_v<
                              T,
@@ -2501,11 +2502,11 @@ createGlobal(const GlobalInfo &globalInfo, OpBuilder &builder,
   if (failed(valueAttr))
     return failure();
 
-  auto denseValueAttr = dyn_cast<DenseIntOrFPElementsAttr>(*valueAttr);
+  auto denseValueAttr = dyn_cast<DenseTypedElementsAttr>(*valueAttr);
   if (!denseValueAttr)
     return reader.emitError()
            << "parsed global constant attribute is not the expected type "
-              "derived from DenseIntOrFPElementsAttr";
+              "derived from DenseTypedElementsAttr";
 
   // Global variables must not have DILocAttr location type because CudaTile
   // supports only local scope. Therefore, global variables must have UnknownLoc
