@@ -1,0 +1,127 @@
+Architecture
+============
+
+basic_tile compiles BASIC source code through a multi-stage pipeline, with two
+paths to GPU execution.
+
+Pipeline Overview
+-----------------
+
+.. code-block:: text
+
+   .bas Source
+       │
+       ▼
+   ┌────────┐
+   │ Lexer  │  tokens.py, lexer.py
+   └───┬────┘
+       │  list[Token]
+       ▼
+   ┌────────┐
+   │ Parser │  ast_nodes.py, parser.py
+   └───┬────┘
+       │  Program (AST)
+       ▼
+   ┌──────────┐
+   │ Analyzer │  analyzer.py
+   └───┬──────┘
+       │  AnalyzedProgram
+       ▼
+   ┌───────────────────────────────────┐
+   │         Two Compilation Paths      │
+   │                                    │
+   │  ┌──────────┐    ┌──────────────┐ │
+   │  │ Codegen  │    │  Bytecode    │ │
+   │  │ (MLIR)   │    │  Backend     │ │
+   │  └────┬─────┘    └──────┬───────┘ │
+   └───────┼─────────────────┼─────────┘
+           │                 │
+           ▼                 ▼
+   cuda-tile-translate    tileiras
+           │                 │
+           ▼                 │
+       tileiras              │
+           │                 │
+           ▼                 ▼
+         .cubin            .cubin
+           │                 │
+           └────────┬────────┘
+                    ▼
+              GPU Launch
+           (CUDA driver API)
+
+Stage Details
+-------------
+
+Lexer
+^^^^^
+
+:Module: ``basic_tile.lexer``
+
+Tokenizes BASIC source text into a flat list of ``Token`` objects. Each token
+carries its type (from ``TokenType`` enum), string value, line number, and column.
+
+The lexer recognizes all standard BASIC keywords plus the tile extensions
+(``TILE``, ``MMA``, ``STORE``, ``OUTPUT``, ``BID``).
+
+Parser
+^^^^^^
+
+:Module: ``basic_tile.parser``
+
+Converts the token stream into an AST (``Program`` containing a list of
+``Statement`` nodes). Handles BASIC line numbers and builds a ``line_map``
+mapping BASIC line numbers to statement indices for ``GOTO``/``GOSUB``.
+
+Supports nested control flow (``IF``/``FOR``/``WHILE``) and expression parsing
+with correct operator precedence.
+
+Analyzer
+^^^^^^^^
+
+:Module: ``basic_tile.analyzer``
+
+Performs semantic analysis on the AST:
+
+- Infers types (``F32``, ``I32``, ``STRING``) for all variables
+- Tracks array declarations and sizes
+- Identifies ``INPUT`` and ``OUTPUT`` variables for GPU kernels
+- Collects ``DATA`` values
+- Validates ``GOTO``/``GOSUB`` targets
+
+Produces an ``AnalyzedProgram`` with a symbol table and metadata.
+
+Codegen (MLIR Path)
+^^^^^^^^^^^^^^^^^^^^
+
+:Module: ``basic_tile.codegen``
+
+Generates CUDA Tile IR MLIR text from the analyzed program. ``INPUT`` variables
+become kernel parameters. The output is a ``cuda_tile.module`` with an entry
+function.
+
+Bytecode Backend
+^^^^^^^^^^^^^^^^
+
+:Module: ``basic_tile.bytecode_backend``
+
+Compiles the analyzed program directly to cuTile bytecode using the
+``cuda.tile._bytecode`` Python APIs. Bypasses MLIR text entirely and produces
+a ``.cubin`` via ``tileiras``.
+
+Runner
+^^^^^^
+
+:Module: ``basic_tile.runner``
+
+Orchestrates the MLIR path: locates ``cuda-tile-translate`` and ``tileiras``
+tools, compiles MLIR to ``.tilebc`` to ``.cubin``, optionally detects GPU
+architecture and launches the kernel.
+
+GPU Runner
+^^^^^^^^^^
+
+:Module: ``basic_tile.gpu_runner``
+
+Handles low-level GPU kernel launch via the CUDA driver API (``ctypes``).
+Manages host/device memory allocation, data transfer, and kernel invocation.

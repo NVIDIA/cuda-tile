@@ -1,0 +1,21 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+code,
+pre,
+.highlight,
+div.highlight pre {
+    font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace !important;
+}
+
+div.highlight pre {
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.sd-card {
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.sd-card:hover {
+    transform: translateY(-2px);
+}

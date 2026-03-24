@@ -1,0 +1,4 @@
+sphinx>=7.2
+nvidia-sphinx-theme>=0.0.9
+sphinx-design>=0.5
+sphinx-copybutton>=0.5

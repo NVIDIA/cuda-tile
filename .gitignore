@@ -12,3 +12,7 @@
 *.pyzwzw
 *.pyzwzwzw
 *.pyzwzwzwzw
+
+# Docs build artifacts
+docs/build/
+public/
