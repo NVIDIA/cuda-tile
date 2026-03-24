@@ -1,8 +1,8 @@
 """Tests for the BASIC lexer."""
 
 import pytest
-from basic_tile.lexer import lex, LexError
-from basic_tile.tokens import TokenType
+from cutile_basic.lexer import lex, LexError
+from cutile_basic.tokens import TokenType
 
 
 def tok_types(source: str) -> list[TokenType]:

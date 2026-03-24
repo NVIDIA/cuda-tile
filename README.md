@@ -1,15 +1,15 @@
-# basic_tile
+# cutile-basic
 
-![basic_tile](graphic.jpg)
+![cutile-basic](graphic.jpg)
 
 A BASIC to CUDA Tile IR transpiler. Write GPU kernels in BASIC, compile them to
 CUDA Tile IR (MLIR), and launch them on NVIDIA GPUs.
 
-**[Documentation](https://basic-tile-a22467.gitlab-master-pages.nvidia.com/)**
+**[Documentation](https://cutile-basic-a22467.gitlab-master-pages.nvidia.com/)**
 
 ## Overview
 
-basic_tile extends classic BASIC with tile-based GPU operations (`TILE`, `MMA`,
+cutile-basic extends classic BASIC with tile-based GPU operations (`TILE`, `MMA`,
 `STORE`, `OUTPUT`, `BID`), enabling concise expression of GPU kernels such as
 vector addition and matrix multiplication.
 
@@ -25,19 +25,19 @@ Two compilation paths are supported:
 Generate MLIR from a BASIC program:
 
 ```bash
-python -m basic_tile.cli examples/vector_add.bas
+python -m cutile_basic.cli examples/vector_add.bas
 ```
 
 Compile and run on a GPU:
 
 ```bash
-python -m basic_tile.cli examples/vector_add.bas --run
+python -m cutile_basic.cli examples/vector_add.bas --run
 ```
 
 Or use the Python API:
 
 ```python
-from basic_tile import compile_basic_to_mlir
+from cutile_basic import compile_basic_to_mlir
 
 source = """
 10 DIM A(128), B(128), C(128)

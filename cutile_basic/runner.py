@@ -255,7 +255,7 @@ def compile_and_run(
         gpu_arch = detect_gpu_arch()
 
     if output_dir is None:
-        output_dir = Path(tempfile.mkdtemp(prefix="basic_tile_"))
+        output_dir = Path(tempfile.mkdtemp(prefix="cutile_basic_"))
 
     tilebc_path = output_dir / "program.tilebc"
     cubin_path = output_dir / "program.cubin"

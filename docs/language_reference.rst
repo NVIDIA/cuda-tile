@@ -1,7 +1,7 @@
 Language Reference
 ==================
 
-basic_tile implements a dialect of BASIC extended with GPU tile operations.
+cutile-basic implements a dialect of BASIC extended with GPU tile operations.
 Programs use numbered lines in classic BASIC style.
 
 Program Structure

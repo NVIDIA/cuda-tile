@@ -1278,7 +1278,7 @@ class BytecodeBackend:
         """Generate bytecode, run tileiras, return path to .cubin."""
         bytecode = self.generate(array_size=array_size)
 
-        output_dir = tempfile.mkdtemp(prefix="basic_tile_bc_", dir=output_dir)
+        output_dir = tempfile.mkdtemp(prefix="cutile_basic_bc_", dir=output_dir)
         bc_path = os.path.join(output_dir, "program.tilebc")
         cubin_path = os.path.join(output_dir, "program.cubin")
 

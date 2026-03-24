@@ -1,7 +1,7 @@
 Architecture
 ============
 
-basic_tile compiles BASIC source code through a multi-stage pipeline, with two
+cutile-basic compiles BASIC source code through a multi-stage pipeline, with two
 paths to GPU execution.
 
 Pipeline Overview
@@ -56,7 +56,7 @@ Stage Details
 Lexer
 ^^^^^
 
-:Module: ``basic_tile.lexer``
+:Module: ``cutile_basic.lexer``
 
 Tokenizes BASIC source text into a flat list of ``Token`` objects. Each token
 carries its type (from ``TokenType`` enum), string value, line number, and column.
@@ -67,7 +67,7 @@ The lexer recognizes all standard BASIC keywords plus the tile extensions
 Parser
 ^^^^^^
 
-:Module: ``basic_tile.parser``
+:Module: ``cutile_basic.parser``
 
 Converts the token stream into an AST (``Program`` containing a list of
 ``Statement`` nodes). Handles BASIC line numbers and builds a ``line_map``
@@ -79,7 +79,7 @@ with correct operator precedence.
 Analyzer
 ^^^^^^^^
 
-:Module: ``basic_tile.analyzer``
+:Module: ``cutile_basic.analyzer``
 
 Performs semantic analysis on the AST:
 
@@ -94,7 +94,7 @@ Produces an ``AnalyzedProgram`` with a symbol table and metadata.
 Codegen (MLIR Path)
 ^^^^^^^^^^^^^^^^^^^^
 
-:Module: ``basic_tile.codegen``
+:Module: ``cutile_basic.codegen``
 
 Generates CUDA Tile IR MLIR text from the analyzed program. ``INPUT`` variables
 become kernel parameters. The output is a ``cuda_tile.module`` with an entry
@@ -103,7 +103,7 @@ function.
 Bytecode Backend
 ^^^^^^^^^^^^^^^^
 
-:Module: ``basic_tile.bytecode_backend``
+:Module: ``cutile_basic.bytecode_backend``
 
 Compiles the analyzed program directly to cuTile bytecode using the
 ``cuda.tile._bytecode`` Python APIs. Bypasses MLIR text entirely and produces
@@ -112,7 +112,7 @@ a ``.cubin`` via ``tileiras``.
 Runner
 ^^^^^^
 
-:Module: ``basic_tile.runner``
+:Module: ``cutile_basic.runner``
 
 Orchestrates the MLIR path: locates ``cuda-tile-translate`` and ``tileiras``
 tools, compiles MLIR to ``.tilebc`` to ``.cubin``, optionally detects GPU
@@ -121,7 +121,7 @@ architecture and launches the kernel.
 GPU Runner
 ^^^^^^^^^^
 
-:Module: ``basic_tile.gpu_runner``
+:Module: ``cutile_basic.gpu_runner``
 
 Handles low-level GPU kernel launch via the CUDA driver API (``ctypes``).
 Manages host/device memory allocation, data transfer, and kernel invocation.

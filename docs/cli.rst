@@ -1,14 +1,14 @@
 CLI Reference
 =============
 
-basic_tile provides a command-line interface for compiling BASIC source files.
+cutile-basic provides a command-line interface for compiling BASIC source files.
 
 Usage
 -----
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli [options] <input.bas>
+   $ python -m cutile_basic.cli [options] <input.bas>
 
 Arguments
 ---------
@@ -57,34 +57,34 @@ Generate MLIR to stdout:
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli examples/vector_add.bas
+   $ python -m cutile_basic.cli examples/vector_add.bas
 
 Write MLIR to a file:
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli examples/vector_add.bas -o vector_add.mlir
+   $ python -m cutile_basic.cli examples/vector_add.bas -o vector_add.mlir
 
 Inspect the token stream:
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli examples/hello.bas --dump-tokens
+   $ python -m cutile_basic.cli examples/hello.bas --dump-tokens
 
 Inspect the AST:
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli examples/hello.bas --dump-ast
+   $ python -m cutile_basic.cli examples/hello.bas --dump-ast
 
 Compile to cubin:
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli examples/vector_add.bas --compile -o vector_add.cubin
+   $ python -m cutile_basic.cli examples/vector_add.bas --compile -o vector_add.cubin
 
 Compile and run on GPU:
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli examples/vector_add.bas --run
+   $ python -m cutile_basic.cli examples/vector_add.bas --run

@@ -4,14 +4,14 @@
 import sys
 from pathlib import Path
 
-# Add project root to path so we can import basic_tile
+# Add project root to path so we can import cutile_basic
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from basic_tile.lexer import lex
-from basic_tile.parser import parse
-from basic_tile.analyzer import analyze
-from basic_tile.bytecode_backend import BytecodeBackend
-from basic_tile.gpu_runner import launch_kernel
+from cutile_basic.lexer import lex
+from cutile_basic.parser import parse
+from cutile_basic.analyzer import analyze
+from cutile_basic.bytecode_backend import BytecodeBackend
+from cutile_basic.gpu_runner import launch_kernel
 
 
 def main():

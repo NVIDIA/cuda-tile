@@ -2,12 +2,12 @@ import os
 import sys
 from datetime import datetime
 
-# Add project root so autodoc can import basic_tile
+# Add project root so autodoc can import cutile_basic
 sys.path.insert(0, os.path.abspath(".."))
 
 # -- Project information -----------------------------------------------------
 
-project = "basic_tile"
+project = "cutile-basic"
 copyright = f"{datetime.now().year}, Conor Hoekstra"
 author = "Conor Hoekstra"
 release = "0.1.0"
@@ -29,11 +29,10 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "nvidia_sphinx_theme"
 
-html_title = "basic_tile"
+html_title = "cutile-basic"
 
 html_theme_options = {
-    "icon_links": [
-    ],
+    "icon_links": [],
     "navigation_depth": 4,
     "show_toc_level": 2,
     "navbar_start": ["navbar-logo"],

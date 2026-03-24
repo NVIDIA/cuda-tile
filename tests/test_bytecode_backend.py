@@ -6,11 +6,11 @@ import subprocess
 
 import pytest
 
-from basic_tile.lexer import lex
-from basic_tile.parser import parse
-from basic_tile.analyzer import analyze
-from basic_tile.bytecode_backend import BytecodeBackend
-from basic_tile.gpu_runner import launch_kernel
+from cutile_basic.lexer import lex
+from cutile_basic.parser import parse
+from cutile_basic.analyzer import analyze
+from cutile_basic.bytecode_backend import BytecodeBackend
+from cutile_basic.gpu_runner import launch_kernel
 
 TILEIRAS_MAGIC = b"\x7fTileIR"
 

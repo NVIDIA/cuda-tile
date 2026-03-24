@@ -12,12 +12,12 @@ Prerequisites
 Installation
 ------------
 
-Clone the repository and ensure the ``basic_tile`` package is on your Python path:
+Clone the repository and ensure the ``cutile_basic`` package is on your Python path:
 
 .. code-block:: bash
 
-   $ git clone <repo-url> basic_tile
-   $ cd basic_tile
+   $ git clone <repo-url> cutile-basic
+   $ cd cutile-basic
 
 No ``pip install`` step is needed -- the package is used directly from the source
 tree.
@@ -41,26 +41,26 @@ Compile it to CUDA Tile IR MLIR:
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli hello.bas
+   $ python -m cutile_basic.cli hello.bas
 
 This prints the generated MLIR to stdout. To write it to a file:
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli hello.bas -o hello.mlir
+   $ python -m cutile_basic.cli hello.bas -o hello.mlir
 
 Compile and run on a GPU (requires ``cuda-tile-translate`` and ``tileiras``):
 
 .. code-block:: bash
 
-   $ python -m basic_tile.cli hello.bas --run
+   $ python -m cutile_basic.cli hello.bas --run
 
 Using the Python API
 --------------------
 
 .. code-block:: python
 
-   from basic_tile import compile_basic_to_mlir
+   from cutile_basic import compile_basic_to_mlir
 
    source = """
    10 DIM A(128), B(128), C(128)
@@ -76,7 +76,7 @@ Using the Python API
 Two Compilation Paths
 ---------------------
 
-basic_tile supports two paths from BASIC source to GPU execution:
+cutile-basic supports two paths from BASIC source to GPU execution:
 
 **MLIR Path**
    Source is compiled to CUDA Tile IR MLIR text, then passed through

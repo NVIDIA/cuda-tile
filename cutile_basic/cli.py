@@ -13,7 +13,7 @@ from .runner import compile_and_run, RunnerError
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="basic_tile",
+        prog="cutile_basic",
         description="Compile BASIC source to CUDA Tile IR MLIR",
     )
     parser.add_argument("input", help="Input .bas file")

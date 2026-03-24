@@ -1,10 +1,10 @@
 """Tests for the CUDA Tile IR code generator."""
 
 import pytest
-from basic_tile.lexer import lex
-from basic_tile.parser import parse
-from basic_tile.analyzer import analyze
-from basic_tile.codegen import generate
+from cutile_basic.lexer import lex
+from cutile_basic.parser import parse
+from cutile_basic.analyzer import analyze
+from cutile_basic.codegen import generate
 
 
 def compile_src(src: str) -> str:

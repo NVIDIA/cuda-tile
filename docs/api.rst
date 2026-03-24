@@ -1,79 +1,79 @@
 API Reference
 =============
 
-basic_tile
-----------
+cutile_basic
+------------
 
-.. automodule:: basic_tile
+.. automodule:: cutile_basic
    :members:
    :undoc-members:
 
-basic_tile.tokens
------------------
-
-.. automodule:: basic_tile.tokens
-   :members:
-   :undoc-members:
-
-basic_tile.lexer
-----------------
-
-.. automodule:: basic_tile.lexer
-   :members:
-   :undoc-members:
-
-basic_tile.ast_nodes
---------------------
-
-.. automodule:: basic_tile.ast_nodes
-   :members:
-   :undoc-members:
-
-basic_tile.parser
------------------
-
-.. automodule:: basic_tile.parser
-   :members:
-   :undoc-members:
-
-basic_tile.analyzer
+cutile_basic.tokens
 -------------------
 
-.. automodule:: basic_tile.analyzer
+.. automodule:: cutile_basic.tokens
    :members:
    :undoc-members:
 
-basic_tile.codegen
+cutile_basic.lexer
 ------------------
 
-.. automodule:: basic_tile.codegen
+.. automodule:: cutile_basic.lexer
    :members:
    :undoc-members:
 
-basic_tile.bytecode_backend
----------------------------
+cutile_basic.ast_nodes
+----------------------
 
-.. automodule:: basic_tile.bytecode_backend
+.. automodule:: cutile_basic.ast_nodes
    :members:
    :undoc-members:
 
-basic_tile.runner
------------------
+cutile_basic.parser
+-------------------
 
-.. automodule:: basic_tile.runner
+.. automodule:: cutile_basic.parser
    :members:
    :undoc-members:
 
-basic_tile.gpu_runner
+cutile_basic.analyzer
 ---------------------
 
-.. automodule:: basic_tile.gpu_runner
+.. automodule:: cutile_basic.analyzer
    :members:
    :undoc-members:
 
-basic_tile.cli
---------------
+cutile_basic.codegen
+--------------------
 
-.. automodule:: basic_tile.cli
+.. automodule:: cutile_basic.codegen
+   :members:
+   :undoc-members:
+
+cutile_basic.bytecode_backend
+-----------------------------
+
+.. automodule:: cutile_basic.bytecode_backend
+   :members:
+   :undoc-members:
+
+cutile_basic.runner
+-------------------
+
+.. automodule:: cutile_basic.runner
+   :members:
+   :undoc-members:
+
+cutile_basic.gpu_runner
+-----------------------
+
+.. automodule:: cutile_basic.gpu_runner
+   :members:
+   :undoc-members:
+
+cutile_basic.cli
+----------------
+
+.. automodule:: cutile_basic.cli
    :members:
    :undoc-members:

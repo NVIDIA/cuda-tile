@@ -1,7 +1,7 @@
 Examples
 ========
 
-basic_tile ships with several example programs demonstrating both standard BASIC
+cutile-basic ships with several example programs demonstrating both standard BASIC
 and GPU tile operations.
 
 Hello World
