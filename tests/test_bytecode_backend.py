@@ -29,33 +29,6 @@ def _tileiras_available() -> bool:
         return False
 
 
-def _detect_gpu_arch() -> str:
-    """Detect the GPU architecture, e.g. 'sm_80'.
-
-    Tries nvidia-smi first, then falls back to the CUDA driver API
-    (for environments where nvidia-smi is not installed).
-    """
-    try:
-        from cutile_basic._runner import detect_gpu_arch
-        return detect_gpu_arch()
-    except Exception:
-        pass
-    import ctypes
-    libcuda = ctypes.CDLL("libcuda.so")
-    libcuda.cuInit(0)
-    device = ctypes.c_int()
-    libcuda.cuDeviceGet(ctypes.byref(device), 0)
-    major = ctypes.c_int()
-    minor = ctypes.c_int()
-    libcuda.cuDeviceGetAttribute(
-        ctypes.byref(major), 75, device  # CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR
-    )
-    libcuda.cuDeviceGetAttribute(
-        ctypes.byref(minor), 76, device  # CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR
-    )
-    return f"sm_{major.value * 10 + minor.value}"
-
-
 requires_tileiras = pytest.mark.skipif(
     not _tileiras_available(), reason="tileiras not available",
 )
@@ -64,7 +37,23 @@ requires_tileiras = pytest.mark.skipif(
 @pytest.fixture(scope="session")
 def gpu_arch():
     """Session-scoped GPU architecture string (e.g. 'sm_80')."""
-    return _detect_gpu_arch()
+    try:
+        from cutile_basic._runner import detect_gpu_arch
+        return detect_gpu_arch()
+    except Exception:
+        pass
+    try:
+        import ctypes
+        libcuda = ctypes.CDLL("libcuda.so")
+        libcuda.cuInit(0)
+        dev = ctypes.c_int()
+        libcuda.cuDeviceGet(ctypes.byref(dev), 0)
+        major, minor = ctypes.c_int(), ctypes.c_int()
+        libcuda.cuDeviceGetAttribute(ctypes.byref(major), 75, dev)
+        libcuda.cuDeviceGetAttribute(ctypes.byref(minor), 76, dev)
+        return f"sm_{major.value * 10 + minor.value}"
+    except Exception:
+        pytest.skip("No GPU available")
 
 
 def _compile(source: str) -> bytes:
