@@ -14,22 +14,24 @@ Prerequisites
 
 - Python 3.10+
 - CUDA Toolkit 13.1 or later
-- ``cuda-tile-translate`` and ``tileiras`` tools (for the MLIR compilation path)
-- ``cuda.tile`` Python package (for the bytecode backend path), installable
-  via ``pip install cuda-tile``
+- ``cuda-tile[tileiras]``, ``cuda-python``, ``cuda-core``, ``cupy-cuda13x``
+  (all installed via ``pip install -r requirements.txt``)
+- ``cuda-tile-translate`` (for the MLIR compilation path only)
 
 Installation
 ------------
 
-Clone the repository and ensure the ``cutile_basic`` package is on your Python path:
+Clone the repository and install dependencies:
 
 .. code-block:: bash
 
    $ git clone <repo-url> cutile-basic
    $ cd cutile-basic
+   $ pip install -r requirements.txt
 
-No ``pip install`` step is needed -- the package is used directly from the source
-tree.
+This installs ``cuda-tile[tileiras]``, ``cuda-python``, ``cuda-core``, and
+``cupy-cuda13x``. The ``cutile_basic`` package itself is used directly from the
+source tree (no separate install step).
 
 Quick Start
 -----------
@@ -67,6 +69,8 @@ Compile and run on a GPU (requires ``cuda-tile-translate`` and ``tileiras``):
 Using the Python API
 --------------------
 
+Generate MLIR text:
+
 .. code-block:: python
 
    from cutile_basic import compile_basic_to_mlir
@@ -81,6 +85,16 @@ Using the Python API
 
    mlir = compile_basic_to_mlir(source)
    print(mlir)
+
+Or compile directly to a ``.cubin`` via the bytecode backend:
+
+.. code-block:: python
+
+   from cutile_basic import compile_basic_to_cubin
+
+   result = compile_basic_to_cubin(source, array_size=1024)
+   print(result.cubin_path)   # path to the compiled .cubin
+   print(result.meta)          # kernel metadata (arrays, grid size, etc.)
 
 Two Compilation Paths
 ---------------------

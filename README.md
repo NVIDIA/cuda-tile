@@ -75,14 +75,26 @@ End-to-end GPU demos:
 ```bash
 python examples/vector_add_demo.py
 python examples/gemm_demo.py
+python examples/gpu_demo.py examples/vector_add.bas  # general-purpose launcher
+```
+
+## Installation
+
+```bash
+git clone <repo-url> cutile-basic
+cd cutile-basic
+pip install -r requirements.txt
 ```
 
 ## Prerequisites
 
 - Python 3.10+
-- NVIDIA GPU with CUDA support (for kernel execution)
-- `cuda-tile-translate` and `tileiras` (MLIR path)
-- `cuda.tile` Python package (bytecode path)
+- NVIDIA GPU with compute capability 10.x or 12.x (Blackwell architecture
+  or later) and driver r580+
+- CUDA Toolkit 13.1 or later
+- `cuda-tile[tileiras]` (bytecode backend + `tileiras` assembler)
+- `cuda-python`, `cuda-core`, `cupy-cuda13x` (GPU launch and memory management)
+- `cuda-tile-translate` (MLIR compilation path only)
 
 ## License
 

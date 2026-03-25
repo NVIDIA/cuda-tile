@@ -13,17 +13,17 @@ Pipeline Overview
        │
        ▼
    ┌────────┐
-   │ Lexer  │  tokens.py, lexer.py
+   │ Lexer  │  _tokens.py, _lexer.py
    └───┬────┘
        │  list[Token]
        ▼
    ┌────────┐
-   │ Parser │  ast_nodes.py, parser.py
+   │ Parser │  _ast_nodes.py, _parser.py
    └───┬────┘
        │  Program (AST)
        ▼
    ┌──────────┐
-   │ Analyzer │  analyzer.py
+   │ Analyzer │  _analyzer.py
    └───┬──────┘
        │  AnalyzedProgram
        ▼
@@ -123,5 +123,5 @@ GPU Runner
 
 :Module: ``cutile_basic.gpu_runner``
 
-Handles low-level GPU kernel launch via the CUDA driver API (``ctypes``).
-Manages host/device memory allocation, data transfer, and kernel invocation.
+Handles GPU kernel launch via ``cuda.core`` and ``cupy``. Manages
+host/device memory allocation, data transfer, and kernel invocation.
