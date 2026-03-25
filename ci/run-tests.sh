@@ -10,15 +10,20 @@ source "$REPO_ROOT/.venv/bin/activate"
 
 uv pip install pytest "cuda-tile[tileiras]"
 
-# Ensure CUDA driver libs and tools are discoverable
-CUDA_COMPAT="/usr/local/cuda/compat"
-if [ -d "$CUDA_COMPAT" ]; then
-    export LD_LIBRARY_PATH="${CUDA_COMPAT}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Find libcuda.so and add its directory to LD_LIBRARY_PATH
+LIBCUDA=$(find / -name 'libcuda.so*' -print -quit 2>/dev/null || true)
+if [ -n "$LIBCUDA" ]; then
+    export LD_LIBRARY_PATH="$(dirname "$LIBCUDA")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
-for d in /usr/local/cuda/bin /usr/local/cuda/compat; do
-    if [ -d "$d" ]; then
-        export PATH="$d:$PATH"
-    fi
-done
+
+# Find nvidia-smi and add its directory to PATH
+NVSMI=$(find / -name 'nvidia-smi' -type f -print -quit 2>/dev/null || true)
+if [ -n "$NVSMI" ]; then
+    export PATH="$(dirname "$NVSMI"):$PATH"
+fi
+
+echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+echo "libcuda: $LIBCUDA"
+echo "nvidia-smi: $NVSMI"
 
 PYTHONPATH="$REPO_ROOT" pytest "$REPO_ROOT/tests/" -v "$@"
