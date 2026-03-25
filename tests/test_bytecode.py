@@ -1,7 +1,6 @@
 """Tests for the bytecode backend (AST → cuTile bytecode)."""
 
 import os
-import shutil
 
 import cupy as cp
 import pytest
@@ -14,25 +13,6 @@ from cutile_basic._analyzer import analyze
 from cutile_basic._bytecode import BytecodeBackend
 
 TILEIRAS_MAGIC = b"\x7fTileIR"
-
-
-def _tileiras_available() -> bool:
-    if shutil.which("tileiras"):
-        return True
-    if os.path.isfile("/usr/local/cuda/bin/tileiras"):
-        return True
-    try:
-        import nvidia.cu13.bin as _nbin
-        return any(
-            os.path.isfile(os.path.join(d, "tileiras")) for d in _nbin.__path__
-        )
-    except ImportError:
-        return False
-
-
-requires_tileiras = pytest.mark.skipif(
-    not _tileiras_available(), reason="tileiras not available",
-)
 
 
 def _compile(source: str) -> bytes:
@@ -139,7 +119,6 @@ class TestBytecodeGeneration:
         assert bc[:7] == TILEIRAS_MAGIC
 
 
-@requires_tileiras
 class TestCompileToCubin:
     """Test the full pipeline through tileiras (skip if not available)."""
 
@@ -179,7 +158,6 @@ class TestArrayKernel:
         assert info["output_arrays"] == ["C"]
         assert info["tile_size"] == 128
 
-    @requires_tileiras
     def test_vector_add_cubin(self):
         source = open("examples/vector_add.bas").read()
         tokens = lex(source)
@@ -192,7 +170,6 @@ class TestArrayKernel:
         assert backend._array_kernel_meta is not None
         assert backend._array_kernel_meta["grid_size"] == 8
 
-    @requires_tileiras
     def test_vector_add_gpu_execution(self):
         """Full end-to-end: compile + launch + verify on GPU."""
         source = open("examples/vector_add.bas").read()
@@ -256,7 +233,6 @@ class TestGemmKernel:
         assert meta["tk"] == 32
         assert set(meta["all_arrays"]) == {"A", "B", "C"}
 
-    @requires_tileiras
     def test_gemm_cubin(self):
         source = open("examples/gemm.bas").read()
         tokens = lex(source)
@@ -267,7 +243,6 @@ class TestGemmKernel:
         assert os.path.isfile(cubin_path)
         assert os.path.getsize(cubin_path) > 0
 
-    @requires_tileiras
     def test_gemm_gpu_execution(self):
         """Full end-to-end: compile + launch + verify on GPU."""
         source = open("examples/gemm.bas").read()

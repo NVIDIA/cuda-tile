@@ -1,5 +1,7 @@
 """Tests for the CUDA Tile IR code generator."""
 
+from pathlib import Path
+
 import pytest
 from cutile_basic._lexer import lex
 from cutile_basic._parser import parse
@@ -227,3 +229,107 @@ def test_hello_world_program():
     assert "cmpf" in mlir
     assert "if %" in mlir
     assert "for %" in mlir
+
+
+# --- Example .bas files ---
+
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+
+
+def _read_example(name: str) -> str:
+    return (EXAMPLES_DIR / name).read_text()
+
+
+class TestExampleHelloCodegen:
+    """Generate MLIR from examples/hello.bas and verify output."""
+
+    def test_generates_without_error(self):
+        mlir = compile_src(_read_example("hello.bas"))
+        assert mlir is not None
+        assert len(mlir) > 0
+
+    def test_module_and_entry(self):
+        mlir = compile_src(_read_example("hello.bas"))
+        assert "cuda_tile.module @basic_program" in mlir
+        assert "entry @main()" in mlir
+
+    def test_matches_inline_hello_world(self):
+        """The example file should produce the same output as the inline version."""
+        file_mlir = compile_src(_read_example("hello.bas"))
+        inline_src = """10 REM Hello World in BASIC
+20 PRINT "Hello, World!"
+30 LET X = 42.0
+40 LET Y = X * 2.0
+50 PRINT "X = "; X
+60 PRINT "Y = "; Y
+70 IF Y > 80 THEN
+80   PRINT "Y is large"
+90 ELSE
+100  PRINT "Y is small"
+110 ENDIF
+120 FOR I = 1 TO 5
+130   PRINT "I = "; I
+140 NEXT I
+150 END"""
+        inline_mlir = compile_src(inline_src)
+        assert file_mlir == inline_mlir
+
+    def test_comment_preserved(self):
+        mlir = compile_src(_read_example("hello.bas"))
+        assert "// Hello World in BASIC" in mlir
+
+    def test_print_hello_world(self):
+        mlir = compile_src(_read_example("hello.bas"))
+        assert "Hello, World!" in mlir
+
+    def test_arithmetic_and_control_flow(self):
+        mlir = compile_src(_read_example("hello.bas"))
+        assert "mulf" in mlir
+        assert "cmpf" in mlir
+        assert "if %" in mlir
+        assert "} else {" in mlir
+        assert "for %" in mlir
+
+
+class TestExampleVectorAddCodegen:
+    """Generate MLIR from examples/vector_add.bas and verify output."""
+
+    def test_generates_without_error(self):
+        mlir = compile_src(_read_example("vector_add.bas"))
+        assert mlir is not None
+        assert len(mlir) > 0
+
+    def test_module_structure(self):
+        mlir = compile_src(_read_example("vector_add.bas"))
+        assert "cuda_tile.module @basic_program" in mlir
+
+    def test_has_kernel_params(self):
+        """INPUT A(), B() should generate kernel parameters."""
+        mlir = compile_src(_read_example("vector_add.bas"))
+        assert "entry @main(" in mlir
+        assert "tile<f32>" in mlir
+
+
+class TestExampleGemmCodegen:
+    """Generate MLIR from examples/gemm.bas and verify output."""
+
+    def test_generates_without_error(self):
+        mlir = compile_src(_read_example("gemm.bas"))
+        assert mlir is not None
+        assert len(mlir) > 0
+
+    def test_module_structure(self):
+        mlir = compile_src(_read_example("gemm.bas"))
+        assert "cuda_tile.module @basic_program" in mlir
+
+    def test_has_kernel_params(self):
+        mlir = compile_src(_read_example("gemm.bas"))
+        assert "entry @main(" in mlir
+
+    def test_for_loop_generated(self):
+        mlir = compile_src(_read_example("gemm.bas"))
+        assert "for %" in mlir
+
+    def test_comment_preserved(self):
+        mlir = compile_src(_read_example("gemm.bas"))
+        assert "// GEMM" in mlir

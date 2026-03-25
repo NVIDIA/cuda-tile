@@ -1,5 +1,7 @@
 """Tests for the BASIC parser."""
 
+from pathlib import Path
+
 import pytest
 from cutile_basic._lexer import lex
 from cutile_basic._parser import parse, ParseError
@@ -213,3 +215,139 @@ def test_array_assignment():
     prog = parse_src("LET A(5) = 42")
     stmt = prog.statements[0]
     assert isinstance(stmt.target, ast.ArrayAccess)
+
+
+# --- Example .bas files ---
+
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+
+
+def _read_example(name: str) -> str:
+    return (EXAMPLES_DIR / name).read_text()
+
+
+class TestExampleHello:
+    """Parse examples/hello.bas and verify AST structure."""
+
+    def test_parses_without_error(self):
+        prog = parse_src(_read_example("hello.bas"))
+        assert len(prog.statements) > 0
+
+    def test_line_map(self):
+        prog = parse_src(_read_example("hello.bas"))
+        for ln in (10, 20, 30, 40, 50, 60, 70, 120, 150):
+            assert ln in prog.line_map
+
+    def test_statement_types(self):
+        prog = parse_src(_read_example("hello.bas"))
+        types = [type(s) for s in prog.statements]
+        assert ast.RemStatement in types
+        assert ast.PrintStatement in types
+        assert ast.LetStatement in types
+        assert ast.IfStatement in types
+        assert ast.ForStatement in types
+        assert ast.EndStatement in types
+
+    def test_if_has_else(self):
+        prog = parse_src(_read_example("hello.bas"))
+        ifs = [s for s in prog.statements if isinstance(s, ast.IfStatement)]
+        assert len(ifs) == 1
+        assert len(ifs[0].then_body) == 1
+        assert len(ifs[0].else_body) == 1
+
+    def test_for_loop_range(self):
+        prog = parse_src(_read_example("hello.bas"))
+        fors = [s for s in prog.statements if isinstance(s, ast.ForStatement)]
+        assert len(fors) == 1
+        assert fors[0].var.name == "I"
+        assert fors[0].start.value == 1
+        assert fors[0].end.value == 5
+        assert fors[0].step is None
+
+
+class TestExampleVectorAdd:
+    """Parse examples/vector_add.bas and verify AST structure."""
+
+    def test_parses_without_error(self):
+        prog = parse_src(_read_example("vector_add.bas"))
+        assert len(prog.statements) > 0
+
+    def test_dim_statements(self):
+        prog = parse_src(_read_example("vector_add.bas"))
+        dims = [s for s in prog.statements if isinstance(s, ast.DimStatement)]
+        assert len(dims) == 3
+        names = {d.name for d in dims}
+        assert names == {"A", "B", "C"}
+        for d in dims:
+            assert d.sizes[0].value == 128
+
+    def test_input_arrays(self):
+        prog = parse_src(_read_example("vector_add.bas"))
+        inputs = [s for s in prog.statements if isinstance(s, ast.InputStatement)]
+        assert len(inputs) == 1
+        var_names = [v.name for v in inputs[0].variables]
+        assert var_names == ["A", "B"]
+
+    def test_array_let_with_bid(self):
+        prog = parse_src(_read_example("vector_add.bas"))
+        lets = [s for s in prog.statements if isinstance(s, ast.LetStatement)]
+        assert len(lets) == 1
+        assert isinstance(lets[0].target, ast.ArrayAccess)
+        assert lets[0].target.name == "C"
+        assert isinstance(lets[0].target.index, ast.Variable)
+        assert lets[0].target.index.name == "BID"
+
+    def test_output_statement(self):
+        prog = parse_src(_read_example("vector_add.bas"))
+        outputs = [s for s in prog.statements if isinstance(s, ast.OutputStatement)]
+        assert len(outputs) == 1
+        assert outputs[0].variables[0].name == "C"
+
+
+class TestExampleGemm:
+    """Parse examples/gemm.bas and verify AST structure."""
+
+    def test_parses_without_error(self):
+        prog = parse_src(_read_example("gemm.bas"))
+        assert len(prog.statements) > 0
+
+    def test_2d_dim(self):
+        prog = parse_src(_read_example("gemm.bas"))
+        dims = [s for s in prog.statements if isinstance(s, ast.DimStatement)]
+        assert len(dims) == 3
+        for d in dims:
+            assert len(d.sizes) == 2
+            assert d.sizes[0].value == 512
+            assert d.sizes[1].value == 512
+
+    def test_tile_statement(self):
+        prog = parse_src(_read_example("gemm.bas"))
+        tiles = [s for s in prog.statements if isinstance(s, ast.TileStatement)]
+        assert len(tiles) == 1
+        assert tiles[0].tm == 128
+        assert tiles[0].tn == 128
+        assert tiles[0].tk == 32
+
+    def test_mma_statement(self):
+        prog = parse_src(_read_example("gemm.bas"))
+        fors = [s for s in prog.statements if isinstance(s, ast.ForStatement)]
+        assert len(fors) == 1
+        mmas = [s for s in fors[0].body if isinstance(s, ast.MmaStatement)]
+        assert len(mmas) == 1
+        assert mmas[0].acc_var == "ACC"
+        assert mmas[0].a_access.name == "A"
+        assert mmas[0].b_access.name == "B"
+
+    def test_tile_store(self):
+        prog = parse_src(_read_example("gemm.bas"))
+        stores = [s for s in prog.statements if isinstance(s, ast.TileStoreStatement)]
+        assert len(stores) == 1
+        assert stores[0].target.name == "C"
+        assert stores[0].value_var == "ACC"
+
+    def test_mod_expression(self):
+        prog = parse_src(_read_example("gemm.bas"))
+        lets = [s for s in prog.statements if isinstance(s, ast.LetStatement)]
+        mod_lets = [l for l in lets if isinstance(l.value, ast.BinaryOp) and l.value.op == "MOD"]
+        assert len(mod_lets) == 1
+        assert mod_lets[0].target.name == "TILEN"

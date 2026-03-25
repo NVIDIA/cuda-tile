@@ -1,0 +1,38 @@
+---
+description: How to run the test suite for cutile-basic
+globs: tests/**
+alwaysApply: false
+---
+
+# Running Tests
+
+Always run tests inside Docker using the CI script:
+
+```bash
+bash ci/run-tests-docker.sh
+```
+
+This launches a `nvcr.io/nvidia/cuda:13.2.0-devel-ubuntu24.04` container with GPU access, installs dependencies via `uv`, and runs `pytest tests/ -v`. It mirrors what CI does.
+
+Pass extra pytest args after the script:
+
+```bash
+bash ci/run-tests-docker.sh -k "test_gemm"
+bash ci/run-tests-docker.sh tests/test_examples.py -v
+```
+
+Do NOT run `pytest` directly with the local `.venv` -- the sandbox blocks GPU access and results will not match CI.
+
+## Test Files
+
+| File | What it tests |
+|------|--------------|
+| `test_lexer.py` | Tokenizer (all examples) |
+| `test_parser.py` | AST construction (all examples) |
+| `test_analyzer.py` | Type inference / symbols (all examples) |
+| `test_codegen.py` | MLIR text generation (all examples) |
+| `test_bytecode.py` | Bytecode backend, cubin compilation, GPU execution |
+| `test_examples.py` | Public API + end-to-end example scripts on GPU |
+| `test_runner.py` | MLIR pipeline (tool discovery, compile steps, launch) |
+
+GPU tests in `test_bytecode.py` and `test_examples.py` are **required**, not skipped. They must pass.

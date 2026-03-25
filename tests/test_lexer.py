@@ -1,5 +1,7 @@
 """Tests for the BASIC lexer."""
 
+from pathlib import Path
+
 import pytest
 from cutile_basic._lexer import lex, LexError
 from cutile_basic._tokens import TokenType
@@ -107,3 +109,107 @@ def test_complete_program():
     tokens = lex(src)
     # Should not raise and should end with EOF
     assert tokens[-1].type == TokenType.EOF
+
+
+# --- Example .bas files ---
+
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+
+
+def _read_example(name: str) -> str:
+    return (EXAMPLES_DIR / name).read_text()
+
+
+class TestExampleHello:
+    """Lex examples/hello.bas and verify key token patterns."""
+
+    def test_lexes_without_error(self):
+        tokens = lex(_read_example("hello.bas"))
+        assert tokens[-1].type == TokenType.EOF
+
+    def test_contains_expected_keywords(self):
+        types = tok_types(_read_example("hello.bas"))
+        assert TokenType.REM in types
+        assert TokenType.PRINT in types
+        assert TokenType.LET in types
+        assert TokenType.IF in types
+        assert TokenType.THEN in types
+        assert TokenType.ELSE in types
+        assert TokenType.ENDIF in types
+        assert TokenType.FOR in types
+        assert TokenType.TO in types
+        assert TokenType.NEXT in types
+        assert TokenType.END in types
+
+    def test_string_literals(self):
+        tokens = lex(_read_example("hello.bas"))
+        strings = [t.value for t in tokens if t.type == TokenType.STRING]
+        assert "Hello, World!" in strings
+        assert "Y is large" in strings
+        assert "Y is small" in strings
+
+    def test_float_literal(self):
+        tokens = lex(_read_example("hello.bas"))
+        floats = [t.value for t in tokens if t.type == TokenType.FLOAT]
+        assert "42.0" in floats
+        assert "2.0" in floats
+
+
+class TestExampleVectorAdd:
+    """Lex examples/vector_add.bas and verify key token patterns."""
+
+    def test_lexes_without_error(self):
+        tokens = lex(_read_example("vector_add.bas"))
+        assert tokens[-1].type == TokenType.EOF
+
+    def test_contains_expected_keywords(self):
+        types = tok_types(_read_example("vector_add.bas"))
+        assert TokenType.REM in types
+        assert TokenType.DIM in types
+        assert TokenType.INPUT in types
+        assert TokenType.LET in types
+        assert TokenType.OUTPUT in types
+        assert TokenType.END in types
+
+    def test_bid_token(self):
+        types = tok_types(_read_example("vector_add.bas"))
+        assert TokenType.BID in types
+
+    def test_array_sizes(self):
+        tokens = lex(_read_example("vector_add.bas"))
+        ints = [t.value for t in tokens if t.type == TokenType.INTEGER]
+        assert "128" in ints
+
+
+class TestExampleGemm:
+    """Lex examples/gemm.bas and verify key token patterns."""
+
+    def test_lexes_without_error(self):
+        tokens = lex(_read_example("gemm.bas"))
+        assert tokens[-1].type == TokenType.EOF
+
+    def test_contains_expected_keywords(self):
+        types = tok_types(_read_example("gemm.bas"))
+        assert TokenType.REM in types
+        assert TokenType.DIM in types
+        assert TokenType.TILE in types
+        assert TokenType.INPUT in types
+        assert TokenType.LET in types
+        assert TokenType.FOR in types
+        assert TokenType.TO in types
+        assert TokenType.MMA in types
+        assert TokenType.NEXT in types
+        assert TokenType.STORE in types
+        assert TokenType.OUTPUT in types
+        assert TokenType.END in types
+
+    def test_mod_operator(self):
+        types = tok_types(_read_example("gemm.bas"))
+        assert TokenType.MOD in types
+
+    def test_tile_sizes(self):
+        tokens = lex(_read_example("gemm.bas"))
+        ints = [t.value for t in tokens if t.type == TokenType.INTEGER]
+        assert "128" in ints
+        assert "32" in ints
+        assert "512" in ints

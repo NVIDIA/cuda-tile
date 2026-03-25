@@ -9,14 +9,18 @@ from cuda.core import Device, LaunchConfig, ObjectCode, launch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cutile_basic import compile_basic_to_cubin
+from cutile_basic import compile_basic_to_cubin, detect_gpu_arch
 
 
 def main():
     source = (Path(__file__).parent / "gemm.bas").read_text()
 
+    arch = detect_gpu_arch()
+    sm_version = int(arch.removeprefix("sm_"))
+    num_ctas = 2 if sm_version >= 100 else None
+
     print("[1/2] Compiling to cubin ...", flush=True)
-    result = compile_basic_to_cubin(source, num_ctas=2)
+    result = compile_basic_to_cubin(source, num_ctas=num_ctas)
     meta = result.meta
     M, N, K = meta["M"], meta["N"], meta["K"]
     tm, tn, tk = meta["tm"], meta["tn"], meta["tk"]

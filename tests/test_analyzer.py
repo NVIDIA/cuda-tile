@@ -1,5 +1,7 @@
 """Tests for the BASIC analyzer."""
 
+from pathlib import Path
+
 import pytest
 from cutile_basic._lexer import lex
 from cutile_basic._parser import parse
@@ -129,3 +131,97 @@ def test_complete_program():
     assert result.symbols["X"].type == BasicType.F32
     assert result.symbols["Y"].type == BasicType.F32
     assert result.symbols["I"].type == BasicType.I32
+
+
+# --- Example .bas files ---
+
+EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
+
+
+def _read_example(name: str) -> str:
+    return (EXAMPLES_DIR / name).read_text()
+
+
+class TestExampleHello:
+    """Analyze examples/hello.bas and verify type inference."""
+
+    def test_analyzes_without_error(self):
+        result = analyze_src(_read_example("hello.bas"))
+        assert result is not None
+
+    def test_variable_types(self):
+        result = analyze_src(_read_example("hello.bas"))
+        assert result.symbols["X"].type == BasicType.F32
+        assert result.symbols["Y"].type == BasicType.F32
+        assert result.symbols["I"].type == BasicType.I32
+
+    def test_no_goto(self):
+        result = analyze_src(_read_example("hello.bas"))
+        assert result.has_goto is False
+
+    def test_no_input_or_output_vars(self):
+        result = analyze_src(_read_example("hello.bas"))
+        assert result.input_vars == []
+        assert result.output_vars == []
+
+
+class TestExampleVectorAdd:
+    """Analyze examples/vector_add.bas and verify symbols/arrays."""
+
+    def test_analyzes_without_error(self):
+        result = analyze_src(_read_example("vector_add.bas"))
+        assert result is not None
+
+    def test_array_symbols(self):
+        result = analyze_src(_read_example("vector_add.bas"))
+        for name in ("A", "B", "C"):
+            assert name in result.symbols
+            assert result.symbols[name].is_array is True
+            assert result.symbols[name].array_size == 128
+
+    def test_input_vars(self):
+        result = analyze_src(_read_example("vector_add.bas"))
+        assert "A" in result.input_vars
+        assert "B" in result.input_vars
+
+    def test_output_vars(self):
+        result = analyze_src(_read_example("vector_add.bas"))
+        assert "C" in result.output_vars
+
+
+class TestExampleGemm:
+    """Analyze examples/gemm.bas and verify symbols/arrays."""
+
+    def test_analyzes_without_error(self):
+        result = analyze_src(_read_example("gemm.bas"))
+        assert result is not None
+
+    def test_array_symbols(self):
+        result = analyze_src(_read_example("gemm.bas"))
+        for name in ("A", "B", "C"):
+            assert name in result.symbols
+            assert result.symbols[name].is_array is True
+
+    def test_dim_sizes(self):
+        result = analyze_src(_read_example("gemm.bas"))
+        assert result.symbols["A"].array_size == 512
+        assert result.symbols["B"].array_size == 512
+        assert result.symbols["C"].array_size == 512
+
+    def test_scalar_variables(self):
+        result = analyze_src(_read_example("gemm.bas"))
+        assert "TILEM" in result.symbols
+        assert "TILEN" in result.symbols
+        assert result.symbols["K"].type == BasicType.I32
+
+    def test_accumulator_registered(self):
+        result = analyze_src(_read_example("gemm.bas"))
+        assert "ACC" in result.symbols
+        assert result.symbols["ACC"].is_array is True
+        assert result.symbols["ACC"].type == BasicType.F32
+
+    def test_input_and_output(self):
+        result = analyze_src(_read_example("gemm.bas"))
+        assert "A" in result.input_vars
+        assert "B" in result.input_vars
+        assert "C" in result.output_vars
