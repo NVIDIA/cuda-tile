@@ -171,6 +171,54 @@ END / STOP
 
 Terminates program execution.
 
+Arrays and Tiles
+-----------------
+
+cutile-basic programs work with two kinds of data when targeting the GPU:
+**arrays** and **tiles**. Understanding the distinction is key to writing
+effective GPU kernels.
+
+**Arrays** are declared with ``DIM`` and live in GPU global memory. They are the
+data that the host passes into and receives from the kernel. Arrays can be 1D or
+2D, have arbitrary sizes, and are mutable -- the kernel can read from and write to
+them.
+
+.. code-block:: basic
+
+   10 DIM A(1024)
+   20 DIM M(512, 512)
+
+**Tiles** are fixed-size rectangular chunks of data that the GPU hardware can
+process efficiently using tensor cores. Tile dimensions must be powers of two
+(e.g. 128 x 128). Unlike arrays, tiles are not directly addressable by the
+programmer -- they are implicit in operations like ``MMA`` and ``STORE``.
+
+When a kernel executes, each block works on a **tile-sized region** of the
+arrays:
+
+- For element-wise operations (vector add), each block processes one element
+  via ``BID``:
+
+  .. code-block:: basic
+
+     30 LET C(BID) = A(BID) + B(BID)
+
+- For matrix operations, ``TILE`` declares the tile shape and ``MMA`` loads
+  tile-sized sub-matrices from arrays, multiplies them on tensor cores, and
+  accumulates the result:
+
+  .. code-block:: basic
+
+     30 TILE 128, 128, 32
+     80 MMA ACC, A(TILEM, K), B(K, TILEN)
+
+  Here, ``A(TILEM, K)`` does not access a single element -- it loads a
+  128 x 32 tile from array ``A``. The hardware handles the bulk data movement.
+
+``STORE`` writes a tile back to an array, and ``OUTPUT`` marks which arrays
+should be copied back to the host after execution. See :doc:`execution_model`
+for more on how kernels, grids, and data transfer work.
+
 Tile/GPU Extensions
 -------------------
 

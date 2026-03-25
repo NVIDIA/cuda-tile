@@ -15,6 +15,12 @@ CUDA Tile IR (MLIR), and launch them on NVIDIA GPUs.
 
       Installation, dependencies, and your first compilation.
 
+   .. grid-item-card:: Execution Model
+      :link: execution_model
+      :link-type: doc
+
+      Grids, blocks, tiles, and how BASIC maps to GPU parallelism.
+
    .. grid-item-card:: Language Reference
       :link: language_reference
       :link-type: doc
@@ -50,6 +56,7 @@ CUDA Tile IR (MLIR), and launch them on NVIDIA GPUs.
    :hidden:
 
    getting_started
+   execution_model
    language_reference
    architecture
    api

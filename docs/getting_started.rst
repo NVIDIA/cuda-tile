@@ -4,10 +4,19 @@ Getting Started
 Prerequisites
 -------------
 
+**Hardware:**
+
+- NVIDIA GPU with compute capability 10.x or 12.x (Blackwell architecture
+  or later)
+- NVIDIA Driver r580 or later
+
+**Software:**
+
 - Python 3.10+
-- NVIDIA GPU with CUDA support (for running kernels)
+- CUDA Toolkit 13.1 or later
 - ``cuda-tile-translate`` and ``tileiras`` tools (for the MLIR compilation path)
-- ``cuda.tile`` Python package (for the bytecode backend path)
+- ``cuda.tile`` Python package (for the bytecode backend path), installable
+  via ``pip install cuda-tile``
 
 Installation
 ------------

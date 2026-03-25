@@ -28,8 +28,8 @@ Pipeline Overview
        │  AnalyzedProgram
        ▼
    ┌───────────────────────────────────┐
-   │         Two Compilation Paths      │
-   │                                    │
+   │         Two Compilation Paths     │
+   │                                   │
    │  ┌──────────┐    ┌──────────────┐ │
    │  │ Codegen  │    │  Bytecode    │ │
    │  │ (MLIR)   │    │  Backend     │ │
