@@ -65,8 +65,6 @@ print(compile_basic_to_mlir(source))
 | Program | Description |
 |---|---|
 | `examples/hello.bas` | Variables, arithmetic, conditionals, loops |
-| `examples/fibonacci.bas` | Fibonacci sequence |
-| `examples/array_sum.bas` | DATA/READ array summation |
 | `examples/vector_add.bas` | GPU vector addition using BID |
 | `examples/gemm.bas` | Tiled GPU matrix multiply (TILE, MMA, STORE) |
 

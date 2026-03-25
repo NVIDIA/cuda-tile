@@ -138,16 +138,6 @@ class TestBytecodeGeneration:
         bc = _compile(source)
         assert bc[:7] == TILEIRAS_MAGIC
 
-    def test_fibonacci_bas(self):
-        source = open("examples/fibonacci.bas").read()
-        bc = _compile(source)
-        assert bc[:7] == TILEIRAS_MAGIC
-
-    def test_array_sum_bas(self):
-        source = open("examples/array_sum.bas").read()
-        bc = _compile(source)
-        assert bc[:7] == TILEIRAS_MAGIC
-
 
 @requires_tileiras
 class TestCompileToCubin:
@@ -155,26 +145,6 @@ class TestCompileToCubin:
 
     def test_hello_cubin(self):
         source = open("examples/hello.bas").read()
-        tokens = lex(source)
-        program = parse(tokens)
-        analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
-        cubin_path = backend.compile_to_cubin()
-        assert os.path.isfile(cubin_path)
-        assert os.path.getsize(cubin_path) > 0
-
-    def test_fibonacci_cubin(self):
-        source = open("examples/fibonacci.bas").read()
-        tokens = lex(source)
-        program = parse(tokens)
-        analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
-        cubin_path = backend.compile_to_cubin()
-        assert os.path.isfile(cubin_path)
-        assert os.path.getsize(cubin_path) > 0
-
-    def test_array_sum_cubin(self):
-        source = open("examples/array_sum.bas").read()
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
