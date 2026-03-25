@@ -39,13 +39,12 @@ def main():
     launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
     stream.sync()
 
-    h_c = cp.asnumpy(d_c)
-    expected = cp.asnumpy(d_a + d_b)
-    max_diff = float(max(abs(h_c[i] - expected[i]) for i in range(N)))
+    expected = d_a + d_b
+    max_diff = float(cp.max(cp.abs(d_c - expected)))
 
     print(f"\nResults (showing 5 samples of {N}):")
     for i in [0, 1, 511, 512, 1023]:
-        print(f"  C[{i:4d}] = {h_c[i]:10.1f}  (expected {expected[i]:.1f})")
+        print(f"  C[{i:4d}] = {float(d_c[i]):10.1f}  (expected {float(expected[i]):.1f})")
 
     if max_diff < 0.01:
         print(f"\nVERIFICATION PASSED  (max_diff={max_diff:.6f}, {N} elements)")

@@ -3,13 +3,15 @@
 import os
 import shutil
 
+import cupy as cp
 import pytest
+from cuda.core import Device, LaunchConfig, ObjectCode, launch
 
+from cutile_basic import detect_gpu_arch
 from cutile_basic._lexer import lex
 from cutile_basic._parser import parse
 from cutile_basic._analyzer import analyze
 from cutile_basic.bytecode_backend import BytecodeBackend
-from cutile_basic.gpu_runner import launch_kernel
 
 TILEIRAS_MAGIC = b"\x7fTileIR"
 
@@ -31,13 +33,6 @@ def _tileiras_available() -> bool:
 requires_tileiras = pytest.mark.skipif(
     not _tileiras_available(), reason="tileiras not available",
 )
-
-
-@pytest.fixture(scope="session")
-def gpu_arch():
-    """Session-scoped GPU architecture string (e.g. 'sm_80')."""
-    from cutile_basic.gpu_runner import detect_gpu_arch
-    return detect_gpu_arch()
 
 
 def _compile(source: str) -> bytes:
@@ -158,32 +153,32 @@ class TestBytecodeGeneration:
 class TestCompileToCubin:
     """Test the full pipeline through tileiras (skip if not available)."""
 
-    def test_hello_cubin(self, gpu_arch):
+    def test_hello_cubin(self):
         source = open("examples/hello.bas").read()
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=gpu_arch)
+        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
         cubin_path = backend.compile_to_cubin()
         assert os.path.isfile(cubin_path)
         assert os.path.getsize(cubin_path) > 0
 
-    def test_fibonacci_cubin(self, gpu_arch):
+    def test_fibonacci_cubin(self):
         source = open("examples/fibonacci.bas").read()
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=gpu_arch)
+        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
         cubin_path = backend.compile_to_cubin()
         assert os.path.isfile(cubin_path)
         assert os.path.getsize(cubin_path) > 0
 
-    def test_array_sum_cubin(self, gpu_arch):
+    def test_array_sum_cubin(self):
         source = open("examples/array_sum.bas").read()
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=gpu_arch)
+        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
         cubin_path = backend.compile_to_cubin()
         assert os.path.isfile(cubin_path)
         assert os.path.getsize(cubin_path) > 0
@@ -215,12 +210,12 @@ class TestArrayKernel:
         assert info["tile_size"] == 128
 
     @requires_tileiras
-    def test_vector_add_cubin(self, gpu_arch):
+    def test_vector_add_cubin(self):
         source = open("examples/vector_add.bas").read()
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=gpu_arch, array_size=self.N)
+        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch(), array_size=self.N)
         cubin_path = backend.compile_to_cubin()
         assert os.path.isfile(cubin_path)
         assert os.path.getsize(cubin_path) > 0
@@ -228,32 +223,31 @@ class TestArrayKernel:
         assert backend._array_kernel_meta["grid_size"] == 8
 
     @requires_tileiras
-    def test_vector_add_gpu_execution(self, gpu_arch):
+    def test_vector_add_gpu_execution(self):
         """Full end-to-end: compile + launch + verify on GPU."""
         source = open("examples/vector_add.bas").read()
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=gpu_arch, array_size=self.N)
+        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch(), array_size=self.N)
         cubin_path = backend.compile_to_cubin()
         meta = backend._array_kernel_meta
 
+        dev = Device(0)
+        dev.set_current()
+        stream = dev.create_stream()
+        kernel = ObjectCode.from_cubin(cubin_path).get_kernel("main")
+
         N = self.N
-        h_a = [float(i) for i in range(N)]
-        h_b = [float(i) * 2.0 for i in range(N)]
+        d_a = cp.arange(N, dtype=cp.float32)
+        d_b = cp.arange(N, dtype=cp.float32) * 2.0
+        d_c = cp.zeros(N, dtype=cp.float32)
 
-        results = launch_kernel(
-            cubin_path=cubin_path,
-            inputs={"A": h_a, "B": h_b},
-            outputs=["C"],
-            param_order=meta["all_arrays"],
-            sizes={name: N for name in meta["all_arrays"]},
-            grid_size=meta["grid_size"],
-        )
+        config = LaunchConfig(grid=(meta["grid_size"], 1, 1), block=(1, 1, 1))
+        launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
+        stream.sync()
 
-        h_c = results["C"]
-        for i in [0, 1, 511, 512, 1023]:
-            assert abs(h_c[i] - (h_a[i] + h_b[i])) < 0.01
+        assert float(cp.max(cp.abs(d_c - (d_a + d_b)))) < 0.01
 
 
 class TestGemmKernel:
@@ -293,52 +287,42 @@ class TestGemmKernel:
         assert set(meta["all_arrays"]) == {"A", "B", "C"}
 
     @requires_tileiras
-    def test_gemm_cubin(self, gpu_arch):
+    def test_gemm_cubin(self):
         source = open("examples/gemm.bas").read()
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=gpu_arch)
+        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
         cubin_path = backend.compile_to_cubin()
         assert os.path.isfile(cubin_path)
         assert os.path.getsize(cubin_path) > 0
 
     @requires_tileiras
-    def test_gemm_gpu_execution(self, gpu_arch):
+    def test_gemm_gpu_execution(self):
         """Full end-to-end: compile + launch + verify on GPU."""
-        import random
-        random.seed(42)
-
         source = open("examples/gemm.bas").read()
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=gpu_arch)
+        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
         cubin_path = backend.compile_to_cubin()
         meta = backend._array_kernel_meta
         M, N, K = meta["M"], meta["N"], meta["K"]
 
-        h_a = [random.uniform(-1.0, 1.0) for _ in range(M * K)]
-        h_b = [random.uniform(-1.0, 1.0) for _ in range(K * N)]
+        dev = Device(0)
+        dev.set_current()
+        stream = dev.create_stream()
+        kernel = ObjectCode.from_cubin(cubin_path).get_kernel("main")
 
-        a_name, b_name, c_name = meta["all_arrays"]
-        results = launch_kernel(
-            cubin_path=cubin_path,
-            inputs={a_name: h_a, b_name: h_b},
-            outputs=[c_name],
-            param_order=meta["all_arrays"],
-            sizes={a_name: M * K, b_name: K * N, c_name: M * N},
-            grid_size=meta["grid_size"],
-        )
+        cp.random.seed(42)
+        d_a = cp.random.uniform(-1.0, 1.0, (M, K)).astype(cp.float32)
+        d_b = cp.random.uniform(-1.0, 1.0, (K, N)).astype(cp.float32)
+        d_c = cp.zeros((M, N), dtype=cp.float32)
 
-        h_c = results[c_name]
-        expected = [0.0] * (M * N)
-        for i in range(M):
-            for j in range(N):
-                s = 0.0
-                for k in range(K):
-                    s += h_a[i * K + k] * h_b[k * N + j]
-                expected[i * N + j] = s
+        config = LaunchConfig(grid=(meta["grid_size"], 1, 1), block=(1, 1, 1))
+        launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
+        stream.sync()
 
-        max_diff = max(abs(h_c[i] - expected[i]) for i in range(M * N))
+        expected = d_a @ d_b
+        max_diff = float(cp.max(cp.abs(d_c - expected)))
         assert max_diff < K * 1e-5

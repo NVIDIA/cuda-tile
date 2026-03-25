@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """End-to-end GEMM: compile BASIC → cubin, launch on GPU, verify results."""
 
-import random
 import sys
 from pathlib import Path
 
@@ -32,34 +31,23 @@ def main():
 
     kernel = ObjectCode.from_cubin(result.cubin_path).get_kernel("main")
 
-    random.seed(42)
-    d_a = cp.array([random.uniform(-1.0, 1.0) for _ in range(M * K)], dtype=cp.float32)
-    d_b = cp.array([random.uniform(-1.0, 1.0) for _ in range(K * N)], dtype=cp.float32)
-    d_c = cp.zeros(M * N, dtype=cp.float32)
+    cp.random.seed(42)
+    d_a = cp.random.uniform(-1.0, 1.0, (M, K)).astype(cp.float32)
+    d_b = cp.random.uniform(-1.0, 1.0, (K, N)).astype(cp.float32)
+    d_c = cp.zeros((M, N), dtype=cp.float32)
 
     config = LaunchConfig(grid=(meta["grid_size"], 1, 1), block=(1, 1, 1))
     launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
     stream.sync()
 
-    h_a = cp.asnumpy(d_a)
-    h_b = cp.asnumpy(d_b)
-    h_c = cp.asnumpy(d_c)
-
-    expected = [0.0] * (M * N)
-    for i in range(M):
-        for j in range(N):
-            s = 0.0
-            for k in range(K):
-                s += h_a[i * K + k] * h_b[k * N + j]
-            expected[i * N + j] = s
-
-    max_diff = max(abs(h_c[i] - expected[i]) for i in range(M * N))
+    expected = d_a @ d_b
+    max_diff = float(cp.max(cp.abs(d_c - expected)))
 
     print(f"\nResults (showing 5 samples of {M}x{N} = {M*N} elements):")
-    samples = [0, 1, M * N // 2, M * N // 2 + 1, M * N - 1]
-    for idx in samples:
+    for idx in [0, 1, M * N // 2, M * N // 2 + 1, M * N - 1]:
         row, col = divmod(idx, N)
-        print(f"  C[{row},{col}] = {h_c[idx]:10.4f}  (expected {expected[idx]:.4f})")
+        print(f"  C[{row},{col}] = {float(d_c[row, col]):10.4f}  "
+              f"(expected {float(expected[row, col]):.4f})")
 
     tol = K * 1e-5
     if max_diff < tol:

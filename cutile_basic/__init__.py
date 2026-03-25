@@ -7,7 +7,12 @@ from ._parser import parse
 from ._analyzer import analyze
 from ._codegen import generate
 
-__all__ = ["compile_basic_to_mlir", "compile_basic_to_cubin", "CompilationResult"]
+__all__ = [
+    "compile_basic_to_mlir",
+    "compile_basic_to_cubin",
+    "detect_gpu_arch",
+    "CompilationResult",
+]
 
 
 def compile_basic_to_mlir(source: str) -> str:
@@ -16,6 +21,15 @@ def compile_basic_to_mlir(source: str) -> str:
     program = parse(tokens)
     analyzed = analyze(program)
     return generate(analyzed)
+
+
+def detect_gpu_arch() -> str:
+    """Return the GPU architecture string (e.g. ``'sm_80'``) for device 0."""
+    from cuda.core import Device
+
+    dev = Device(0)
+    cc = dev.compute_capability
+    return f"sm_{cc[0] * 10 + cc[1]}"
 
 
 class CompilationResult:
@@ -32,7 +46,7 @@ class CompilationResult:
 def compile_basic_to_cubin(
     source: str,
     *,
-    gpu_arch: str = "sm_120",
+    gpu_arch: str | None = None,
     array_size: int | None = None,
     num_ctas: int | None = None,
 ) -> CompilationResult:
@@ -40,7 +54,8 @@ def compile_basic_to_cubin(
 
     Args:
         source: BASIC source code.
-        gpu_arch: Target GPU architecture (default: ``"sm_120"``).
+        gpu_arch: Target GPU architecture (e.g. ``"sm_90"``).
+            ``None`` auto-detects from the current device.
         array_size: Total elements per array; ``None`` infers from DIM.
         num_ctas: CTAs-per-CGA optimisation hint; ``None`` disables.
 
@@ -48,6 +63,9 @@ def compile_basic_to_cubin(
         A :class:`CompilationResult` with ``cubin_path`` and kernel ``meta``.
     """
     from .bytecode_backend import BytecodeBackend
+
+    if gpu_arch is None:
+        gpu_arch = detect_gpu_arch()
 
     tokens = lex(source)
     program = parse(tokens)
