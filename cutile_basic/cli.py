@@ -1,4 +1,4 @@
-"""CLI entry point for the BASIC to CUDA Tile IR transpiler."""
+"""CLI entry point for the BASIC to CUDA Tile IR compiler."""
 
 import argparse
 import sys

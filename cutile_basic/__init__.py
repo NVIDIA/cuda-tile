@@ -1,4 +1,4 @@
-"""BASIC to CUDA Tile IR MLIR transpiler."""
+"""BASIC to CUDA Tile IR MLIR compiler."""
 
 from __future__ import annotations
 

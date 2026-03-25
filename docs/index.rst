@@ -1,7 +1,7 @@
 cutile-basic
 ============
 
-A BASIC to CUDA Tile IR transpiler. Write GPU kernels in BASIC, compile them to
+A BASIC to CUDA Tile IR compiler. Write GPU kernels in BASIC, compile them to
 CUDA Tile IR (MLIR), and launch them on NVIDIA GPUs.
 
 .. only:: html
