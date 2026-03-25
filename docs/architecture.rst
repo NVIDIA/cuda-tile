@@ -118,10 +118,9 @@ Orchestrates the MLIR path: locates ``cuda-tile-translate`` and ``tileiras``
 tools, compiles MLIR to ``.tilebc`` to ``.cubin``, optionally detects GPU
 architecture and launches the kernel.
 
-GPU Runner
-^^^^^^^^^^
+GPU Utilities
+^^^^^^^^^^^^^
 
-:Module: ``cutile_basic.gpu_runner``
+:Module: ``cutile_basic.gpu``
 
-Handles GPU kernel launch via ``cuda.core`` and ``cupy``. Manages
-host/device memory allocation, data transfer, and kernel invocation.
+GPU architecture detection via ``cuda.core``.

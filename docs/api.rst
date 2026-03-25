@@ -15,10 +15,10 @@ cutile_basic.bytecode_backend
    :members:
    :undoc-members:
 
-cutile_basic.gpu_runner
------------------------
+cutile_basic.gpu
+----------------
 
-.. automodule:: cutile_basic.gpu_runner
+.. automodule:: cutile_basic.gpu
    :members:
    :undoc-members:
 
