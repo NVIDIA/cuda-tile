@@ -33,9 +33,7 @@ html_title = "cutile-basic"
 
 html_theme_options = {
     "icon_links": [],
-    "external_links": [
-        {"name": "PDF", "url": "_static/cutile-basic.pdf"},
-    ],
+    "external_links": [],
     "navigation_depth": 4,
     "show_toc_level": 2,
     "navbar_start": ["navbar-logo"],
@@ -49,26 +47,6 @@ html_theme_options = {
 }
 
 html_static_path = ["_static"]
-
-# -- Options for LaTeX / PDF output ------------------------------------------
-
-latex_logo = os.path.join(os.path.abspath(".."), "graphic.jpg")
-
-latex_engine = "xelatex"
-latex_use_xindy = False
-
-latex_documents = [
-    ("index", "cutile-basic.tex", "cutile-basic Documentation",
-     author, "manual"),
-]
-
-latex_elements = {
-    "papersize": "letterpaper",
-    "pointsize": "11pt",
-    "extraclassoptions": "openany",
-}
-
-latex_domain_indices = False
 
 # -- Extension configuration -------------------------------------------------
 

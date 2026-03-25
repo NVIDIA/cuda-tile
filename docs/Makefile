@@ -9,14 +9,9 @@ NPROC         := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || e
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
-.PHONY: help Makefile docs pdf
+.PHONY: help Makefile docs
 
-pdf:
-	@$(SPHINXBUILD) -M latexpdf "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
-
-docs: html pdf
-	@mkdir -p "$(BUILDDIR)/html/_static"
-	cp "$(BUILDDIR)/latex/cutile-basic.pdf" "$(BUILDDIR)/html/_static/cutile-basic.pdf"
+docs: html
 
 %: Makefile
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" -j$(NPROC) $(SPHINXOPTS) $(O)
