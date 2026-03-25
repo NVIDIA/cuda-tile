@@ -2,16 +2,16 @@
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch, mock_open
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from cutile_basic.gpu import detect_gpu_arch
 from cutile_basic._runner import (
     RunnerError,
     find_tools,
     compile_mlir_to_tilebc,
     compile_tilebc_to_cubin,
-    detect_gpu_arch,
     launch_cubin,
     compile_and_run,
 )
@@ -134,32 +134,23 @@ class TestCompileTilebcToCubin:
 
 class TestDetectGpuArch:
     def test_parses_compute_cap(self):
-        with patch("cutile_basic._runner.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                [], 0, stdout="12.0\n", stderr=""
-            )
+        mock_dev = MagicMock()
+        mock_dev.compute_capability = (12, 0)
+        with patch("cutile_basic.gpu.Device", return_value=mock_dev):
             assert detect_gpu_arch() == "sm_120"
 
     def test_older_gpu(self):
-        with patch("cutile_basic._runner.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                [], 0, stdout="8.9\n", stderr=""
-            )
+        mock_dev = MagicMock()
+        mock_dev.compute_capability = (8, 9)
+        with patch("cutile_basic.gpu.Device", return_value=mock_dev):
             assert detect_gpu_arch() == "sm_89"
 
-    def test_nvidia_smi_missing(self):
+    def test_device_error(self):
         with patch(
-            "cutile_basic._runner.subprocess.run", side_effect=FileNotFoundError
+            "cutile_basic.gpu.Device",
+            side_effect=RuntimeError("no device"),
         ):
-            with pytest.raises(RunnerError, match="nvidia-smi not found"):
-                detect_gpu_arch()
-
-    def test_bad_format(self):
-        with patch("cutile_basic._runner.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                [], 0, stdout="unknown\n", stderr=""
-            )
-            with pytest.raises(RunnerError, match="Unexpected compute_cap"):
+            with pytest.raises(RuntimeError):
                 detect_gpu_arch()
 
 
@@ -167,46 +158,55 @@ class TestDetectGpuArch:
 
 
 class TestLaunchCubin:
-    def test_driver_api_sequence(self, tmp_path):
+    def test_cuda_core_sequence(self, tmp_path):
         cubin = tmp_path / "test.cubin"
         cubin.write_bytes(b"\x00" * 64)
 
-        mock_libcuda = MagicMock()
-        # All calls return 0 (CUDA_SUCCESS)
-        mock_libcuda.cuInit.return_value = 0
-        mock_libcuda.cuDeviceGet.return_value = 0
-        mock_libcuda.cuCtxCreate_v2.return_value = 0
-        mock_libcuda.cuModuleLoadData.return_value = 0
-        mock_libcuda.cuModuleGetFunction.return_value = 0
-        mock_libcuda.cuLaunchKernel.return_value = 0
-        mock_libcuda.cuCtxSynchronize.return_value = 0
-        mock_libcuda.cuCtxDestroy_v2.return_value = 0
+        mock_dev = MagicMock()
+        mock_stream = MagicMock()
+        mock_dev.create_stream.return_value = mock_stream
+        mock_kernel = MagicMock()
+        mock_obj = MagicMock()
+        mock_obj.get_kernel.return_value = mock_kernel
 
-        with patch("cutile_basic._runner.ctypes.CDLL", return_value=mock_libcuda):
+        with (
+            patch("cutile_basic._runner.Device", return_value=mock_dev),
+            patch("cutile_basic._runner.ObjectCode") as mock_oc,
+            patch("cutile_basic._runner.launch") as mock_launch,
+        ):
+            mock_oc.from_cubin.return_value = mock_obj
             launch_cubin(cubin)
 
-        mock_libcuda.cuInit.assert_called_once_with(0)
-        mock_libcuda.cuLaunchKernel.assert_called_once()
-        mock_libcuda.cuCtxSynchronize.assert_called_once()
-        mock_libcuda.cuCtxDestroy_v2.assert_called_once()
+        mock_dev.set_current.assert_called_once()
+        mock_dev.create_stream.assert_called_once()
+        mock_oc.from_cubin.assert_called_once_with(str(cubin))
+        mock_obj.get_kernel.assert_called_once_with("main")
+        mock_launch.assert_called_once()
+        mock_stream.sync.assert_called_once()
 
-    def test_driver_error(self, tmp_path):
+    def test_device_error(self, tmp_path):
         cubin = tmp_path / "test.cubin"
         cubin.write_bytes(b"\x00" * 64)
 
-        mock_libcuda = MagicMock()
-        mock_libcuda.cuInit.return_value = 100  # CUDA_ERROR_NO_DEVICE
-
-        with patch("cutile_basic._runner.ctypes.CDLL", return_value=mock_libcuda):
-            with pytest.raises(RunnerError, match="CUDA driver error in cuInit"):
+        with patch(
+            "cutile_basic._runner.Device",
+            side_effect=RuntimeError("no device"),
+        ):
+            with pytest.raises(RunnerError, match="GPU launch failed"):
                 launch_cubin(cubin)
 
-    def test_libcuda_not_found(self, tmp_path):
+    def test_kernel_load_error(self, tmp_path):
         cubin = tmp_path / "test.cubin"
         cubin.write_bytes(b"\x00" * 64)
 
-        with patch("cutile_basic._runner.ctypes.CDLL", side_effect=OSError("not found")):
-            with pytest.raises(RunnerError, match="Cannot load libcuda.so"):
+        mock_dev = MagicMock()
+        mock_oc = MagicMock()
+        mock_oc.from_cubin.side_effect = RuntimeError("bad cubin")
+        with (
+            patch("cutile_basic._runner.Device", return_value=mock_dev),
+            patch("cutile_basic._runner.ObjectCode", mock_oc),
+        ):
+            with pytest.raises(RunnerError, match="GPU launch failed"):
                 launch_cubin(cubin)
 
 

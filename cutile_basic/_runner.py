@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-import ctypes
 import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+from cuda.core import Device, LaunchConfig, ObjectCode, launch
+
+from .gpu import detect_gpu_arch
 
 
 class RunnerError(Exception):
@@ -129,113 +132,19 @@ def compile_tilebc_to_cubin(
     return output_path
 
 
-def detect_gpu_arch() -> str:
-    """Query nvidia-smi for the GPU compute capability and return sm_XXX string."""
-    try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=compute_cap",
-                "--format=csv,noheader",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except FileNotFoundError:
-        raise RunnerError("nvidia-smi not found. Is the NVIDIA driver installed?")
-    except subprocess.CalledProcessError as e:
-        raise RunnerError(f"nvidia-smi failed: {e.stderr}")
-
-    # Output like "12.0" -> "sm_120"
-    line = result.stdout.strip().splitlines()[0].strip()
-    parts = line.split(".")
-    if len(parts) != 2:
-        raise RunnerError(f"Unexpected compute_cap format: {line!r}")
-
-    major, minor = parts
-    arch = f"sm_{major}{minor}"
-    return arch
-
-
 def launch_cubin(cubin_path: Path, kernel_name: str = "main") -> None:
-    """Load and launch a .cubin kernel via the CUDA driver API (ctypes)."""
+    """Load and launch a .cubin kernel via cuda.core."""
     try:
-        libcuda = ctypes.CDLL("libcuda.so")
-    except OSError:
-        raise RunnerError(
-            "Cannot load libcuda.so. Ensure NVIDIA driver is installed."
-        )
+        dev = Device(0)
+        dev.set_current()
+        stream = dev.create_stream()
 
-    # Type aliases
-    CUresult = ctypes.c_int
-    CUdevice = ctypes.c_int
-    CUcontext = ctypes.c_void_p
-    CUmodule = ctypes.c_void_p
-    CUfunction = ctypes.c_void_p
-
-    def _check(name: str, ret: int):
-        if ret != 0:
-            raise RunnerError(f"CUDA driver error in {name}: code {ret}")
-
-    # cuInit
-    _check("cuInit", libcuda.cuInit(0))
-
-    # cuDeviceGet
-    device = CUdevice()
-    _check("cuDeviceGet", libcuda.cuDeviceGet(ctypes.byref(device), 0))
-
-    # cuCtxCreate
-    ctx = CUcontext()
-    _check(
-        "cuCtxCreate",
-        libcuda.cuCtxCreate_v2(ctypes.byref(ctx), 0, device),
-    )
-
-    try:
-        # cuModuleLoad
-        module = CUmodule()
-        cubin_bytes = cubin_path.read_bytes()
-        _check(
-            "cuModuleLoadData",
-            libcuda.cuModuleLoadData(
-                ctypes.byref(module), cubin_bytes
-            ),
-        )
-
-        # cuModuleGetFunction
-        func = CUfunction()
-        _check(
-            "cuModuleGetFunction",
-            libcuda.cuModuleGetFunction(
-                ctypes.byref(func),
-                module,
-                kernel_name.encode("utf-8"),
-            ),
-        )
-
-        # cuLaunchKernel(func, gridDimX=1, gridDimY=1, gridDimZ=1,
-        #                blockDimX=1, blockDimY=1, blockDimZ=1,
-        #                sharedMemBytes=0, stream=0, kernelParams=NULL, extra=NULL)
-        _check(
-            "cuLaunchKernel",
-            libcuda.cuLaunchKernel(
-                func,
-                1, 1, 1,  # grid
-                1, 1, 1,  # block
-                0,         # shared mem
-                None,      # stream
-                None,      # kernel params
-                None,      # extra
-            ),
-        )
-
-        # cuCtxSynchronize
-        _check("cuCtxSynchronize", libcuda.cuCtxSynchronize())
-
-    finally:
-        # cuCtxDestroy
-        libcuda.cuCtxDestroy_v2(ctx)
+        kernel = ObjectCode.from_cubin(str(cubin_path)).get_kernel(kernel_name)
+        config = LaunchConfig(grid=(1, 1, 1), block=(1, 1, 1))
+        launch(stream, config, kernel)
+        stream.sync()
+    except Exception as e:
+        raise RunnerError(f"GPU launch failed: {e}") from e
 
 
 def compile_and_run(

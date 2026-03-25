@@ -6,6 +6,7 @@ from ._lexer import lex
 from ._parser import parse
 from ._analyzer import analyze
 from ._codegen import generate
+from .gpu import detect_gpu_arch
 
 __all__ = [
     "compile_basic_to_mlir",
@@ -21,15 +22,6 @@ def compile_basic_to_mlir(source: str) -> str:
     program = parse(tokens)
     analyzed = analyze(program)
     return generate(analyzed)
-
-
-def detect_gpu_arch() -> str:
-    """Return the GPU architecture string (e.g. ``'sm_80'``) for device 0."""
-    from cuda.core import Device
-
-    dev = Device(0)
-    cc = dev.compute_capability
-    return f"sm_{cc[0] * 10 + cc[1]}"
 
 
 class CompilationResult:
