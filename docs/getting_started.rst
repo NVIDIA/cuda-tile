@@ -6,12 +6,11 @@ Prerequisites
 
 **Hardware:**
 
-- NVIDIA GPU with compute capability 10.x or 12.x (Blackwell architecture
-  or later)
-- NVIDIA Driver r580 or later
+- NVIDIA GPU with compute capability 8.x, 10.x, 11.x, or 12.x
 
 **Software:**
 
+- NVIDIA Driver r580 or later
 - Python 3.10+
 - CUDA Toolkit 13.1 or later
 - ``cuda-tile[tileiras]``, ``cuda-python``, ``cuda-core``, ``cupy-cuda13x``

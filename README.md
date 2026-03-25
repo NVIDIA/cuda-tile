@@ -87,8 +87,8 @@ pip install -r requirements.txt
 ## Prerequisites
 
 - Python 3.10+
-- NVIDIA GPU with compute capability 10.x or 12.x (Blackwell architecture
-  or later) and driver r580+
+- NVIDIA GPU with compute capability 8.x, 10.x, 11.x, or 12.x
+- NVIDIA Driver r580 or later
 - CUDA Toolkit 13.1 or later
 - `cuda-tile[tileiras]` (bytecode backend + `tileiras` assembler)
 - `cuda-python`, `cuda-core`, `cupy-cuda13x` (GPU launch and memory management)
