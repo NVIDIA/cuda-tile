@@ -4,52 +4,54 @@ cutile-basic
 A BASIC to CUDA Tile IR transpiler. Write GPU kernels in BASIC, compile them to
 CUDA Tile IR (MLIR), and launch them on NVIDIA GPUs.
 
-.. grid:: 1 2 2 3
-   :gutter: 4
-   :padding: 2 2 0 0
-   :class-container: sd-text-center
+.. only:: html
 
-   .. grid-item-card:: Getting Started
-      :link: getting_started
-      :link-type: doc
+   .. grid:: 1 2 2 3
+      :gutter: 4
+      :padding: 2 2 0 0
+      :class-container: sd-text-center
 
-      Installation, dependencies, and your first compilation.
+      .. grid-item-card:: Getting Started
+         :link: getting_started
+         :link-type: doc
 
-   .. grid-item-card:: Execution Model
-      :link: execution_model
-      :link-type: doc
+         Installation, dependencies, and your first compilation.
 
-      Grids, blocks, tiles, and how BASIC maps to GPU parallelism.
+      .. grid-item-card:: Execution Model
+         :link: execution_model
+         :link-type: doc
 
-   .. grid-item-card:: Language Reference
-      :link: language_reference
-      :link-type: doc
+         Grids, blocks, tiles, and how BASIC maps to GPU parallelism.
 
-      Complete BASIC syntax reference including tile/GPU extensions.
+      .. grid-item-card:: Language Reference
+         :link: language_reference
+         :link-type: doc
 
-   .. grid-item-card:: Architecture
-      :link: architecture
-      :link-type: doc
+         Complete BASIC syntax reference including tile/GPU extensions.
 
-      Compiler pipeline from source to GPU execution.
+      .. grid-item-card:: Architecture
+         :link: architecture
+         :link-type: doc
 
-   .. grid-item-card:: API Reference
-      :link: api
-      :link-type: doc
+         Compiler pipeline from source to GPU execution.
 
-      Python API documentation for all modules.
+      .. grid-item-card:: API Reference
+         :link: api
+         :link-type: doc
 
-   .. grid-item-card:: Examples
-      :link: examples
-      :link-type: doc
+         Python API documentation for all modules.
 
-      Walkthrough of example programs from hello world to GEMM.
+      .. grid-item-card:: Examples
+         :link: examples
+         :link-type: doc
 
-   .. grid-item-card:: CLI Reference
-      :link: cli
-      :link-type: doc
+         Walkthrough of example programs from hello world to GEMM.
 
-      Command-line interface flags and usage.
+      .. grid-item-card:: CLI Reference
+         :link: cli
+         :link-type: doc
+
+         Command-line interface flags and usage.
 
 .. toctree::
    :maxdepth: 2
