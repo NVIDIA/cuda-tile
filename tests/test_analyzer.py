@@ -1,9 +1,9 @@
 """Tests for the BASIC analyzer."""
 
 import pytest
-from cutile_basic.lexer import lex
-from cutile_basic.parser import parse
-from cutile_basic.analyzer import analyze, AnalyzeError, BasicType
+from cutile_basic._lexer import lex
+from cutile_basic._parser import parse
+from cutile_basic._analyzer import analyze, AnalyzeError, BasicType
 
 
 def analyze_src(src: str):

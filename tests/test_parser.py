@@ -1,9 +1,9 @@
 """Tests for the BASIC parser."""
 
 import pytest
-from cutile_basic.lexer import lex
-from cutile_basic.parser import parse, ParseError
-from cutile_basic import ast_nodes as ast
+from cutile_basic._lexer import lex
+from cutile_basic._parser import parse, ParseError
+from cutile_basic import _ast_nodes as ast
 
 
 def parse_src(src: str) -> ast.Program:

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch, mock_open
 
 import pytest
 
-from cutile_basic.runner import (
+from cutile_basic._runner import (
     RunnerError,
     find_tools,
     compile_mlir_to_tilebc,
@@ -30,7 +30,7 @@ class TestFindTools:
         tileiras.write_text("#!/bin/sh\n")
         tileiras.chmod(0o755)
 
-        with patch("cutile_basic.runner._search_paths") as mock_search:
+        with patch("cutile_basic._runner._search_paths") as mock_search:
             # Only mock tileiras search; cuda-tile-translate uses explicit path
             def side_effect(name):
                 if name == "tileiras":
@@ -43,7 +43,7 @@ class TestFindTools:
             assert tools["tileiras"] == tileiras
 
     def test_missing_cuda_tile_translate_raises(self):
-        with patch("cutile_basic.runner._search_paths", return_value=[]):
+        with patch("cutile_basic._runner._search_paths", return_value=[]):
             with pytest.raises(RunnerError, match="cuda-tile-translate not found"):
                 find_tools()
 
@@ -60,7 +60,7 @@ class TestFindTools:
         fake_ctt.write_text("#!/bin/sh\n")
         fake_ctt.chmod(0o755)
 
-        with patch("cutile_basic.runner._search_paths", return_value=[]):
+        with patch("cutile_basic._runner._search_paths", return_value=[]):
             with pytest.raises(RunnerError, match="tileiras not found"):
                 find_tools(cuda_tile_translate_path=str(fake_ctt))
 
@@ -78,7 +78,7 @@ class TestCompileMlirToTilebc:
             output.write_bytes(b"tilebc-data")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-        with patch("cutile_basic.runner.subprocess.run", side_effect=fake_run):
+        with patch("cutile_basic._runner.subprocess.run", side_effect=fake_run):
             result = compile_mlir_to_tilebc("mlir text", output, tools)
 
         assert result == output
@@ -88,7 +88,7 @@ class TestCompileMlirToTilebc:
         output = tmp_path / "out.tilebc"
         tools = {"cuda-tile-translate": Path("/usr/bin/fake-ctt")}
 
-        with patch("cutile_basic.runner.subprocess.run") as mock_run:
+        with patch("cutile_basic._runner.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 [], 1, stdout="", stderr="some error"
             )
@@ -110,7 +110,7 @@ class TestCompileTilebcToCubin:
             output.write_bytes(b"cubin-data")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-        with patch("cutile_basic.runner.subprocess.run", side_effect=fake_run):
+        with patch("cutile_basic._runner.subprocess.run", side_effect=fake_run):
             result = compile_tilebc_to_cubin(tilebc, output, "sm_120", tools)
 
         assert result == output
@@ -121,7 +121,7 @@ class TestCompileTilebcToCubin:
         output = tmp_path / "out.cubin"
         tools = {"tileiras": Path("/usr/local/cuda/bin/tileiras")}
 
-        with patch("cutile_basic.runner.subprocess.run") as mock_run:
+        with patch("cutile_basic._runner.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 [], 1, stdout="", stderr="asm error"
             )
@@ -134,14 +134,14 @@ class TestCompileTilebcToCubin:
 
 class TestDetectGpuArch:
     def test_parses_compute_cap(self):
-        with patch("cutile_basic.runner.subprocess.run") as mock_run:
+        with patch("cutile_basic._runner.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 [], 0, stdout="12.0\n", stderr=""
             )
             assert detect_gpu_arch() == "sm_120"
 
     def test_older_gpu(self):
-        with patch("cutile_basic.runner.subprocess.run") as mock_run:
+        with patch("cutile_basic._runner.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 [], 0, stdout="8.9\n", stderr=""
             )
@@ -149,13 +149,13 @@ class TestDetectGpuArch:
 
     def test_nvidia_smi_missing(self):
         with patch(
-            "cutile_basic.runner.subprocess.run", side_effect=FileNotFoundError
+            "cutile_basic._runner.subprocess.run", side_effect=FileNotFoundError
         ):
             with pytest.raises(RunnerError, match="nvidia-smi not found"):
                 detect_gpu_arch()
 
     def test_bad_format(self):
-        with patch("cutile_basic.runner.subprocess.run") as mock_run:
+        with patch("cutile_basic._runner.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 [], 0, stdout="unknown\n", stderr=""
             )
@@ -182,7 +182,7 @@ class TestLaunchCubin:
         mock_libcuda.cuCtxSynchronize.return_value = 0
         mock_libcuda.cuCtxDestroy_v2.return_value = 0
 
-        with patch("cutile_basic.runner.ctypes.CDLL", return_value=mock_libcuda):
+        with patch("cutile_basic._runner.ctypes.CDLL", return_value=mock_libcuda):
             launch_cubin(cubin)
 
         mock_libcuda.cuInit.assert_called_once_with(0)
@@ -197,7 +197,7 @@ class TestLaunchCubin:
         mock_libcuda = MagicMock()
         mock_libcuda.cuInit.return_value = 100  # CUDA_ERROR_NO_DEVICE
 
-        with patch("cutile_basic.runner.ctypes.CDLL", return_value=mock_libcuda):
+        with patch("cutile_basic._runner.ctypes.CDLL", return_value=mock_libcuda):
             with pytest.raises(RunnerError, match="CUDA driver error in cuInit"):
                 launch_cubin(cubin)
 
@@ -205,7 +205,7 @@ class TestLaunchCubin:
         cubin = tmp_path / "test.cubin"
         cubin.write_bytes(b"\x00" * 64)
 
-        with patch("cutile_basic.runner.ctypes.CDLL", side_effect=OSError("not found")):
+        with patch("cutile_basic._runner.ctypes.CDLL", side_effect=OSError("not found")):
             with pytest.raises(RunnerError, match="Cannot load libcuda.so"):
                 launch_cubin(cubin)
 
@@ -232,9 +232,9 @@ class TestCompileAndRun:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         with (
-            patch("cutile_basic.runner.find_tools", return_value=tools),
-            patch("cutile_basic.runner.detect_gpu_arch", return_value="sm_120"),
-            patch("cutile_basic.runner.subprocess.run", side_effect=fake_run),
+            patch("cutile_basic._runner.find_tools", return_value=tools),
+            patch("cutile_basic._runner.detect_gpu_arch", return_value="sm_120"),
+            patch("cutile_basic._runner.subprocess.run", side_effect=fake_run),
         ):
             result = compile_and_run(
                 "mlir text", compile_only=True, output_dir=tmp_path
@@ -257,10 +257,10 @@ class TestCompileAndRun:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         with (
-            patch("cutile_basic.runner.find_tools", return_value=tools),
-            patch("cutile_basic.runner.detect_gpu_arch", return_value="sm_120"),
-            patch("cutile_basic.runner.subprocess.run", side_effect=fake_run),
-            patch("cutile_basic.runner.launch_cubin") as mock_launch,
+            patch("cutile_basic._runner.find_tools", return_value=tools),
+            patch("cutile_basic._runner.detect_gpu_arch", return_value="sm_120"),
+            patch("cutile_basic._runner.subprocess.run", side_effect=fake_run),
+            patch("cutile_basic._runner.launch_cubin") as mock_launch,
         ):
             result = compile_and_run(
                 "mlir text", compile_only=False, output_dir=tmp_path

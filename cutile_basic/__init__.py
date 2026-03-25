@@ -1,9 +1,11 @@
 """BASIC to CUDA Tile IR MLIR transpiler."""
 
-from .lexer import lex
-from .parser import parse
-from .analyzer import analyze
-from .codegen import generate
+from ._lexer import lex
+from ._parser import parse
+from ._analyzer import analyze
+from ._codegen import generate
+
+__all__ = ["compile_basic_to_mlir"]
 
 
 def compile_basic_to_mlir(source: str) -> str:

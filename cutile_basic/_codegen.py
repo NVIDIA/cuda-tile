@@ -1,8 +1,8 @@
 """Code generator: AST → CUDA Tile IR MLIR text."""
 
 from __future__ import annotations
-from . import ast_nodes as ast
-from .analyzer import AnalyzedProgram, BasicType, SymbolInfo
+from . import _ast_nodes as ast
+from ._analyzer import AnalyzedProgram, BasicType, SymbolInfo
 
 
 class CodeGenError(Exception):

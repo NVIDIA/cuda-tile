@@ -1,9 +1,9 @@
 """Recursive descent parser for BASIC."""
 
 from __future__ import annotations
-from .tokens import Token, TokenType, KEYWORDS
-from .lexer import BUILTIN_FUNCTIONS
-from . import ast_nodes as ast
+from ._tokens import Token, TokenType, KEYWORDS
+from ._lexer import BUILTIN_FUNCTIONS
+from . import _ast_nodes as ast
 
 
 class ParseError(Exception):

@@ -4,11 +4,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from .lexer import lex, LexError
-from .parser import parse, ParseError
-from .analyzer import analyze, AnalyzeError
-from .codegen import generate, CodeGenError
-from .runner import compile_and_run, RunnerError
+from ._lexer import lex, LexError
+from ._parser import parse, ParseError
+from ._analyzer import analyze, AnalyzeError
+from ._codegen import generate, CodeGenError
+from ._runner import compile_and_run, RunnerError
 
 
 def main():

@@ -56,7 +56,7 @@ Stage Details
 Lexer
 ^^^^^
 
-:Module: ``cutile_basic.lexer``
+:Module: ``cutile_basic._lexer``
 
 Tokenizes BASIC source text into a flat list of ``Token`` objects. Each token
 carries its type (from ``TokenType`` enum), string value, line number, and column.
@@ -67,7 +67,7 @@ The lexer recognizes all standard BASIC keywords plus the tile extensions
 Parser
 ^^^^^^
 
-:Module: ``cutile_basic.parser``
+:Module: ``cutile_basic._parser``
 
 Converts the token stream into an AST (``Program`` containing a list of
 ``Statement`` nodes). Handles BASIC line numbers and builds a ``line_map``
@@ -79,7 +79,7 @@ with correct operator precedence.
 Analyzer
 ^^^^^^^^
 
-:Module: ``cutile_basic.analyzer``
+:Module: ``cutile_basic._analyzer``
 
 Performs semantic analysis on the AST:
 
@@ -94,7 +94,7 @@ Produces an ``AnalyzedProgram`` with a symbol table and metadata.
 Codegen (MLIR Path)
 ^^^^^^^^^^^^^^^^^^^^
 
-:Module: ``cutile_basic.codegen``
+:Module: ``cutile_basic._codegen``
 
 Generates CUDA Tile IR MLIR text from the analyzed program. ``INPUT`` variables
 become kernel parameters. The output is a ``cuda_tile.module`` with an entry
@@ -112,7 +112,7 @@ a ``.cubin`` via ``tileiras``.
 Runner
 ^^^^^^
 
-:Module: ``cutile_basic.runner``
+:Module: ``cutile_basic._runner``
 
 Orchestrates the MLIR path: locates ``cuda-tile-translate`` and ``tileiras``
 tools, compiles MLIR to ``.tilebc`` to ``.cubin``, optionally detects GPU

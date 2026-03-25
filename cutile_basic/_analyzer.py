@@ -3,7 +3,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from . import ast_nodes as ast
+from . import _ast_nodes as ast
 
 
 class AnalyzeError(Exception):

@@ -65,8 +65,8 @@ from cuda.tile._bytecode.encodings import (
 )
 from cuda.tile._bytecode.type import PaddingValue, SimpleType, TypeTable
 
-from . import ast_nodes as ast
-from .analyzer import AnalyzedProgram, BasicType
+from . import _ast_nodes as ast
+from ._analyzer import AnalyzedProgram, BasicType
 
 
 class BytecodeBackendError(Exception):
