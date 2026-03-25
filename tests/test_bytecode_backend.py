@@ -30,9 +30,30 @@ def _tileiras_available() -> bool:
 
 
 def _detect_gpu_arch() -> str:
-    """Detect the GPU architecture from nvidia-smi, e.g. 'sm_80'."""
-    from cutile_basic._runner import detect_gpu_arch
-    return detect_gpu_arch()
+    """Detect the GPU architecture, e.g. 'sm_80'.
+
+    Tries nvidia-smi first, then falls back to the CUDA driver API
+    (for environments where nvidia-smi is not installed).
+    """
+    try:
+        from cutile_basic._runner import detect_gpu_arch
+        return detect_gpu_arch()
+    except Exception:
+        pass
+    import ctypes
+    libcuda = ctypes.CDLL("libcuda.so")
+    libcuda.cuInit(0)
+    device = ctypes.c_int()
+    libcuda.cuDeviceGet(ctypes.byref(device), 0)
+    major = ctypes.c_int()
+    minor = ctypes.c_int()
+    libcuda.cuDeviceGetAttribute(
+        ctypes.byref(major), 75, device  # CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR
+    )
+    libcuda.cuDeviceGetAttribute(
+        ctypes.byref(minor), 76, device  # CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR
+    )
+    return f"sm_{major.value * 10 + minor.value}"
 
 
 requires_tileiras = pytest.mark.skipif(
