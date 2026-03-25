@@ -2,7 +2,6 @@
 
 import os
 import shutil
-import subprocess
 
 import pytest
 
@@ -37,15 +36,8 @@ requires_tileiras = pytest.mark.skipif(
 @pytest.fixture(scope="session")
 def gpu_arch():
     """Session-scoped GPU architecture string (e.g. 'sm_80')."""
-    import ctypes
-    libcuda = ctypes.CDLL("libcuda.so")
-    assert libcuda.cuInit(0) == 0
-    dev = ctypes.c_int()
-    assert libcuda.cuDeviceGet(ctypes.byref(dev), 0) == 0
-    major, minor = ctypes.c_int(), ctypes.c_int()
-    libcuda.cuDeviceGetAttribute(ctypes.byref(major), 75, dev)
-    libcuda.cuDeviceGetAttribute(ctypes.byref(minor), 76, dev)
-    return f"sm_{major.value * 10 + minor.value}"
+    from cutile_basic.gpu_runner import detect_gpu_arch
+    return detect_gpu_arch()
 
 
 def _compile(source: str) -> bytes:

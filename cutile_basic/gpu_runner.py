@@ -1,28 +1,20 @@
-"""GPU kernel launch via CUDA driver API (ctypes)."""
+"""GPU kernel launch via cuda.core and cupy."""
 
 from __future__ import annotations
 
-import array
-import ctypes
-from pathlib import Path
+import cupy as cp
+from cuda.core import Device, LaunchConfig, ObjectCode, launch
 
 
 class GpuRunnerError(Exception):
     pass
 
 
-def _get_libcuda():
-    try:
-        return ctypes.CDLL("libcuda.so")
-    except OSError:
-        raise GpuRunnerError(
-            "Cannot load libcuda.so. Ensure NVIDIA driver is installed."
-        )
-
-
-def _check(name: str, ret: int):
-    if ret != 0:
-        raise GpuRunnerError(f"CUDA driver error in {name}: code {ret}")
+def detect_gpu_arch() -> str:
+    """Return the GPU architecture string (e.g. 'sm_80') for device 0."""
+    dev = Device(0)
+    cc = dev.compute_capability
+    return f"sm_{cc[0] * 10 + cc[1]}"
 
 
 def launch_kernel(
@@ -54,7 +46,6 @@ def launch_kernel(
     inputs = inputs or {}
     outputs = outputs or []
 
-    # Infer param_order if not given
     if param_order is None:
         seen: set[str] = set()
         param_order = []
@@ -63,149 +54,50 @@ def launch_kernel(
                 seen.add(name)
                 param_order.append(name)
 
-    # Infer sizes from input data if not given
     if sizes is None:
-        sizes = {}
-        for name, data in inputs.items():
-            sizes[name] = len(data)
+        sizes = {name: len(data) for name, data in inputs.items()}
 
-    # No-param kernel (e.g. print-only)
     if not param_order:
         return _launch_no_params(cubin_path, grid_size, kernel_name)
 
-    libcuda = _get_libcuda()
-    _check("cuInit", libcuda.cuInit(0))
+    dev = Device(0)
+    dev.set_current()
+    s = dev.create_stream()
 
-    device = ctypes.c_int()
-    _check("cuDeviceGet", libcuda.cuDeviceGet(ctypes.byref(device), 0))
+    obj = ObjectCode.from_cubin(cubin_path)
+    kernel = obj.get_kernel(kernel_name)
 
-    ctx = ctypes.c_void_p()
-    _check("cuCtxCreate", libcuda.cuCtxCreate_v2(ctypes.byref(ctx), 0, device))
+    arrays: dict[str, cp.ndarray] = {}
+    for name in param_order:
+        n_elems = sizes.get(name, 0)
+        if name in inputs:
+            arrays[name] = cp.array(inputs[name], dtype=cp.float32)
+        else:
+            arrays[name] = cp.zeros(n_elems, dtype=cp.float32)
 
-    d_ptrs: dict[str, ctypes.c_uint64] = {}
-    h_arrays: dict[str, array.array] = {}
+    config = LaunchConfig(grid=(grid_size, 1, 1), block=(1, 1, 1))
+    kernel_args = [arrays[name].data.ptr for name in param_order]
+    launch(s, config, kernel, *kernel_args)
+    s.sync()
 
-    try:
-        # Load module
-        module = ctypes.c_void_p()
-        cubin_data = Path(cubin_path).read_bytes()
-        _check(
-            "cuModuleLoadData",
-            libcuda.cuModuleLoadData(ctypes.byref(module), cubin_data),
-        )
-        func = ctypes.c_void_p()
-        _check(
-            "cuModuleGetFunction",
-            libcuda.cuModuleGetFunction(
-                ctypes.byref(func), module, kernel_name.encode("utf-8")
-            ),
-        )
+    results: dict[str, list[float]] = {}
+    for name in outputs:
+        results[name] = cp.asnumpy(arrays[name]).tolist()
 
-        # Allocate device memory for each parameter
-        for name in param_order:
-            n_elems = sizes.get(name, 0)
-            nbytes = n_elems * 4  # f32
-            d_ptr = ctypes.c_uint64()
-            _check(f"cuMemAlloc({name})", libcuda.cuMemAlloc_v2(ctypes.byref(d_ptr), nbytes))
-            d_ptrs[name] = d_ptr
-
-        # Copy inputs host → device
-        for name, data in inputs.items():
-            if name not in d_ptrs:
-                continue
-            h_arr = array.array("f", data)
-            h_arrays[name] = h_arr
-            nbytes = sizes[name] * 4
-            h_buf = (ctypes.c_char * nbytes).from_buffer(h_arr)
-            _check(
-                f"cuMemcpyHtoD({name})",
-                libcuda.cuMemcpyHtoD_v2(
-                    d_ptrs[name], ctypes.addressof(h_buf), nbytes,
-                ),
-            )
-
-        # Build kernel params (array of pointers to device pointers)
-        n_params = len(param_order)
-        param_values = (ctypes.c_uint64 * n_params)(
-            *(d_ptrs[name].value for name in param_order)
-        )
-        param_ptrs = (ctypes.c_void_p * n_params)(
-            *(ctypes.addressof(param_values) + i * 8 for i in range(n_params))
-        )
-
-        # Launch
-        _check(
-            "cuLaunchKernel",
-            libcuda.cuLaunchKernel(
-                func,
-                grid_size, 1, 1,
-                1, 1, 1,
-                0, None,
-                param_ptrs, None,
-            ),
-        )
-        _check("cuCtxSynchronize", libcuda.cuCtxSynchronize())
-
-        # Copy outputs device → host
-        results: dict[str, list[float]] = {}
-        for name in outputs:
-            n_elems = sizes[name]
-            nbytes = n_elems * 4
-            h_arr = h_arrays.get(name) or array.array("f", [0.0] * n_elems)
-            h_buf = (ctypes.c_char * nbytes).from_buffer(h_arr)
-            _check(
-                f"cuMemcpyDtoH({name})",
-                libcuda.cuMemcpyDtoH_v2(
-                    ctypes.addressof(h_buf), d_ptrs[name], nbytes,
-                ),
-            )
-            results[name] = list(h_arr)
-
-        return results
-
-    finally:
-        for d_ptr in d_ptrs.values():
-            libcuda.cuMemFree_v2(d_ptr)
-        libcuda.cuCtxDestroy_v2(ctx)
+    return results
 
 
 def _launch_no_params(cubin_path: str, grid_size: int, kernel_name: str) -> dict:
     """Launch a kernel that takes no parameters."""
-    libcuda = _get_libcuda()
-    _check("cuInit", libcuda.cuInit(0))
+    dev = Device(0)
+    dev.set_current()
+    s = dev.create_stream()
 
-    device = ctypes.c_int()
-    _check("cuDeviceGet", libcuda.cuDeviceGet(ctypes.byref(device), 0))
+    obj = ObjectCode.from_cubin(cubin_path)
+    kernel = obj.get_kernel(kernel_name)
 
-    ctx = ctypes.c_void_p()
-    _check("cuCtxCreate", libcuda.cuCtxCreate_v2(ctypes.byref(ctx), 0, device))
-
-    try:
-        module = ctypes.c_void_p()
-        cubin_data = Path(cubin_path).read_bytes()
-        _check(
-            "cuModuleLoadData",
-            libcuda.cuModuleLoadData(ctypes.byref(module), cubin_data),
-        )
-        func = ctypes.c_void_p()
-        _check(
-            "cuModuleGetFunction",
-            libcuda.cuModuleGetFunction(
-                ctypes.byref(func), module, kernel_name.encode("utf-8")
-            ),
-        )
-        _check(
-            "cuLaunchKernel",
-            libcuda.cuLaunchKernel(
-                func,
-                grid_size, 1, 1,
-                1, 1, 1,
-                0, None,
-                None, None,
-            ),
-        )
-        _check("cuCtxSynchronize", libcuda.cuCtxSynchronize())
-    finally:
-        libcuda.cuCtxDestroy_v2(ctx)
+    config = LaunchConfig(grid=(grid_size, 1, 1), block=(1, 1, 1))
+    launch(s, config, kernel)
+    s.sync()
 
     return {}
