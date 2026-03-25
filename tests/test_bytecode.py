@@ -11,7 +11,7 @@ from cutile_basic import detect_gpu_arch
 from cutile_basic._lexer import lex
 from cutile_basic._parser import parse
 from cutile_basic._analyzer import analyze
-from cutile_basic.bytecode_backend import BytecodeBackend
+from cutile_basic._bytecode import BytecodeBackend
 
 TILEIRAS_MAGIC = b"\x7fTileIR"
 

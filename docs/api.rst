@@ -8,10 +8,10 @@ cutile_basic
    :members:
    :undoc-members:
 
-cutile_basic.bytecode_backend
------------------------------
+cutile_basic._bytecode
+----------------------
 
-.. automodule:: cutile_basic.bytecode_backend
+.. automodule:: cutile_basic._bytecode
    :members:
    :undoc-members:
 

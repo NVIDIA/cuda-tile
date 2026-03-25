@@ -103,7 +103,7 @@ function.
 Bytecode Backend
 ^^^^^^^^^^^^^^^^
 
-:Module: ``cutile_basic.bytecode_backend``
+:Module: ``cutile_basic._bytecode``
 
 Compiles the analyzed program directly to cuTile bytecode using the
 ``cuda.tile._bytecode`` Python APIs. Bypasses MLIR text entirely and produces

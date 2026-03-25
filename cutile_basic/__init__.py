@@ -62,7 +62,7 @@ def compile_basic_to_cubin(
     Returns:
         A :class:`CompilationResult` with ``cubin_path`` and kernel ``meta``.
     """
-    from .bytecode_backend import BytecodeBackend
+    from ._bytecode import BytecodeBackend
 
     if gpu_arch is None:
         gpu_arch = detect_gpu_arch()
