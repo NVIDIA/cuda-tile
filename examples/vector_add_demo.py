@@ -4,59 +4,44 @@
 import sys
 from pathlib import Path
 
+import cupy as cp
+from cuda.core import Device, LaunchConfig, ObjectCode, launch
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cutile_basic._lexer import lex
-from cutile_basic._parser import parse
-from cutile_basic._analyzer import analyze
-from cutile_basic.bytecode_backend import BytecodeBackend
-from cutile_basic.gpu_runner import launch_kernel
+from cutile_basic import compile_basic_to_cubin
 
 N = 1024
 
 
 def main():
-    source_path = Path(__file__).parent / "vector_add.bas"
-    source = source_path.read_text()
+    source = (Path(__file__).parent / "vector_add.bas").read_text()
 
-    print(f"[1/4] Lexing & parsing {source_path.name} ...", flush=True)
-    tokens = lex(source)
-    program = parse(tokens)
-
-    print("[2/4] Analyzing ...", flush=True)
-    analyzed = analyze(program)
-
-    print("[3/4] Compiling to cubin (bytecode backend) ...", flush=True)
-    backend = BytecodeBackend(analyzed, array_size=N)
-
-    if "--dump-ir" in sys.argv:
-        print("\n" + backend.dump_tileir() + "\n")
-
-    cubin_path = backend.compile_to_cubin()
-    meta = backend._array_kernel_meta
-    print(f"       Arrays: {meta['all_arrays']}, "
+    print("[1/2] Compiling to cubin ...", flush=True)
+    result = compile_basic_to_cubin(source, array_size=N)
+    meta = result.meta
+    print(f"      Arrays: {meta['all_arrays']}, "
           f"tile_size={meta['tile_size']}, "
           f"grid_size={meta['grid_size']}")
 
-    print("[4/4] Launching kernel on GPU ...", flush=True)
-    # Prepare input data: A = [0, 1, 2, ..., 1023], B = [0, 2, 4, ..., 2046]
-    h_a = [float(i) for i in range(N)]
-    h_b = [float(i) * 2.0 for i in range(N)]
+    print("[2/2] Launching kernel on GPU ...", flush=True)
+    dev = Device(0)
+    dev.set_current()
+    stream = dev.create_stream()
 
-    results = launch_kernel(
-        cubin_path=cubin_path,
-        inputs={"A": h_a, "B": h_b},
-        outputs=["C"],
-        param_order=meta["all_arrays"],
-        sizes={name: meta["array_size"] for name in meta["all_arrays"]},
-        grid_size=meta["grid_size"],
-    )
+    kernel = ObjectCode.from_cubin(result.cubin_path).get_kernel("main")
 
-    h_c = results["C"]
+    d_a = cp.arange(N, dtype=cp.float32)
+    d_b = cp.arange(N, dtype=cp.float32) * 2.0
+    d_c = cp.zeros(N, dtype=cp.float32)
 
-    # Verify
-    expected = [a + b for a, b in zip(h_a, h_b)]
-    max_diff = max(abs(h_c[i] - expected[i]) for i in range(N))
+    config = LaunchConfig(grid=(meta["grid_size"], 1, 1), block=(1, 1, 1))
+    launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
+    stream.sync()
+
+    h_c = cp.asnumpy(d_c)
+    expected = cp.asnumpy(d_a + d_b)
+    max_diff = float(max(abs(h_c[i] - expected[i]) for i in range(N)))
 
     print(f"\nResults (showing 5 samples of {N}):")
     for i in [0, 1, 511, 512, 1023]:

@@ -1,57 +1,50 @@
 #!/usr/bin/env python3
 """End-to-end GEMM: compile BASIC → cubin, launch on GPU, verify results."""
 
+import random
 import sys
 from pathlib import Path
 
+import cupy as cp
+from cuda.core import Device, LaunchConfig, ObjectCode, launch
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cutile_basic._lexer import lex
-from cutile_basic._parser import parse
-from cutile_basic._analyzer import analyze
-from cutile_basic.bytecode_backend import BytecodeBackend
-from cutile_basic.gpu_runner import launch_kernel
+from cutile_basic import compile_basic_to_cubin
 
 
 def main():
-    source_path = Path(__file__).parent / "gemm.bas"
-    source = source_path.read_text()
+    source = (Path(__file__).parent / "gemm.bas").read_text()
 
-    print(f"[1/4] Lexing & parsing {source_path.name} ...", flush=True)
-    tokens = lex(source)
-    program = parse(tokens)
-
-    print("[2/4] Analyzing ...", flush=True)
-    analyzed = analyze(program)
-
-    print("[3/4] Compiling to cubin (bytecode backend) ...", flush=True)
-    backend = BytecodeBackend(analyzed, num_ctas=2)
-    cubin_path = backend.compile_to_cubin()
-    meta = backend._array_kernel_meta
+    print("[1/2] Compiling to cubin ...", flush=True)
+    result = compile_basic_to_cubin(source, num_ctas=2)
+    meta = result.meta
     M, N, K = meta["M"], meta["N"], meta["K"]
     tm, tn, tk = meta["tm"], meta["tn"], meta["tk"]
-    print(f"       M={M}, N={N}, K={K}, "
+    print(f"      M={M}, N={N}, K={K}, "
           f"tiles=({tm}x{tn}x{tk}), "
           f"grid_size={meta['grid_size']}")
 
-    print("[4/4] Launching kernel on GPU ...", flush=True)
-    import random
+    print("[2/2] Launching kernel on GPU ...", flush=True)
+    dev = Device(0)
+    dev.set_current()
+    stream = dev.create_stream()
+
+    kernel = ObjectCode.from_cubin(result.cubin_path).get_kernel("main")
+
     random.seed(42)
-    h_a = [random.uniform(-1.0, 1.0) for _ in range(M * K)]
-    h_b = [random.uniform(-1.0, 1.0) for _ in range(K * N)]
+    d_a = cp.array([random.uniform(-1.0, 1.0) for _ in range(M * K)], dtype=cp.float32)
+    d_b = cp.array([random.uniform(-1.0, 1.0) for _ in range(K * N)], dtype=cp.float32)
+    d_c = cp.zeros(M * N, dtype=cp.float32)
 
-    a_name, b_name, c_name = meta["all_arrays"]
-    results = launch_kernel(
-        cubin_path=cubin_path,
-        inputs={a_name: h_a, b_name: h_b},
-        outputs=[c_name],
-        param_order=meta["all_arrays"],
-        sizes={a_name: M * K, b_name: K * N, c_name: M * N},
-        grid_size=meta["grid_size"],
-    )
-    h_c = results[c_name]
+    config = LaunchConfig(grid=(meta["grid_size"], 1, 1), block=(1, 1, 1))
+    launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
+    stream.sync()
 
-    # Verify against naive CPU matmul
+    h_a = cp.asnumpy(d_a)
+    h_b = cp.asnumpy(d_b)
+    h_c = cp.asnumpy(d_c)
+
     expected = [0.0] * (M * N)
     for i in range(M):
         for j in range(N):

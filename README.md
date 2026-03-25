@@ -34,10 +34,10 @@ Compile and run on a GPU:
 python -m cutile_basic.cli examples/vector_add.bas --run
 ```
 
-Or use the Python API:
+Or use the Python API to compile straight to a `.cubin`:
 
 ```python
-from cutile_basic import compile_basic_to_mlir
+from cutile_basic import compile_basic_to_cubin
 
 source = """
 10 DIM A(128), B(128), C(128)
@@ -46,6 +46,16 @@ source = """
 40 OUTPUT C
 50 END
 """
+
+result = compile_basic_to_cubin(source)
+print(result.cubin_path)   # path to the compiled .cubin
+print(result.meta)          # kernel metadata (arrays, grid size, etc.)
+```
+
+To emit MLIR text instead:
+
+```python
+from cutile_basic import compile_basic_to_mlir
 
 print(compile_basic_to_mlir(source))
 ```

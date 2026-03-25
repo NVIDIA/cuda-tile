@@ -4,14 +4,11 @@
 import sys
 from pathlib import Path
 
-# Add project root to path so we can import cutile_basic
+from cuda.core import Device, LaunchConfig, ObjectCode, launch
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from cutile_basic._lexer import lex
-from cutile_basic._parser import parse
-from cutile_basic._analyzer import analyze
-from cutile_basic.bytecode_backend import BytecodeBackend
-from cutile_basic.gpu_runner import launch_kernel
+from cutile_basic import compile_basic_to_cubin
 
 
 def main():
@@ -19,24 +16,21 @@ def main():
         print(f"Usage: {sys.argv[0]} <program.bas>")
         sys.exit(1)
 
-    source_path = sys.argv[1]
-    source = Path(source_path).read_text()
+    source = Path(sys.argv[1]).read_text()
 
-    print(f"[1/4] Lexing & parsing {source_path} ...", flush=True)
-    tokens = lex(source)
-    program = parse(tokens)
+    print("[1/2] Compiling to cubin ...", flush=True)
+    result = compile_basic_to_cubin(source)
 
-    print("[2/4] Analyzing ...", flush=True)
-    analyzed = analyze(program)
+    print("[2/2] Launching kernel on GPU ...", flush=True)
+    dev = Device(0)
+    dev.set_current()
+    stream = dev.create_stream()
 
-    print("[3/4] Compiling to cubin (bytecode backend) ...", flush=True)
-    backend = BytecodeBackend(analyzed)
-    cubin_path = backend.compile_to_cubin()
+    kernel = ObjectCode.from_cubin(result.cubin_path).get_kernel("main")
+    config = LaunchConfig(grid=(1, 1, 1), block=(1, 1, 1))
+    launch(stream, config, kernel)
+    stream.sync()
 
-    print(f"[4/4] Launching kernel on GPU ...", flush=True)
-    sys.stdout.flush()
-    sys.stderr.flush()
-    launch_kernel(cubin_path)
     print("[done] Kernel execution complete.")
 
 
