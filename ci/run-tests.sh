@@ -10,7 +10,7 @@ export PATH="$HOME/.local/bin:$PATH"
 uv venv --clear --python python3 "$REPO_ROOT/.venv"
 source "$REPO_ROOT/.venv/bin/activate"
 
-uv pip install pytest "cuda-tile[tileiras]" cuda-python cuda-core cupy-cuda13x
+uv pip install -r "$REPO_ROOT/requirements.txt"
 
 nvidia-smi
 
