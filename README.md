@@ -73,9 +73,9 @@ print(compile_basic_to_mlir(source))
 End-to-end GPU demos:
 
 ```bash
-python examples/vector_add_demo.py
-python examples/gemm_demo.py
-python examples/gpu_demo.py examples/vector_add.bas  # general-purpose launcher
+python examples/vector_add.py
+python examples/gemm.py
+python examples/hello.py
 ```
 
 ## Installation

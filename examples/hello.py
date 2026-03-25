@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end demo: compile a BASIC program and run it on the GPU."""
+"""End-to-end demo: compile hello.bas and run it on the GPU."""
 
 import sys
 from pathlib import Path
@@ -12,11 +12,7 @@ from cutile_basic import compile_basic_to_cubin
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <program.bas>")
-        sys.exit(1)
-
-    source = Path(sys.argv[1]).read_text()
+    source = (Path(__file__).parent / "hello.bas").read_text()
 
     print("[1/2] Compiling to cubin ...", flush=True)
     result = compile_basic_to_cubin(source)

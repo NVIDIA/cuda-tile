@@ -85,7 +85,7 @@ Run it end-to-end with the Python demo script:
 
 .. code-block:: bash
 
-   $ python examples/vector_add_demo.py
+   $ python examples/vector_add.py
 
 This script lexes, parses, analyzes, compiles to cubin via the bytecode backend,
 launches the kernel with test data, and verifies the result.
@@ -118,25 +118,24 @@ Run it with:
 
 .. code-block:: bash
 
-   $ python examples/gemm_demo.py
+   $ python examples/gemm.py
 
 Python Demo Scripts
 -------------------
 
 Three demo scripts in ``examples/`` show end-to-end GPU execution:
 
-``vector_add_demo.py``
+``vector_add.py``
    Compiles ``vector_add.bas``, launches with 1024-element arrays, verifies
    ``C[i] = A[i] + B[i]``.
 
-``gemm_demo.py``
+``gemm.py``
    Compiles ``gemm.bas``, launches a 512x512 GEMM, verifies against a CPU
    reference implementation.
 
-``gpu_demo.py``
-   General-purpose launcher: takes any ``.bas`` file as an argument, compiles
-   and runs it on the GPU via the bytecode backend.
+``hello.py``
+   Compiles ``hello.bas`` and runs it on the GPU via the bytecode backend.
 
    .. code-block:: bash
 
-      $ python examples/gpu_demo.py examples/vector_add.bas
+      $ python examples/hello.py
