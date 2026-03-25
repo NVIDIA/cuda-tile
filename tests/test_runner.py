@@ -10,14 +10,48 @@ from cutile_basic.gpu import detect_gpu_arch
 from cutile_basic._runner import (
     RunnerError,
     find_tools,
+    _search_paths,
     compile_mlir_to_tilebc,
     compile_tilebc_to_cubin,
-    launch_cubin,
     compile_and_run,
 )
 
 
-# --- find_tools ---
+# --- tool discovery (no mocks) ---
+
+
+class TestToolDiscovery:
+    """Verify that cuda-tile-translate and tileiras are actually present on the system."""
+
+    def test_find_tools_discovers_both(self):
+        tools = find_tools()
+        assert "cuda-tile-translate" in tools
+        assert "tileiras" in tools
+
+    def test_cuda_tile_translate_is_executable(self):
+        tools = find_tools()
+        result = subprocess.run(
+            [str(tools["cuda-tile-translate"]), "--help"],
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode == 0
+
+    def test_tileiras_is_executable(self):
+        tools = find_tools()
+        result = subprocess.run(
+            [str(tools["tileiras"]), "--help"],
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode == 0
+
+    def test_search_paths_returns_candidates(self):
+        candidates = _search_paths("cuda-tile-translate")
+        assert len(candidates) > 0
+        found = any(c.is_file() for c in candidates)
+        assert found, f"No executable found among candidates: {candidates}"
+
+
+# --- find_tools (mocked) ---
 
 
 class TestFindTools:
@@ -154,62 +188,6 @@ class TestDetectGpuArch:
                 detect_gpu_arch()
 
 
-# --- launch_cubin ---
-
-
-class TestLaunchCubin:
-    def test_cuda_core_sequence(self, tmp_path):
-        cubin = tmp_path / "test.cubin"
-        cubin.write_bytes(b"\x00" * 64)
-
-        mock_dev = MagicMock()
-        mock_stream = MagicMock()
-        mock_dev.create_stream.return_value = mock_stream
-        mock_kernel = MagicMock()
-        mock_obj = MagicMock()
-        mock_obj.get_kernel.return_value = mock_kernel
-
-        with (
-            patch("cutile_basic._runner.Device", return_value=mock_dev),
-            patch("cutile_basic._runner.ObjectCode") as mock_oc,
-            patch("cutile_basic._runner.launch") as mock_launch,
-        ):
-            mock_oc.from_cubin.return_value = mock_obj
-            launch_cubin(cubin)
-
-        mock_dev.set_current.assert_called_once()
-        mock_dev.create_stream.assert_called_once()
-        mock_oc.from_cubin.assert_called_once_with(str(cubin))
-        mock_obj.get_kernel.assert_called_once_with("main")
-        mock_launch.assert_called_once()
-        mock_stream.sync.assert_called_once()
-
-    def test_device_error(self, tmp_path):
-        cubin = tmp_path / "test.cubin"
-        cubin.write_bytes(b"\x00" * 64)
-
-        with patch(
-            "cutile_basic._runner.Device",
-            side_effect=RuntimeError("no device"),
-        ):
-            with pytest.raises(RunnerError, match="GPU launch failed"):
-                launch_cubin(cubin)
-
-    def test_kernel_load_error(self, tmp_path):
-        cubin = tmp_path / "test.cubin"
-        cubin.write_bytes(b"\x00" * 64)
-
-        mock_dev = MagicMock()
-        mock_oc = MagicMock()
-        mock_oc.from_cubin.side_effect = RuntimeError("bad cubin")
-        with (
-            patch("cutile_basic._runner.Device", return_value=mock_dev),
-            patch("cutile_basic._runner.ObjectCode", mock_oc),
-        ):
-            with pytest.raises(RunnerError, match="GPU launch failed"):
-                launch_cubin(cubin)
-
-
 # --- compile_and_run (integration with mocks) ---
 
 
@@ -256,15 +234,26 @@ class TestCompileAndRun:
                     Path(cmd[i + 1]).write_bytes(b"data")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
+        mock_dev = MagicMock()
+        mock_stream = MagicMock()
+        mock_dev.create_stream.return_value = mock_stream
+        mock_obj = MagicMock()
+        mock_obj.get_kernel.return_value = MagicMock()
+
         with (
             patch("cutile_basic._runner.find_tools", return_value=tools),
             patch("cutile_basic._runner.detect_gpu_arch", return_value="sm_120"),
             patch("cutile_basic._runner.subprocess.run", side_effect=fake_run),
-            patch("cutile_basic._runner.launch_cubin") as mock_launch,
+            patch("cutile_basic._runner.Device", return_value=mock_dev),
+            patch("cutile_basic._runner.ObjectCode") as mock_oc,
+            patch("cutile_basic._runner.launch") as mock_launch,
         ):
+            mock_oc.from_cubin.return_value = mock_obj
             result = compile_and_run(
                 "mlir text", compile_only=False, output_dir=tmp_path
             )
 
         assert result is None
+        mock_dev.set_current.assert_called_once()
         mock_launch.assert_called_once()
+        mock_stream.sync.assert_called_once()

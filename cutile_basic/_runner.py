@@ -38,8 +38,9 @@ def find_tools(cuda_tile_translate_path: str | None = None) -> dict[str, Path]:
                 break
         else:
             raise RunnerError(
-                "cuda-tile-translate not found. Run 'make build-tools' or "
-                "pass --cuda-tile-translate <path>."
+                "cuda-tile-translate not found. "
+                "Build it from https://github.com/NVIDIA/cuda-tile "
+                "or pass --cuda-tile-translate <path>."
             )
 
     # tileiras
@@ -132,21 +133,6 @@ def compile_tilebc_to_cubin(
     return output_path
 
 
-def launch_cubin(cubin_path: Path, kernel_name: str = "main") -> None:
-    """Load and launch a .cubin kernel via cuda.core."""
-    try:
-        dev = Device(0)
-        dev.set_current()
-        stream = dev.create_stream()
-
-        kernel = ObjectCode.from_cubin(str(cubin_path)).get_kernel(kernel_name)
-        config = LaunchConfig(grid=(1, 1, 1), block=(1, 1, 1))
-        launch(stream, config, kernel)
-        stream.sync()
-    except Exception as e:
-        raise RunnerError(f"GPU launch failed: {e}") from e
-
-
 def compile_and_run(
     mlir_text: str,
     gpu_arch: str | None = None,
@@ -180,6 +166,16 @@ def compile_and_run(
         return cubin_path
 
     print(f"[3/3] Launching kernel on GPU ...", flush=True)
-    launch_cubin(cubin_path)
+    try:
+        dev = Device(0)
+        dev.set_current()
+        stream = dev.create_stream()
+
+        kernel = ObjectCode.from_cubin(str(cubin_path)).get_kernel("main")
+        config = LaunchConfig(grid=(1, 1, 1), block=(1, 1, 1))
+        launch(stream, config, kernel)
+        stream.sync()
+    except Exception as e:
+        raise RunnerError(f"GPU launch failed: {e}") from e
     print(f"[done] Kernel execution complete.")
     return None
