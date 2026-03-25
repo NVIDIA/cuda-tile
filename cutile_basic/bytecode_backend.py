@@ -10,6 +10,7 @@ from pathlib import Path
 
 from cuda.tile._bytecode import (
     write_bytecode,
+    BytecodeVersion,
     EntryHints,
     encode_AbsFOp,
     encode_AddFOp,
@@ -40,7 +41,7 @@ from cuda.tile._bytecode import (
     encode_NegFOp,
     encode_OrIOp,
     encode_PowOp,
-    encode_PrintOp,
+    encode_PrintTkoOp,
     encode_RemFOp,
     encode_RemIOp,
     encode_ReturnOp,
@@ -112,6 +113,7 @@ class BytecodeBackend:
         self.i32_t = tt.tile(i32_s, [])
         self.f32_t = tt.tile(f32_s, [])
         self.i1_t = tt.tile(i1_s, [])
+        self.token_t = tt.simple(SimpleType.Token)
 
     def _type_id(self, typ: BasicType):
         """Map BasicType to a TypeId."""
@@ -478,7 +480,7 @@ class BytecodeBackend:
 
     def _gen_print(self, stmt: ast.PrintStatement):
         if not stmt.items:
-            encode_PrintOp(self.builder, args=[], str="\n")
+            encode_PrintTkoOp(self.builder, self.token_t, args=[], token=None, str="\n")
             return
 
         fmt_parts: list[str] = []
@@ -500,7 +502,7 @@ class BytecodeBackend:
         if stmt.newline:
             fmt += "\n"
 
-        encode_PrintOp(self.builder, args=operands, str=fmt)
+        encode_PrintTkoOp(self.builder, self.token_t, args=operands, token=None, str=fmt)
 
     def _gen_if(self, stmt: ast.IfStatement):
         cond = self._gen_expr(stmt.condition)
@@ -574,6 +576,7 @@ class BytecodeBackend:
             upperBound=ub,
             step=step,
             initValues=init_values,
+            unsignedCmp=False,
         )
 
         # Block args: (iv, *iter_values)
@@ -755,7 +758,7 @@ class BytecodeBackend:
                 all_arrays.append(name)
 
         buf = bytearray()
-        with write_bytecode(1, buf) as writer:
+        with write_bytecode(1, buf, BytecodeVersion.V_13_2) as writer:
             tt = writer.type_table
             self._init_types(tt)
 
@@ -934,6 +937,7 @@ class BytecodeBackend:
             upperBound=ub,
             step=step,
             initValues=init_values,
+            unsignedCmp=False,
         )
 
         block_arg_types = [iv_type_id, tile_c_t, token_s] + scalar_types
@@ -1053,7 +1057,7 @@ class BytecodeBackend:
         all_arrays = [a_name, b_name, c_name]
 
         buf = bytearray()
-        with write_bytecode(1, buf) as writer:
+        with write_bytecode(1, buf, BytecodeVersion.V_13_2) as writer:
             tt = writer.type_table
             self._init_types(tt)
 
@@ -1153,7 +1157,7 @@ class BytecodeBackend:
 
         buf = bytearray()
 
-        with write_bytecode(1, buf) as writer:
+        with write_bytecode(1, buf, BytecodeVersion.V_13_2) as writer:
             self._init_types(writer.type_table)
 
             with writer.function(
@@ -1309,6 +1313,14 @@ def _find_tileiras() -> Path:
     p = Path("/usr/local/cuda/bin/tileiras")
     if p.is_file() and os.access(p, os.X_OK):
         return p
+    try:
+        import nvidia.cu13.bin as _nbin
+        for pkg_dir in _nbin.__path__:
+            p = Path(pkg_dir) / "tileiras"
+            if p.is_file() and os.access(p, os.X_OK):
+                return p
+    except ImportError:
+        pass
     raise BytecodeBackendError(
         "tileiras not found. Ensure CUDA toolkit is installed."
     )
