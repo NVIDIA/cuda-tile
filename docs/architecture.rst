@@ -9,37 +9,37 @@ Pipeline Overview
 
 .. code-block:: text
 
-       .bas Source
-            │
-            ▼
-   ┌──────────────────┐
-   │      Lexer       │  tokens.py, lexer.py
-   └────────┬─────────┘
-            │  list[Token]
-            ▼
-   ┌──────────────────┐
-   │      Parser      │  ast_nodes.py, parser.py
-   └────────┬─────────┘
-            │  Program (AST)
-            ▼
-   ┌──────────────────┐
-   │     Analyzer     │  analyzer.py
-   └────────┬─────────┘
-            │  AnalyzedProgram
-            ▼
-   ┌──────────────────┐
-   │ Bytecode Backend │  bytecode.py
-   └────────┬─────────┘
-            │
-            ▼
-        tileiras
-            │
-            ▼
-         .cubin
-            │
-            ▼
-       GPU Launch
-   (CUDA driver API)
+        .bas Source
+             │
+             ▼
+   ┌───────────────────┐
+   │       Lexer       │  tokens.py, lexer.py
+   └─────────┬─────────┘
+             │  list[Token]
+             ▼
+   ┌───────────────────┐
+   │      Parser       │  ast_nodes.py, parser.py
+   └─────────┬─────────┘
+             │  Program (AST)
+             ▼
+   ┌───────────────────┐
+   │     Analyzer      │  analyzer.py
+   └─────────┬─────────┘
+             │  AnalyzedProgram
+             ▼
+   ┌───────────────────┐
+   │ Bytecode Backend  │  bytecode.py
+   └─────────┬─────────┘
+             │
+             ▼
+         tileiras
+             │
+             ▼
+          .cubin
+             │
+             ▼
+        GPU Launch
+    (CUDA driver API)
 
 Stage Details
 -------------
@@ -74,7 +74,7 @@ Analyzer
 
 Performs semantic analysis on the AST:
 
-- Infers types (``F32``, ``I32``, ``I1``, ``STRING``) for all variables
+- Infers types (``F16``, ``F32``, ``I32``, ``I1``, ``STRING``) for all variables
 - Tracks array declarations and sizes
 - Identifies ``INPUT`` and ``OUTPUT`` variables for GPU kernels
 - Collects ``DATA`` values
