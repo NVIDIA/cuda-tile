@@ -279,7 +279,7 @@ class TestExampleVectorAdd:
         names = {d.name for d in dims}
         assert names == {"A", "B", "C"}
         for d in dims:
-            assert d.sizes[0].value == 128
+            assert d.sizes[0].value == 1024
 
     def test_input_arrays(self):
         prog = parse_src(_read_example("vector_add.bas"))
@@ -323,10 +323,12 @@ class TestExampleGemm:
     def test_tile_statement(self):
         prog = parse_src(_read_example("gemm.bas"))
         tiles = [s for s in prog.statements if isinstance(s, ast.TileStatement)]
-        assert len(tiles) == 1
-        assert tiles[0].tm == 128
-        assert tiles[0].tn == 128
-        assert tiles[0].tk == 32
+        assert len(tiles) == 4
+        tile_map = {t.name: [s.value for s in t.sizes] for t in tiles}
+        assert tile_map["A"] == [128, 32]
+        assert tile_map["B"] == [32, 128]
+        assert tile_map["C"] == [128, 128]
+        assert tile_map["ACC"] == [128, 128]
 
     def test_mma_statement(self):
         prog = parse_src(_read_example("gemm.bas"))

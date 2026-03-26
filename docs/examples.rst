@@ -62,10 +62,11 @@ A tiled matrix multiply: ``C(M,N) = A(M,K) * B(K,N)``.
 
    10 REM GEMM: C(M,N) = A(M,K) * B(K,N)
    20 DIM A(512, 512), B(512, 512), C(512, 512)
-   30 TILE 128, 128, 32
+   30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
    40 INPUT A(), B()
    50 LET TILEM = BID / 4
    60 LET TILEN = BID MOD 4
+   65 LET ACC = 0.0
    70 FOR K = 0 TO 15
    80   MMA ACC, A(TILEM, K), B(K, TILEN)
    90 NEXT K
@@ -73,9 +74,9 @@ A tiled matrix multiply: ``C(M,N) = A(M,K) * B(K,N)``.
    110 OUTPUT C
    120 END
 
-This example uses all tile extensions: ``TILE`` sets tile dimensions, ``MMA``
-performs matrix multiply-accumulate over tiles, and ``STORE`` writes the
-accumulator to the output array.
+``DIM`` declares array dimensions, ``TILE`` declares the tile/partition shape for
+each variable. ``LET ACC = 0.0`` initializes the accumulator tile, ``MMA`` performs
+matrix multiply-accumulate, and ``STORE`` writes the result.
 
 Run it with:
 

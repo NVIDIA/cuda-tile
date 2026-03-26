@@ -177,7 +177,7 @@ class TestExampleVectorAdd:
         for name in ("A", "B", "C"):
             assert name in result.symbols
             assert result.symbols[name].is_array is True
-            assert result.symbols[name].array_size == 128
+            assert result.symbols[name].array_size == 1024
 
     def test_input_vars(self):
         result = analyze_src(_read_example("vector_add.bas"))

@@ -206,18 +206,6 @@ class TestArrayKernel:
         bc = BytecodeBackend(analyzed, array_size=self.N).generate()
         assert bc[:7] == TILEIRAS_MAGIC
 
-    def test_vector_add_detects_array_kernel(self):
-        source = open("examples/vector_add.bas").read()
-        tokens = lex(source)
-        program = parse(tokens)
-        analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, array_size=self.N)
-        assert backend._is_array_kernel()
-        info = backend._get_array_info()
-        assert info["input_arrays"] == ["A", "B"]
-        assert info["output_arrays"] == ["C"]
-        assert info["tile_size"] == 128
-
     def test_vector_add_cubin(self):
         source = open("examples/vector_add.bas").read()
         tokens = lex(source)
@@ -268,14 +256,6 @@ class TestGemmKernel:
         bc = BytecodeBackend(analyzed).generate()
         assert bc[:7] == TILEIRAS_MAGIC
 
-    def test_gemm_detects_gemm_kernel(self):
-        source = open("examples/gemm.bas").read()
-        tokens = lex(source)
-        program = parse(tokens)
-        analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed)
-        assert backend._is_gemm_kernel()
-
     def test_gemm_kernel_metadata(self):
         source = open("examples/gemm.bas").read()
         tokens = lex(source)
@@ -285,12 +265,12 @@ class TestGemmKernel:
         backend.generate()
         meta = backend._array_kernel_meta
         assert meta is not None
-        assert meta["M"] == 512
-        assert meta["N"] == 512
-        assert meta["K"] == 512
-        assert meta["tm"] == 128
-        assert meta["tn"] == 128
-        assert meta["tk"] == 32
+        assert meta["dims"]["A"] == [512, 512]
+        assert meta["dims"]["B"] == [512, 512]
+        assert meta["dims"]["C"] == [512, 512]
+        assert meta["tile_shapes"]["A"] == [128, 32]
+        assert meta["tile_shapes"]["B"] == [32, 128]
+        assert meta["tile_shapes"]["C"] == [128, 128]
         assert set(meta["all_arrays"]) == {"A", "B", "C"}
 
     def test_gemm_cubin(self):
@@ -312,7 +292,8 @@ class TestGemmKernel:
         backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
         cubin_path = backend.compile_to_cubin()
         meta = backend._array_kernel_meta
-        M, N, K = meta["M"], meta["N"], meta["K"]
+        M, K = meta["dims"]["A"]
+        N = meta["dims"]["B"][1]
 
         dev = Device(0)
         dev.set_current()

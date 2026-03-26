@@ -37,6 +37,7 @@ class SymbolInfo:
     type: BasicType
     is_array: bool = False
     array_size: int | None = None
+    tile_shape: list[int] | None = None
 
 
 @dataclass
@@ -162,17 +163,30 @@ class Analyzer:
             size = None
             if stmt.sizes and isinstance(stmt.sizes[0], ast.NumberLiteral):
                 size = int(stmt.sizes[0].value)
-            self.symbols[name] = SymbolInfo(name=name, type=typ, is_array=True, array_size=size)
+            self.symbols[name] = SymbolInfo(
+                name=name, type=typ, is_array=True, array_size=size,
+            )
 
         elif isinstance(stmt, ast.TileStatement):
-            pass  # Tile sizes stored in AST, extracted by backend
+            name = stmt.name
+            tile_shape = [int(s.value) for s in stmt.sizes
+                          if isinstance(s, ast.NumberLiteral)]
+            typ = BasicType.I32 if name.endswith("%") else BasicType.F32
+            if name in self.symbols:
+                self.symbols[name].tile_shape = tile_shape
+                self.symbols[name].is_array = True
+            else:
+                self.symbols[name] = SymbolInfo(
+                    name=name, type=typ, is_array=True, tile_shape=tile_shape,
+                )
 
         elif isinstance(stmt, ast.MmaStatement):
-            # Register accumulator variable
             if stmt.acc_var not in self.symbols:
                 self.symbols[stmt.acc_var] = SymbolInfo(
                     name=stmt.acc_var, type=BasicType.F32, is_array=True)
-            # Register matrix names
+            else:
+                self.symbols[stmt.acc_var].type = BasicType.F32
+                self.symbols[stmt.acc_var].is_array = True
             for name in (stmt.a_access.name, stmt.b_access.name):
                 if name not in self.symbols:
                     self.symbols[name] = SymbolInfo(

@@ -106,7 +106,6 @@ class BytecodeBackend:
         self._views: dict[str, Value] = {}
         self._tensor_views: dict[str, Value] = {}
         self._array_dims: dict[str, list[int]] = {}
-        self._tile_config: tuple[int, int, int] | None = None
         self._tile_types: dict[str, object] = {}
         self._token: Value | None = None
         self._token_type = None
@@ -346,10 +345,9 @@ class BytecodeBackend:
         """Return the tile shape if the expression produces a tile-valued result."""
         if isinstance(expr, ast.ArrayAccess):
             name = expr.name
-            if name in self._views and name in self._tile_types:
-                dims = self._array_dims.get(name, [])
-                if len(dims) == 1:
-                    return [dims[0]]
+            info = self.symbols.get(name)
+            if info and info.tile_shape:
+                return info.tile_shape
             return None
         if isinstance(expr, ast.BinaryOp):
             ls = self._expr_tile_shape(expr.left)
@@ -555,15 +553,11 @@ class BytecodeBackend:
             name = stmt.target.name
             info = self.symbols.get(name)
 
-            # Tile-valued variable not backed by a pointer parameter:
-            # the TILE config gives the shape ([tm, tn] for output tiles).
-            if (info and info.is_array
+            if (info and info.tile_shape
                     and name not in self._param_values
-                    and self._tile_config
                     and isinstance(stmt.value, ast.NumberLiteral)):
-                tm, tn = self._tile_config[0], self._tile_config[1]
                 f32_s = self.tt.simple(SimpleType.F32)
-                tile_t = self.tt.tile(f32_s, [tm, tn])
+                tile_t = self.tt.tile(f32_s, info.tile_shape)
                 val = encode_ConstantOp(
                     self.builder, tile_t,
                     struct.pack("<f", float(stmt.value.value)),
@@ -581,15 +575,19 @@ class BytecodeBackend:
             self.var_map[name] = val
 
     def _gen_let_array(self, stmt: ast.LetStatement):
-        """Lower LET C(BID) = A(BID) + B(BID) as tiled load/compute/store."""
+        """Lower LET C(...) = expr as a tiled store."""
         target = stmt.target
-        store_index = self._gen_expr(target.index)
+        self._ensure_partition_view(target.name)
+
+        indices = [self._ensure_i32(self._gen_expr(target.index), target.index)]
+        if target.index2 is not None:
+            indices.append(self._ensure_i32(self._gen_expr(target.index2), target.index2))
 
         result_tile = self._gen_expr(stmt.value)
 
         encode_StoreViewTkoOp(
             self.builder, self._token_type, result_tile,
-            self._views[target.name], [store_index], self._token,
+            self._views[target.name], indices, self._token,
             MemoryOrderingSemantics.WEAK, None, None,
         )
 
@@ -819,65 +817,66 @@ class BytecodeBackend:
     # ---- DIM / TILE / MMA / STORE lowering ----
 
     def _gen_dim(self, stmt: ast.DimStatement):
-        """Lower a DIM statement: create tensor views and (for 1D) partition views."""
+        """Lower a DIM statement: record sizes and create tensor views for parameter arrays."""
         name = stmt.name
-        if name not in self._param_values:
-            return
-
         sizes = [int(s.value) for s in stmt.sizes if isinstance(s, ast.NumberLiteral)]
         self._array_dims[name] = sizes
+
+        if name not in self._param_values:
+            return
 
         tt = self.tt
         f32_s = tt.simple(SimpleType.F32)
 
         if len(sizes) == 1:
-            tile_size = sizes[0]
-            total = self.array_size
-            if total is None:
-                raise BytecodeBackendError(
-                    "array_size must be provided for array kernels"
-                )
+            total = sizes[0]
             tv_t = tt.tensor_view(f32_s, [total], [1])
-            pv_t = tt.partition_view([tile_size], tv_t, [0], PaddingValue.Zero)
-            tile_t = tt.tile(f32_s, [tile_size])
-
-            tv_val = encode_MakeTensorViewOp(
-                self.builder, tv_t, self._param_values[name], [], []
-            )
-            pv_val = encode_MakePartitionViewOp(self.builder, pv_t, tv_val)
-
-            self._tensor_views[name] = tv_val
-            self._views[name] = pv_val
-            self._tile_types[name] = tile_t
-
         elif len(sizes) == 2:
-            M, N = sizes
-            tv_t = tt.tensor_view(f32_s, [M, N], [N, 1])
-            tv_val = encode_MakeTensorViewOp(
-                self.builder, tv_t, self._param_values[name], [], []
-            )
-            self._tensor_views[name] = tv_val
-            # Partition views deferred until TILE statement provides partition sizes.
-            self._tile_types[f"__tv_type_{name}__"] = tv_t
+            tv_t = tt.tensor_view(f32_s, sizes, [sizes[1], 1])
+        else:
+            return
+
+        tv_val = encode_MakeTensorViewOp(
+            self.builder, tv_t, self._param_values[name], [], []
+        )
+        self._tensor_views[name] = tv_val
+        self._tile_types[f"__tv_type_{name}__"] = tv_t
 
     def _gen_tile(self, stmt: ast.TileStatement):
-        """Lower a TILE statement: store tile config for later use."""
-        self._tile_config = (stmt.tm, stmt.tn, stmt.tk)
+        """Lower a TILE statement: create partition view for the named variable."""
+        name = stmt.name
+        if name in self._views:
+            raise BytecodeBackendError(
+                f"Tile shape for '{name}' already declared. "
+                f"Cannot redeclare with a second TILE statement."
+            )
 
-    def _ensure_partition_view(self, name: str, part_shape: list[int]):
-        """Create a partition view for a 2D array if one doesn't exist yet."""
+        if name in self._param_values:
+            self._ensure_partition_view(name)
+
+    def _ensure_partition_view(self, name: str):
+        """Create a partition view for an array if one doesn't exist yet.
+        Uses the tile_shape declared in the symbol table."""
         if name in self._views:
             return
+        info = self.symbols.get(name)
+        if not info or not info.tile_shape:
+            raise BytecodeBackendError(
+                f"Array '{name}' has no declared tile shape. "
+                f"Use 'TILE {name}(...)' to declare it."
+            )
+        part_shape = info.tile_shape
+
         tv_val = self._tensor_views.get(name)
         if tv_val is None:
             raise BytecodeBackendError(f"No tensor view for array '{name}'")
 
         tt = self.tt
         f32_s = tt.simple(SimpleType.F32)
-        dims = self._array_dims[name]
 
         tv_t = self._tile_types.get(f"__tv_type_{name}__")
         if tv_t is None:
+            dims = self._array_dims.get(name, part_shape)
             tv_t = tt.tensor_view(f32_s, dims, [dims[-1], 1] if len(dims) == 2 else [1])
 
         pv_t = tt.partition_view(
@@ -897,17 +896,15 @@ class BytecodeBackend:
         return val
 
     def _gen_mma(self, stmt: ast.MmaStatement):
-        """Generate MmaFOp. Operand partition shapes are MMA semantics:
-        left operand is [tm, tk], right operand is [tk, tn]."""
+        """Generate MmaFOp. Partition shapes come from each array's DIM TILE declaration."""
         if stmt.acc_var not in self.var_map:
             raise BytecodeBackendError(
                 f"Accumulator '{stmt.acc_var}' used in MMA but not initialized. "
                 f"Add 'LET {stmt.acc_var} = 0' before the loop."
             )
 
-        tm, tn, tk = self._tile_config
-        self._ensure_partition_view(stmt.a_access.name, [tm, tk])
-        self._ensure_partition_view(stmt.b_access.name, [tk, tn])
+        self._ensure_partition_view(stmt.a_access.name)
+        self._ensure_partition_view(stmt.b_access.name)
 
         tile_a_val = self._gen_expr(stmt.a_access)
         tile_b_val = self._gen_expr(stmt.b_access)
@@ -920,10 +917,8 @@ class BytecodeBackend:
         self.var_map[stmt.acc_var] = new_acc
 
     def _gen_tile_store(self, stmt: ast.TileStoreStatement):
-        """Generate StoreViewTkoOp for STORE C(i,j), ACC.
-        Output tile partition shape is [tm, tn]."""
-        tm, tn = self._tile_config[0], self._tile_config[1]
-        self._ensure_partition_view(stmt.target.name, [tm, tn])
+        """Generate StoreViewTkoOp. Partition shape from DIM TILE declaration."""
+        self._ensure_partition_view(stmt.target.name)
 
         idx0 = self._ensure_i32(self._gen_expr(stmt.target.index), stmt.target.index)
         idx1 = self._ensure_i32(self._gen_expr(stmt.target.index2), stmt.target.index2)
@@ -964,52 +959,31 @@ class BytecodeBackend:
             "all_arrays": self._param_arrays,
             "input_arrays": input_arrays,
             "output_arrays": output_arrays,
+            "dims": {},
+            "tile_shapes": {},
         }
 
-        if self._tile_config:
-            meta["tile_config"] = list(self._tile_config)
-
-        # Report per-array DIM sizes
         for name, dims in self._array_dims.items():
-            meta.setdefault("dims", {})[name] = dims
+            meta["dims"][name] = dims
+            info = self.symbols.get(name)
+            if info and info.tile_shape:
+                meta["tile_shapes"][name] = info.tile_shape
 
-        # Compute grid_size from the actual partition views that were created
-        grid_size = None
-        for name in self._param_arrays:
+        # Compute grid_size from the first output array's dims and tile shape.
+        for name in output_arrays:
             dims = self._array_dims.get(name)
-            if dims is None:
+            info = self.symbols.get(name)
+            if not dims or not info or not info.tile_shape:
                 continue
-            if len(dims) == 1:
-                tile_size = dims[0]
-                size = self.array_size
-                if size is None:
-                    raise BytecodeBackendError(
-                        "array_size must be provided for array kernels"
-                    )
-                meta["array_size"] = size
-                meta["tile_size"] = tile_size
-                grid_size = (size + tile_size - 1) // tile_size
-                break
-            if len(dims) == 2 and self._tile_config:
-                tm, tn = self._tile_config[0], self._tile_config[1]
-                M, N = dims[0], dims[1]
-                meta.setdefault("M", M)
-                meta.setdefault("N", N)
-                # K from the second dim of the first input (if 2D)
-                for iname in input_arrays:
-                    idims = self._array_dims.get(iname, [])
-                    if len(idims) == 2:
-                        meta.setdefault("K", idims[1])
-                        break
-                meta.setdefault("array_size", M * N)
-                meta.setdefault("tile_size", tm)
-                num_m_tiles = (M + tm - 1) // tm
-                num_n_tiles = (N + tn - 1) // tn
-                grid_size = num_m_tiles * num_n_tiles
-                break
-
-        if grid_size is not None:
+            tiles_per_dim = [
+                (d + t - 1) // t
+                for d, t in zip(dims, info.tile_shape)
+            ]
+            grid_size = 1
+            for n in tiles_per_dim:
+                grid_size *= n
             meta["grid_size"] = grid_size
+            break
 
         self._array_kernel_meta = meta
 
@@ -1043,7 +1017,6 @@ class BytecodeBackend:
                 self._views = {}
                 self._tensor_views = {}
                 self._array_dims = {}
-                self._tile_config = None
                 self._tile_types = {}
                 self._token = None
                 self._var_ir_types = {}

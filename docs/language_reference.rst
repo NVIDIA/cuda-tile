@@ -222,13 +222,13 @@ arrays:
 
      30 LET C(BID) = A(BID) + B(BID)
 
-- For matrix operations, ``TILE`` declares the tile shape and ``MMA`` loads
+- ``TILE`` declares the tile/partition shape for each variable. ``MMA`` loads
   tile-sized sub-matrices from arrays, multiplies them on tensor cores, and
   accumulates the result:
 
   .. code-block:: basic
 
-     30 TILE 128, 128, 32
+     30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
      80 MMA ACC, A(TILEM, K), B(K, TILEN)
 
   Here, ``A(TILEM, K)`` does not access a single element -- it loads a
@@ -256,11 +256,12 @@ kernel execution.
 TILE
 ^^^^
 
-Declares tile dimensions for matrix operations (M, N, K).
+Declares the tile/partition shape for one or more variables.
 
 .. code-block:: basic
 
-   30 TILE 128, 128, 32
+   20 TILE A(128), B(128), C(128)
+   30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
 
 MMA
 ^^^

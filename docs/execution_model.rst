@@ -107,6 +107,7 @@ compute the result:
 
    50 LET TILEM = BID / 4
    60 LET TILEN = BID MOD 4
+   65 LET ACC = 0.0
    70 FOR K = 0 TO 15
    80   MMA ACC, A(TILEM, K), B(K, TILEN)
    90 NEXT K

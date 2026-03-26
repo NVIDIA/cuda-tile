@@ -111,7 +111,7 @@ class ReturnStatement:
 @dataclass
 class DimStatement:
     name: str
-    sizes: list[Expression]  # DIM A(10) → sizes=[10]
+    sizes: list[Expression]  # DIM A(512, 512) → sizes=[512, 512]
     line: int = 0
 
 @dataclass
@@ -139,9 +139,8 @@ class StopStatement:
 
 @dataclass
 class TileStatement:
-    tm: int           # tile M dimension
-    tn: int           # tile N dimension
-    tk: int           # tile K dimension
+    name: str
+    sizes: list[Expression]  # TILE A(128, 32) → sizes=[128, 32]
     line: int = 0
 
 @dataclass

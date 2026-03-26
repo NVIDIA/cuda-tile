@@ -20,8 +20,9 @@ def main():
     print("[1/2] Compiling to cubin ...", flush=True)
     result = compile_basic_to_cubin(source, array_size=N)
     meta = result.meta
+    tile_shapes = meta.get("tile_shapes", {})
     print(f"      Arrays: {meta['all_arrays']}, "
-          f"tile_size={meta['tile_size']}, "
+          f"tile_shapes={tile_shapes}, "
           f"grid_size={meta['grid_size']}")
 
     print("[2/2] Launching kernel on GPU ...", flush=True)

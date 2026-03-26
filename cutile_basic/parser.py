@@ -354,14 +354,21 @@ class Parser:
             variables.append(ast.Variable(name=var_tok.value, line=var_tok.line))
         return ast.OutputStatement(variables=variables, line=tok.line)
 
-    def parse_tile(self) -> ast.TileStatement:
+    def parse_tile(self) -> ast.TileStatement | list[ast.TileStatement]:
         tok = self.expect(TokenType.TILE)
-        tm = int(self.expect(TokenType.INTEGER).value)
-        self.expect(TokenType.COMMA)
-        tn = int(self.expect(TokenType.INTEGER).value)
-        self.expect(TokenType.COMMA)
-        tk = int(self.expect(TokenType.INTEGER).value)
-        return ast.TileStatement(tm=tm, tn=tn, tk=tk, line=tok.line)
+        tiles = [self._parse_one_tile(tok.line)]
+        while self.match(TokenType.COMMA):
+            tiles.append(self._parse_one_tile(tok.line))
+        return tiles if len(tiles) > 1 else tiles[0]
+
+    def _parse_one_tile(self, line: int) -> ast.TileStatement:
+        name_tok = self.expect(TokenType.IDENTIFIER)
+        self.expect(TokenType.LPAREN)
+        sizes: list[ast.Expression] = [self.parse_expression()]
+        while self.match(TokenType.COMMA):
+            sizes.append(self.parse_expression())
+        self.expect(TokenType.RPAREN)
+        return ast.TileStatement(name=name_tok.value, sizes=sizes, line=line)
 
     def parse_mma(self) -> ast.MmaStatement:
         """MMA ACC, A(row, col), B(row, col)"""

@@ -22,10 +22,11 @@ def main():
     print("[1/2] Compiling to cubin ...", flush=True)
     result = compile_basic_to_cubin(source, num_ctas=num_ctas)
     meta = result.meta
-    M, N, K = meta["M"], meta["N"], meta["K"]
-    tm, tn, tk = meta["tm"], meta["tn"], meta["tk"]
+    M, K = meta["dims"]["A"]
+    N = meta["dims"]["B"][1]
+    tile_shapes = meta.get("tile_shapes", {})
     print(f"      M={M}, N={N}, K={K}, "
-          f"tiles=({tm}x{tn}x{tk}), "
+          f"tile_shapes={tile_shapes}, "
           f"grid_size={meta['grid_size']}")
 
     print("[2/2] Launching kernel on GPU ...", flush=True)
