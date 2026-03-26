@@ -34,7 +34,6 @@ from cuda.tile._bytecode import (
     encode_GetTileBlockIdOp,
     encode_IfOp,
     encode_IToFOp,
-    encode_JoinTokensOp,
     encode_LoadViewTkoOp,
     encode_LogOp,
     encode_MakePartitionViewOp,
@@ -87,11 +86,11 @@ class BytecodeBackend:
         self.analyzed = analyzed
         self.symbols = analyzed.symbols
         self.gpu_arch = gpu_arch
-        self.array_size = array_size  # total elements; None = infer from DIM
-        self.num_ctas = num_ctas      # CTAs per CGA optimization hint; None = no hint
+        self.array_size = array_size if array_size is not None else self._infer_array_size(analyzed)
+        self.num_ctas = num_ctas
         self.data_index = 0
-        self._returned = False  # track if last stmt was a return
-        self._array_kernel_meta: dict | None = None  # set by _generate_array_kernel
+        self._returned = False
+        self._array_kernel_meta: dict | None = None
 
         # Populated during generate()
         self.tt: TypeTable | None = None
@@ -102,6 +101,25 @@ class BytecodeBackend:
         self.i32_t = None
         self.f32_t = None
         self.i1_t = None
+
+        # Compositional codegen state (built up as statements are lowered)
+        self._views: dict[str, Value] = {}
+        self._tensor_views: dict[str, Value] = {}
+        self._array_dims: dict[str, list[int]] = {}
+        self._tile_config: tuple[int, int, int] | None = None
+        self._tile_types: dict[str, object] = {}
+        self._token: Value | None = None
+        self._token_type = None
+        self._var_ir_types: dict[str, object] = {}
+        self._param_arrays: list[str] = []
+
+    @staticmethod
+    def _infer_array_size(analyzed: AnalyzedProgram) -> int | None:
+        """Infer array_size from DIM-declared 1-D arrays in the analyzed program."""
+        for info in analyzed.symbols.values():
+            if info.is_array and info.array_size is not None:
+                return info.array_size
+        return None
 
     def _entry_hints(self) -> dict:
         """Build hints dict for writer.function based on num_ctas."""
@@ -284,8 +302,20 @@ class BytecodeBackend:
             return val
 
         if isinstance(expr, ast.ArrayAccess):
-            # Arrays not directly supported; DATA/READ inlines constants
-            raise BytecodeBackendError("Array access not supported in bytecode backend")
+            name = expr.name
+            if name in self._views:
+                indices = [self._ensure_i32(self._gen_expr(expr.index), expr.index)]
+                if expr.index2 is not None:
+                    indices.append(self._ensure_i32(self._gen_expr(expr.index2), expr.index2))
+                tile_type = self._tile_types[name]
+                tile_val, new_tok = encode_LoadViewTkoOp(
+                    self.builder, tile_type, self._token_type, self._views[name],
+                    indices, self._token,
+                    MemoryOrderingSemantics.WEAK, None, None,
+                )
+                self._token = new_tok
+                return tile_val
+            raise BytecodeBackendError(f"Array {name} has no view")
 
         if isinstance(expr, ast.UnaryOp):
             return self._gen_unary(expr)
@@ -312,11 +342,29 @@ class BytecodeBackend:
             return encode_XOrIOp(self.builder, self.i1_t, operand, ones)
         raise BytecodeBackendError(f"Unknown unary op: {expr.op}")
 
+    def _expr_tile_shape(self, expr: ast.Expression) -> list[int] | None:
+        """Return the tile shape if the expression produces a tile-valued result."""
+        if isinstance(expr, ast.ArrayAccess):
+            name = expr.name
+            if name in self._views and name in self._tile_types:
+                dims = self._array_dims.get(name, [])
+                if len(dims) == 1:
+                    return [dims[0]]
+            return None
+        if isinstance(expr, ast.BinaryOp):
+            ls = self._expr_tile_shape(expr.left)
+            if ls is not None:
+                return ls
+            return self._expr_tile_shape(expr.right)
+        return None
+
     def _gen_binop(self, expr: ast.BinaryOp) -> Value:
         left = self._gen_expr(expr.left)
         right = self._gen_expr(expr.right)
         lt = self._type_of_expr(expr.left)
         rt = self._type_of_expr(expr.right)
+
+        tile_shape = self._expr_tile_shape(expr)
 
         # Comparisons
         if expr.op in ("=", "<>", "<", ">", "<=", ">="):
@@ -341,21 +389,40 @@ class BytecodeBackend:
             right = self._cast_to_f32(right)
             is_float = True
 
+        if tile_shape is not None:
+            f32_s = self.tt.simple(SimpleType.F32)
+            i32_s = self.tt.simple(SimpleType.I32)
+            result_type = self.tt.tile(f32_s, tile_shape) if is_float else self.tt.tile(i32_s, tile_shape)
+        else:
+            result_type = self.f32_t if is_float else self.i32_t
+
         if expr.op == "+":
-            return self._addf(left, right) if is_float else self._addi(left, right)
+            if is_float:
+                return encode_AddFOp(self.builder, result_type, left, right, RoundingMode.NEAREST_EVEN, False)
+            else:
+                return encode_AddIOp(self.builder, result_type, left, right, IntegerOverflow.NONE)
         elif expr.op == "-":
-            return self._subf(left, right) if is_float else self._subi(left, right)
+            if is_float:
+                return encode_SubFOp(self.builder, result_type, left, right, RoundingMode.NEAREST_EVEN, False)
+            else:
+                return encode_SubIOp(self.builder, result_type, left, right, IntegerOverflow.NONE)
         elif expr.op == "*":
-            return self._mulf(left, right) if is_float else self._muli(left, right)
+            if is_float:
+                return encode_MulFOp(self.builder, result_type, left, right, RoundingMode.NEAREST_EVEN, False)
+            else:
+                return encode_MulIOp(self.builder, result_type, left, right, IntegerOverflow.NONE)
         elif expr.op == "/":
-            return self._divf(left, right) if is_float else self._divi(left, right)
+            if is_float:
+                return encode_DivFOp(self.builder, result_type, left, right, RoundingMode.NEAREST_EVEN, False)
+            else:
+                return encode_DivIOp(self.builder, result_type, left, right, Signedness.Signed, RoundingMode.ZERO)
         elif expr.op == "MOD":
             if is_float:
-                return encode_RemFOp(self.builder, self.f32_t, left, right)
+                return encode_RemFOp(self.builder, result_type, left, right)
             else:
-                return encode_RemIOp(self.builder, self.i32_t, left, right, Signedness.Signed)
+                return encode_RemIOp(self.builder, result_type, left, right, Signedness.Signed)
         elif expr.op == "^":
-            return encode_PowOp(self.builder, self.f32_t, left, right)
+            return encode_PowOp(self.builder, result_type, left, right)
 
         raise BytecodeBackendError(f"Unknown binary op: {expr.op}")
 
@@ -463,29 +530,68 @@ class BytecodeBackend:
         elif isinstance(stmt, ast.ReadStatement):
             self._gen_read(stmt)
         elif isinstance(stmt, ast.DimStatement):
-            pass  # Arrays not needed for scalar patterns
+            self._gen_dim(stmt)
+        elif isinstance(stmt, ast.TileStatement):
+            self._gen_tile(stmt)
+        elif isinstance(stmt, ast.MmaStatement):
+            self._gen_mma(stmt)
+        elif isinstance(stmt, ast.TileStoreStatement):
+            self._gen_tile_store(stmt)
         elif isinstance(stmt, ast.InputStatement):
-            pass  # Handled as kernel params
+            pass
         elif isinstance(stmt, ast.DataStatement):
-            pass  # Already collected by analyzer
+            pass
         elif isinstance(stmt, ast.OutputStatement):
-            pass  # Handled at a higher level
-        elif isinstance(stmt, (ast.TileStatement, ast.MmaStatement, ast.TileStoreStatement)):
-            pass  # Handled by GEMM kernel path
+            pass
         elif isinstance(stmt, (ast.GotoStatement, ast.GosubStatement, ast.ReturnStatement)):
-            pass  # Not supported
+            pass
 
     def _gen_let(self, stmt: ast.LetStatement):
-        val = self._gen_expr(stmt.value)
+        if isinstance(stmt.target, ast.ArrayAccess) and stmt.target.name in self._views:
+            self._gen_let_array(stmt)
+            return
+
         if isinstance(stmt.target, ast.Variable):
-            # Cast if value type doesn't match variable's declared type
+            name = stmt.target.name
+            info = self.symbols.get(name)
+
+            # Tile-valued variable not backed by a pointer parameter:
+            # the TILE config gives the shape ([tm, tn] for output tiles).
+            if (info and info.is_array
+                    and name not in self._param_values
+                    and self._tile_config
+                    and isinstance(stmt.value, ast.NumberLiteral)):
+                tm, tn = self._tile_config[0], self._tile_config[1]
+                f32_s = self.tt.simple(SimpleType.F32)
+                tile_t = self.tt.tile(f32_s, [tm, tn])
+                val = encode_ConstantOp(
+                    self.builder, tile_t,
+                    struct.pack("<f", float(stmt.value.value)),
+                )
+                self.var_map[name] = val
+                self._var_ir_types[name] = tile_t
+                return
+
+            val = self._gen_expr(stmt.value)
             expr_type = self._type_of_expr(stmt.value)
-            info = self.symbols.get(stmt.target.name)
             if info and info.type == BasicType.F32 and expr_type == BasicType.I32:
                 val = self._cast_to_f32(val)
             elif info and info.type == BasicType.I32 and expr_type == BasicType.F32:
                 val = self._cast_to_i32(val)
-            self.var_map[stmt.target.name] = val
+            self.var_map[name] = val
+
+    def _gen_let_array(self, stmt: ast.LetStatement):
+        """Lower LET C(BID) = A(BID) + B(BID) as tiled load/compute/store."""
+        target = stmt.target
+        store_index = self._gen_expr(target.index)
+
+        result_tile = self._gen_expr(stmt.value)
+
+        encode_StoreViewTkoOp(
+            self.builder, self._token_type, result_tile,
+            self._views[target.name], [store_index], self._token,
+            MemoryOrderingSemantics.WEAK, None, None,
+        )
 
     def _gen_print(self, stmt: ast.PrintStatement):
         if not stmt.items:
@@ -554,6 +660,31 @@ class BytecodeBackend:
         for i, name in enumerate(all_modified):
             self.var_map[name] = results[i]
 
+    def _body_has_token_ops(self, stmts: list[ast.Statement]) -> bool:
+        """Check if a body contains operations that thread the token."""
+        for stmt in stmts:
+            if isinstance(stmt, (ast.MmaStatement, ast.TileStoreStatement)):
+                return True
+            if isinstance(stmt, ast.LetStatement):
+                if isinstance(stmt.target, ast.ArrayAccess) and stmt.target.name in self._views:
+                    return True
+            if isinstance(stmt, ast.ForStatement):
+                if self._body_has_token_ops(stmt.body):
+                    return True
+            if isinstance(stmt, ast.IfStatement):
+                if self._body_has_token_ops(stmt.then_body) or self._body_has_token_ops(stmt.else_body):
+                    return True
+        return False
+
+    def _var_type_id(self, name: str):
+        """Get the actual IR type ID for a variable, preferring _var_ir_types."""
+        if name in self._var_ir_types:
+            return self._var_ir_types[name]
+        info = self.symbols.get(name)
+        if info:
+            return self._type_id(info.type)
+        return self.f32_t
+
     def _gen_for(self, stmt: ast.ForStatement):
         lb = self._gen_expr(stmt.start)
         end_val = self._gen_expr(stmt.end)
@@ -565,18 +696,23 @@ class BytecodeBackend:
         else:
             step = self._const(1, var_type)
 
-        # Half-open upper bound: end + step
         if var_type == BasicType.F32:
             ub = self._addf(end_val, step)
         else:
             ub = self._addi(end_val, step)
 
-        # Find iter_values (variables modified in loop body that already exist)
         modified = self._find_modified_vars(stmt.body)
         iter_vars = [(name, self.var_map[name]) for name in modified if name in self.var_map]
 
-        iter_type_ids = [self._type_id(self.symbols[n].type) for n, _ in iter_vars]
+        iter_type_ids = [self._var_type_id(n) for n, _ in iter_vars]
         init_values = [v for _, v in iter_vars]
+
+        carry_token = (self._token is not None
+                       and self._body_has_token_ops(stmt.body))
+
+        if carry_token:
+            iter_type_ids.append(self._token_type)
+            init_values.append(self._token)
 
         nbb = encode_ForOp(
             self.builder,
@@ -588,27 +724,33 @@ class BytecodeBackend:
             unsignedCmp=False,
         )
 
-        # Block args: (iv, *iter_values)
         block_arg_types = [type_id] + iter_type_ids
 
         saved = dict(self.var_map)
+        saved_token = self._token
         with nbb.new_block(block_arg_types) as body_args:
-            iv = body_args[0]
-            self.var_map[stmt.var.name] = iv
+            self.var_map[stmt.var.name] = body_args[0]
             for i, (name, _) in enumerate(iter_vars):
                 self.var_map[name] = body_args[1 + i]
+            if carry_token:
+                self._token = body_args[1 + len(iter_vars)]
 
             for s in stmt.body:
                 self._gen_stmt(s)
 
-            # Yield current values of iter vars
             yield_vals = [self.var_map[name] for name, _ in iter_vars]
+            if carry_token:
+                yield_vals.append(self._token)
             encode_ContinueOp(self.builder, operands=yield_vals)
 
         results = nbb.done()
         self.var_map = dict(saved)
         for i, (name, _) in enumerate(iter_vars):
             self.var_map[name] = results[i]
+        if carry_token:
+            self._token = results[len(iter_vars)]
+        else:
+            self._token = saved_token
 
     def _gen_while(self, stmt: ast.WhileStatement):
         lb = self._const_i32(0)
@@ -674,361 +816,78 @@ class BytecodeBackend:
                 typ = info.type if info else BasicType.F32
                 self.var_map[var.name] = self._const(val, typ)
 
-    # ---- Array kernel support ----
+    # ---- DIM / TILE / MMA / STORE lowering ----
 
-    TILE_SIZE = 128  # default tile size (elements per CTA)
-
-    def _is_array_kernel(self) -> bool:
-        """Detect the array kernel pattern: DIM arrays + INPUT arrays + FOR + OUTPUT."""
-        has_input_arrays = bool(
-            self.analyzed.input_vars
-            and any(
-                self.symbols.get(v) and self.symbols[v].is_array
-                for v in self.analyzed.input_vars
-            )
-        )
-        has_output_arrays = bool(
-            self.analyzed.output_vars
-            and any(
-                self.symbols.get(v) and self.symbols[v].is_array
-                for v in self.analyzed.output_vars
-            )
-        )
-        return has_input_arrays and has_output_arrays
-
-    def _get_array_info(self) -> dict:
-        """Extract array kernel metadata: input/output arrays, sizes, array LET stmts."""
-        input_arrays = []
-        for name in self.analyzed.input_vars:
-            info = self.symbols.get(name)
-            if info and info.is_array:
-                input_arrays.append(name)
-        output_arrays = []
-        for name in (self.analyzed.output_vars or []):
-            info = self.symbols.get(name)
-            if info and info.is_array:
-                output_arrays.append(name)
-
-        # Collect array LET statements: LET C(BID) = A(BID) + B(BID)
-        array_let_stmts = []
-        for stmt in self.analyzed.statements:
-            if isinstance(stmt, ast.LetStatement) and isinstance(stmt.target, ast.ArrayAccess):
-                target_name = stmt.target.name
-                if self.symbols.get(target_name) and self.symbols[target_name].is_array:
-                    array_let_stmts.append(stmt)
-
-        # Get tile size from the first DIM'd array
-        tile_size = None
-        for name in input_arrays + output_arrays:
-            info = self.symbols.get(name)
-            if info and info.array_size:
-                tile_size = info.array_size
-                break
-
-        return {
-            "input_arrays": input_arrays,
-            "output_arrays": output_arrays,
-            "array_let_stmts": array_let_stmts,
-            "tile_size": tile_size,
-        }
-
-    def _load_array_tile(self, name: str, index: Value,
-                         views: dict[str, Value], tokens: list[Value]) -> Value:
-        """Load a tile from an array's partition view at the given index."""
-        token_t = self.var_map["__token_type__"]
-        pv = views[name]
-        tok = tokens[-1] if tokens else self.var_map["__init_token__"]
-        tile_type = self.var_map[f"__tile_type_{name}__"]
-        tile_val, new_tok = encode_LoadViewTkoOp(
-            self.builder, tile_type, token_t, pv,
-            [index], tok,
-            MemoryOrderingSemantics.WEAK, None, None,
-        )
-        tokens.append(new_tok)
-        return tile_val
-
-    def _gen_array_expr(self, expr: ast.Expression,
-                        views: dict[str, Value], tokens: list[Value]) -> Value:
-        """Generate bytecode for an expression in the array kernel context.
-
-        Array accesses A(BID) become tile loads from partition views.
-        Scalar expressions use the normal _gen_expr path.
-        """
-        if isinstance(expr, ast.ArrayAccess):
-            name = expr.name
-            if name in views:
-                index = self._gen_expr(expr.index)
-                return self._load_array_tile(name, index, views, tokens)
-            raise BytecodeBackendError(f"Array {name} not in views")
-
-        if isinstance(expr, ast.BinaryOp):
-            left = self._gen_array_expr(expr.left, views, tokens)
-            right = self._gen_array_expr(expr.right, views, tokens)
-            lt = self._type_of_expr(expr.left)
-            rt = self._type_of_expr(expr.right)
-
-            # Get the tile-sized type
-            tile_size = self._active_tile_size
-            is_float = (lt == BasicType.F32 or rt == BasicType.F32)
-            if expr.op in ("/", "^"):
-                is_float = True
-
-            f32_s = self.tt.simple(SimpleType.F32)
-            i32_s = self.tt.simple(SimpleType.I32)
-            result_type = self.tt.tile(f32_s, [tile_size]) if is_float else self.tt.tile(i32_s, [tile_size])
-
-            if expr.op == "+":
-                if is_float:
-                    return encode_AddFOp(self.builder, result_type, left, right, RoundingMode.NEAREST_EVEN, False)
-                else:
-                    return encode_AddIOp(self.builder, result_type, left, right, IntegerOverflow.NONE)
-            elif expr.op == "-":
-                if is_float:
-                    return encode_SubFOp(self.builder, result_type, left, right, RoundingMode.NEAREST_EVEN, False)
-                else:
-                    return encode_SubIOp(self.builder, result_type, left, right, IntegerOverflow.NONE)
-            elif expr.op == "*":
-                if is_float:
-                    return encode_MulFOp(self.builder, result_type, left, right, RoundingMode.NEAREST_EVEN, False)
-                else:
-                    return encode_MulIOp(self.builder, result_type, left, right, IntegerOverflow.NONE)
-            elif expr.op == "/":
-                return encode_DivFOp(self.builder, result_type, left, right, RoundingMode.NEAREST_EVEN, False)
-            raise BytecodeBackendError(f"Unsupported array op: {expr.op}")
-
-        # Scalar constant — broadcast to tile size? Not needed if both sides are arrays
-        return self._gen_expr(expr)
-
-    def _generate_array_kernel(self, array_size: int) -> bytes:
-        """Generate a tiled array kernel."""
-        info = self._get_array_info()
-        input_arrays = info["input_arrays"]
-        output_arrays = info["output_arrays"]
-        array_let_stmts = info["array_let_stmts"]
-        tile_size = info["tile_size"] or self.TILE_SIZE
-        self._active_tile_size = tile_size
-
-        if not array_let_stmts:
-            raise BytecodeBackendError("Cannot detect array kernel pattern")
-
-        grid_size = (array_size + tile_size - 1) // tile_size
-
-        # All arrays that need pointer parameters (inputs + outputs, deduplicated)
-        all_arrays: list[str] = []
-        seen = set()
-        for name in input_arrays + output_arrays:
-            if name not in seen:
-                seen.add(name)
-                all_arrays.append(name)
-
-        buf = bytearray()
-        with write_bytecode(1, buf, BytecodeVersion.V_13_2) as writer:
-            tt = writer.type_table
-            self._init_types(tt)
-
-            f32_s = tt.simple(SimpleType.F32)
-            i32_s = tt.simple(SimpleType.I32)
-            token_s = tt.simple(SimpleType.Token)
-
-            ptr_f32 = tt.pointer(f32_s)
-            tile_ptr_f32 = tt.tile(ptr_f32, [])
-            tv_f32 = tt.tensor_view(f32_s, [array_size], [1])
-            pv_f32 = tt.partition_view([tile_size], tv_f32, [0], PaddingValue.Zero)
-            tile_f32 = tt.tile(f32_s, [tile_size])
-
-            param_types = [tile_ptr_f32] * len(all_arrays)
-
-            with writer.function(
-                "main", param_types, [], True, self._entry_hints(), DebugAttrId(0)
-            ) as fb:
-                self.builder = fb.code_builder
-                self.var_map = {}
-
-                # Map parameters to array names
-                param_vals = {name: fb.parameters[i] for i, name in enumerate(all_arrays)}
-
-                # Get tile block ID — exposed as BID in BASIC
-                bid_x, _, _ = encode_GetTileBlockIdOp(
-                    self.builder, self.i32_t, self.i32_t, self.i32_t
-                )
-                self.var_map["BID"] = bid_x
-                self.var_map["__token_type__"] = token_s
-
-                # Create tensor views and partition views
-                views: dict[str, Value] = {}
-                for name in all_arrays:
-                    tv = encode_MakeTensorViewOp(
-                        self.builder, tv_f32, param_vals[name], [], []
-                    )
-                    pv = encode_MakePartitionViewOp(self.builder, pv_f32, tv)
-                    views[name] = pv
-
-                # Store tile type for loads
-                for name in all_arrays:
-                    self.var_map[f"__tile_type_{name}__"] = tile_f32
-
-                # Create initial token
-                tok = encode_MakeTokenOp(self.builder, token_s)
-                self.var_map["__init_token__"] = tok
-
-                # Process array LET statements as tiled operations
-                load_tokens: list[Value] = []
-                for body_stmt in array_let_stmts:
-                    target_name = body_stmt.target.name
-                    if target_name in views:
-                        # Evaluate the store index (e.g. BID)
-                        store_index = self._gen_expr(body_stmt.target.index)
-
-                        result_tile = self._gen_array_expr(
-                            body_stmt.value, views, load_tokens
-                        )
-                        # Join all load tokens
-                        if len(load_tokens) > 1:
-                            tok_joined = encode_JoinTokensOp(
-                                self.builder, token_s, load_tokens
-                            )
-                        elif load_tokens:
-                            tok_joined = load_tokens[0]
-                        else:
-                            tok_joined = tok
-
-                        encode_StoreViewTkoOp(
-                            self.builder, token_s, result_tile,
-                            views[target_name], [store_index], tok_joined,
-                            MemoryOrderingSemantics.WEAK, None, None,
-                        )
-
-                encode_ReturnOp(self.builder, operands=[])
-
-        self._array_kernel_meta = {
-            "all_arrays": all_arrays,
-            "input_arrays": input_arrays,
-            "output_arrays": output_arrays,
-            "array_size": array_size,
-            "tile_size": tile_size,
-            "grid_size": grid_size,
-        }
-        return bytes(buf)
-
-    # ---- GEMM kernel support ----
-
-    def _find_stmt_recursive(self, stmt_type, stmts=None):
-        """Find first statement of given type, recursing into FOR/IF bodies."""
-        if stmts is None:
-            stmts = self.analyzed.statements
-        for stmt in stmts:
-            if isinstance(stmt, stmt_type):
-                return stmt
-            if isinstance(stmt, ast.ForStatement):
-                result = self._find_stmt_recursive(stmt_type, stmt.body)
-                if result:
-                    return result
-            if isinstance(stmt, ast.IfStatement):
-                result = self._find_stmt_recursive(stmt_type, stmt.then_body)
-                if result:
-                    return result
-                result = self._find_stmt_recursive(stmt_type, stmt.else_body)
-                if result:
-                    return result
-        return None
-
-    def _is_gemm_kernel(self) -> bool:
-        has_tile = any(isinstance(s, ast.TileStatement)
-                       for s in self.analyzed.statements)
-        has_mma = self._find_stmt_recursive(ast.MmaStatement) is not None
-        return has_tile and has_mma
-
-    def _get_dim_sizes(self) -> dict[str, list[int]]:
-        """Extract dimension sizes from DIM statements."""
-        dims = {}
-        for stmt in self.analyzed.statements:
-            if isinstance(stmt, ast.DimStatement):
-                sizes = [int(s.value) for s in stmt.sizes
-                         if isinstance(s, ast.NumberLiteral)]
-                dims[stmt.name] = sizes
-        return dims
-
-    def _gen_gemm_stmt(self, stmt: ast.Statement):
-        """Generate bytecode for a statement in the GEMM kernel context."""
-        if isinstance(stmt, (ast.RemStatement, ast.DimStatement,
-                             ast.TileStatement, ast.InputStatement,
-                             ast.OutputStatement)):
+    def _gen_dim(self, stmt: ast.DimStatement):
+        """Lower a DIM statement: create tensor views and (for 1D) partition views."""
+        name = stmt.name
+        if name not in self._param_values:
             return
-        if isinstance(stmt, (ast.EndStatement, ast.StopStatement)):
-            return  # ReturnOp emitted after all stmts
-        if isinstance(stmt, ast.LetStatement):
-            self._gen_let(stmt)
-        elif isinstance(stmt, ast.ForStatement):
-            self._gen_gemm_for(stmt)
-        elif isinstance(stmt, ast.MmaStatement):
-            self._gen_mma(stmt)
-        elif isinstance(stmt, ast.TileStoreStatement):
-            self._gen_tile_store(stmt)
 
-    def _gen_gemm_for(self, stmt: ast.ForStatement):
-        """Generate a FOR loop that carries the MMA accumulator and token."""
-        lb = self._gen_expr(stmt.start)
-        end_val = self._gen_expr(stmt.end)
-        step = self._gen_expr(stmt.step) if stmt.step else self._const_i32(1)
+        sizes = [int(s.value) for s in stmt.sizes if isinstance(s, ast.NumberLiteral)]
+        self._array_dims[name] = sizes
 
-        var_type = self._type_of_expr(stmt.start)
-        iv_type_id = self._type_id(var_type)
+        tt = self.tt
+        f32_s = tt.simple(SimpleType.F32)
 
-        # Half-open upper bound
-        if var_type == BasicType.F32:
-            ub = self._addf(end_val, step)
-        else:
-            ub = self._addi(end_val, step)
+        if len(sizes) == 1:
+            tile_size = sizes[0]
+            total = self.array_size
+            if total is None:
+                raise BytecodeBackendError(
+                    "array_size must be provided for array kernels"
+                )
+            tv_t = tt.tensor_view(f32_s, [total], [1])
+            pv_t = tt.partition_view([tile_size], tv_t, [0], PaddingValue.Zero)
+            tile_t = tt.tile(f32_s, [tile_size])
 
-        tile_c_t = self._gemm_types['tile_c']
-        token_s = self._gemm_types['token_s']
-        acc_var = self._gemm_acc_var
+            tv_val = encode_MakeTensorViewOp(
+                self.builder, tv_t, self._param_values[name], [], []
+            )
+            pv_val = encode_MakePartitionViewOp(self.builder, pv_t, tv_val)
 
-        # Find scalar vars modified in body (exclude tile-valued ACC)
-        modified = self._find_modified_vars(stmt.body)
-        scalar_iter = [(n, self.var_map[n]) for n in modified
-                       if n in self.var_map and n != acc_var]
-        scalar_types = [self._type_id(self.symbols[n].type) for n, _ in scalar_iter]
+            self._tensor_views[name] = tv_val
+            self._views[name] = pv_val
+            self._tile_types[name] = tile_t
 
-        # Loop carries: ACC tile, token, then scalar vars
-        result_types = [tile_c_t, token_s] + scalar_types
-        init_values = [self.var_map[acc_var], self._gemm_token] + [v for _, v in scalar_iter]
+        elif len(sizes) == 2:
+            M, N = sizes
+            tv_t = tt.tensor_view(f32_s, [M, N], [N, 1])
+            tv_val = encode_MakeTensorViewOp(
+                self.builder, tv_t, self._param_values[name], [], []
+            )
+            self._tensor_views[name] = tv_val
+            # Partition views deferred until TILE statement provides partition sizes.
+            self._tile_types[f"__tv_type_{name}__"] = tv_t
 
-        nbb = encode_ForOp(
-            self.builder,
-            result_types=result_types,
-            lowerBound=lb,
-            upperBound=ub,
-            step=step,
-            initValues=init_values,
-            unsignedCmp=False,
+    def _gen_tile(self, stmt: ast.TileStatement):
+        """Lower a TILE statement: store tile config for later use."""
+        self._tile_config = (stmt.tm, stmt.tn, stmt.tk)
+
+    def _ensure_partition_view(self, name: str, part_shape: list[int]):
+        """Create a partition view for a 2D array if one doesn't exist yet."""
+        if name in self._views:
+            return
+        tv_val = self._tensor_views.get(name)
+        if tv_val is None:
+            raise BytecodeBackendError(f"No tensor view for array '{name}'")
+
+        tt = self.tt
+        f32_s = tt.simple(SimpleType.F32)
+        dims = self._array_dims[name]
+
+        tv_t = self._tile_types.get(f"__tv_type_{name}__")
+        if tv_t is None:
+            tv_t = tt.tensor_view(f32_s, dims, [dims[-1], 1] if len(dims) == 2 else [1])
+
+        pv_t = tt.partition_view(
+            part_shape, tv_t, list(range(len(part_shape))), PaddingValue.Zero
         )
+        pv_val = encode_MakePartitionViewOp(self.builder, pv_t, tv_val)
+        self._views[name] = pv_val
 
-        block_arg_types = [iv_type_id, tile_c_t, token_s] + scalar_types
-
-        saved = dict(self.var_map)
-        saved_token = self._gemm_token
-
-        with nbb.new_block(block_arg_types) as body_args:
-            self.var_map[stmt.var.name] = body_args[0]  # induction var
-            self.var_map[acc_var] = body_args[1]
-            self._gemm_token = body_args[2]
-            for i, (name, _) in enumerate(scalar_iter):
-                self.var_map[name] = body_args[3 + i]
-
-            for s in stmt.body:
-                self._gen_gemm_stmt(s)
-
-            yield_vals = [self.var_map[acc_var], self._gemm_token]
-            yield_vals += [self.var_map[n] for n, _ in scalar_iter]
-            encode_ContinueOp(self.builder, operands=yield_vals)
-
-        results = nbb.done()
-        self.var_map = dict(saved)
-        self.var_map[acc_var] = results[0]
-        self._gemm_token = results[1]
-        for i, (name, _) in enumerate(scalar_iter):
-            self.var_map[name] = results[2 + i]
+        tile_t = tt.tile(f32_s, part_shape)
+        self._tile_types[name] = tile_t
 
     def _ensure_i32(self, val: Value, expr: ast.Expression) -> Value:
         """Cast to i32 if expression type is f32 (needed for tile indices)."""
@@ -1038,199 +897,171 @@ class BytecodeBackend:
         return val
 
     def _gen_mma(self, stmt: ast.MmaStatement):
-        """Generate tile loads + MmaFOp for MMA ACC, A(i,j), B(i,j)."""
-        a_idx0 = self._ensure_i32(self._gen_expr(stmt.a_access.index), stmt.a_access.index)
-        a_idx1 = self._ensure_i32(self._gen_expr(stmt.a_access.index2), stmt.a_access.index2)
-        b_idx0 = self._ensure_i32(self._gen_expr(stmt.b_access.index), stmt.b_access.index)
-        b_idx1 = self._ensure_i32(self._gen_expr(stmt.b_access.index2), stmt.b_access.index2)
+        """Generate MmaFOp. Operand partition shapes are MMA semantics:
+        left operand is [tm, tk], right operand is [tk, tn]."""
+        if stmt.acc_var not in self.var_map:
+            raise BytecodeBackendError(
+                f"Accumulator '{stmt.acc_var}' used in MMA but not initialized. "
+                f"Add 'LET {stmt.acc_var} = 0' before the loop."
+            )
 
-        tile_a_t = self._gemm_types['tile_a']
-        tile_b_t = self._gemm_types['tile_b']
-        tile_c_t = self._gemm_types['tile_c']
-        token_s = self._gemm_types['token_s']
+        tm, tn, tk = self._tile_config
+        self._ensure_partition_view(stmt.a_access.name, [tm, tk])
+        self._ensure_partition_view(stmt.b_access.name, [tk, tn])
 
-        pv_a = self._gemm_views[stmt.a_access.name]
-        pv_b = self._gemm_views[stmt.b_access.name]
-
-        # Load A tile
-        tile_a_val, tok_a = encode_LoadViewTkoOp(
-            self.builder, tile_a_t, token_s, pv_a,
-            [a_idx0, a_idx1], self._gemm_token,
-            MemoryOrderingSemantics.WEAK, None, None,
-        )
-
-        # Load B tile
-        tile_b_val, tok_b = encode_LoadViewTkoOp(
-            self.builder, tile_b_t, token_s, pv_b,
-            [b_idx0, b_idx1], tok_a,
-            MemoryOrderingSemantics.WEAK, None, None,
-        )
-
-        # MMA: acc = A_tile * B_tile + acc
+        tile_a_val = self._gen_expr(stmt.a_access)
+        tile_b_val = self._gen_expr(stmt.b_access)
         acc = self.var_map[stmt.acc_var]
-        new_acc = encode_MmaFOp(
-            self.builder, tile_c_t, tile_a_val, tile_b_val, acc,
-        )
 
+        acc_type = self._var_ir_types.get(stmt.acc_var)
+        new_acc = encode_MmaFOp(
+            self.builder, acc_type, tile_a_val, tile_b_val, acc,
+        )
         self.var_map[stmt.acc_var] = new_acc
-        self._gemm_token = tok_b
 
     def _gen_tile_store(self, stmt: ast.TileStoreStatement):
-        """Generate StoreViewTkoOp for STORE C(i,j), ACC."""
+        """Generate StoreViewTkoOp for STORE C(i,j), ACC.
+        Output tile partition shape is [tm, tn]."""
+        tm, tn = self._tile_config[0], self._tile_config[1]
+        self._ensure_partition_view(stmt.target.name, [tm, tn])
+
         idx0 = self._ensure_i32(self._gen_expr(stmt.target.index), stmt.target.index)
         idx1 = self._ensure_i32(self._gen_expr(stmt.target.index2), stmt.target.index2)
 
-        token_s = self._gemm_types['token_s']
-        pv = self._gemm_views[stmt.target.name]
+        pv = self._views[stmt.target.name]
         tile_val = self.var_map[stmt.value_var]
 
         encode_StoreViewTkoOp(
-            self.builder, token_s, tile_val,
-            pv, [idx0, idx1], self._gemm_token,
+            self.builder, self._token_type, tile_val,
+            pv, [idx0, idx1], self._token,
             MemoryOrderingSemantics.WEAK, None, None,
         )
 
-    def _generate_gemm_kernel(self) -> bytes:
-        """Generate a tiled GEMM kernel from TILE/MMA/STORE statements."""
-        # Extract tile sizes from TILE statement
-        tile_stmt = None
-        for stmt in self.analyzed.statements:
-            if isinstance(stmt, ast.TileStatement):
-                tile_stmt = stmt
+    # ---- Main entry points ----
+
+    def _derive_param_arrays(self) -> list[str]:
+        """Build deduplicated list of arrays that become function parameters."""
+        param_arrays: list[str] = []
+        seen: set[str] = set()
+        for name in (self.analyzed.input_vars or []) + (self.analyzed.output_vars or []):
+            info = self.symbols.get(name)
+            if info and info.is_array and name not in seen:
+                seen.add(name)
+                param_arrays.append(name)
+        return param_arrays
+
+    def _compute_metadata(self):
+        """Compute _array_kernel_meta from accumulated codegen state."""
+        if not self._param_arrays:
+            return
+
+        input_arrays = [n for n in self.analyzed.input_vars
+                        if self.symbols.get(n) and self.symbols[n].is_array]
+        output_arrays = [n for n in (self.analyzed.output_vars or [])
+                         if self.symbols.get(n) and self.symbols[n].is_array]
+
+        meta: dict = {
+            "all_arrays": self._param_arrays,
+            "input_arrays": input_arrays,
+            "output_arrays": output_arrays,
+        }
+
+        if self._tile_config:
+            meta["tile_config"] = list(self._tile_config)
+
+        # Report per-array DIM sizes
+        for name, dims in self._array_dims.items():
+            meta.setdefault("dims", {})[name] = dims
+
+        # Compute grid_size from the actual partition views that were created
+        grid_size = None
+        for name in self._param_arrays:
+            dims = self._array_dims.get(name)
+            if dims is None:
+                continue
+            if len(dims) == 1:
+                tile_size = dims[0]
+                size = self.array_size
+                if size is None:
+                    raise BytecodeBackendError(
+                        "array_size must be provided for array kernels"
+                    )
+                meta["array_size"] = size
+                meta["tile_size"] = tile_size
+                grid_size = (size + tile_size - 1) // tile_size
                 break
-        tm, tn, tk = tile_stmt.tm, tile_stmt.tn, tile_stmt.tk
+            if len(dims) == 2 and self._tile_config:
+                tm, tn = self._tile_config[0], self._tile_config[1]
+                M, N = dims[0], dims[1]
+                meta.setdefault("M", M)
+                meta.setdefault("N", N)
+                # K from the second dim of the first input (if 2D)
+                for iname in input_arrays:
+                    idims = self._array_dims.get(iname, [])
+                    if len(idims) == 2:
+                        meta.setdefault("K", idims[1])
+                        break
+                meta.setdefault("array_size", M * N)
+                meta.setdefault("tile_size", tm)
+                num_m_tiles = (M + tm - 1) // tm
+                num_n_tiles = (N + tn - 1) // tn
+                grid_size = num_m_tiles * num_n_tiles
+                break
 
-        # Find MMA and STORE to determine matrix names
-        mma_stmt = self._find_stmt_recursive(ast.MmaStatement)
-        store_stmt = self._find_stmt_recursive(ast.TileStoreStatement)
-        a_name = mma_stmt.a_access.name
-        b_name = mma_stmt.b_access.name
-        c_name = store_stmt.target.name
-        self._gemm_acc_var = mma_stmt.acc_var
+        if grid_size is not None:
+            meta["grid_size"] = grid_size
 
-        # Get matrix dimensions from DIM statements
-        dims = self._get_dim_sizes()
-        M, K = dims[a_name]
-        K2, N = dims[b_name]
-        assert K == K2, f"K dimension mismatch: {a_name} has K={K}, {b_name} has K={K2}"
+        self._array_kernel_meta = meta
 
-        num_m_tiles = (M + tm - 1) // tm
-        num_n_tiles = (N + tn - 1) // tn
-        grid_size = num_m_tiles * num_n_tiles
+    def generate(self, array_size: int | None = None) -> bytes:
+        """Generate cuTile bytecode from the analyzed program."""
+        if array_size is not None:
+            self.array_size = array_size
 
-        all_arrays = [a_name, b_name, c_name]
+        self._param_arrays = self._derive_param_arrays()
 
         buf = bytearray()
+
         with write_bytecode(1, buf, BytecodeVersion.V_13_2) as writer:
             tt = writer.type_table
             self._init_types(tt)
 
             f32_s = tt.simple(SimpleType.F32)
-            token_s = tt.simple(SimpleType.Token)
             ptr_f32 = tt.pointer(f32_s)
             tile_ptr_f32 = tt.tile(ptr_f32, [])
+            self._token_type = tt.simple(SimpleType.Token)
 
-            # 2D tensor views
-            tv_a_t = tt.tensor_view(f32_s, [M, K], [K, 1])
-            tv_b_t = tt.tensor_view(f32_s, [K, N], [N, 1])
-            tv_c_t = tt.tensor_view(f32_s, [M, N], [N, 1])
-
-            # 2D partition views
-            pv_a_t = tt.partition_view([tm, tk], tv_a_t, [0, 1], PaddingValue.Zero)
-            pv_b_t = tt.partition_view([tk, tn], tv_b_t, [0, 1], PaddingValue.Zero)
-            pv_c_t = tt.partition_view([tm, tn], tv_c_t, [0, 1], PaddingValue.Zero)
-
-            # 2D tile types
-            tile_a_t = tt.tile(f32_s, [tm, tk])
-            tile_b_t = tt.tile(f32_s, [tk, tn])
-            tile_c_t = tt.tile(f32_s, [tm, tn])
-
-            self._gemm_types = {
-                'tile_a': tile_a_t, 'tile_b': tile_b_t, 'tile_c': tile_c_t,
-                'token_s': token_s,
-            }
-
-            param_types = [tile_ptr_f32] * 3
+            param_types = [tile_ptr_f32] * len(self._param_arrays)
 
             with writer.function(
                 "main", param_types, [], True, self._entry_hints(), DebugAttrId(0)
             ) as fb:
                 self.builder = fb.code_builder
                 self.var_map = {}
-
-                # BID
-                bid_x, _, _ = encode_GetTileBlockIdOp(
-                    self.builder, self.i32_t, self.i32_t, self.i32_t
-                )
-                self.var_map["BID"] = bid_x
-
-                # Create tensor views and partition views
-                tv_vals = {}
-                for i, (name, tv_t) in enumerate(zip(all_arrays, [tv_a_t, tv_b_t, tv_c_t])):
-                    tv_vals[name] = encode_MakeTensorViewOp(
-                        self.builder, tv_t, fb.parameters[i], [], []
-                    )
-
-                self._gemm_views = {}
-                for name, pv_t in zip(all_arrays, [pv_a_t, pv_b_t, pv_c_t]):
-                    self._gemm_views[name] = encode_MakePartitionViewOp(
-                        self.builder, pv_t, tv_vals[name]
-                    )
-
-                # Initial token
-                self._gemm_token = encode_MakeTokenOp(self.builder, token_s)
-
-                # Initialize accumulator to zeros
-                acc_init = encode_ConstantOp(
-                    self.builder, tile_c_t, struct.pack("<f", 0.0)
-                )
-                self.var_map[self._gemm_acc_var] = acc_init
-
-                # Walk all statements
-                for stmt in self.analyzed.statements:
-                    self._gen_gemm_stmt(stmt)
-
-                encode_ReturnOp(self.builder, operands=[])
-
-        self._array_kernel_meta = {
-            "all_arrays": all_arrays,
-            "input_arrays": [a_name, b_name],
-            "output_arrays": [c_name],
-            "array_size": M * N,
-            "tile_size": tm,
-            "grid_size": grid_size,
-            "M": M, "N": N, "K": K,
-            "tm": tm, "tn": tn, "tk": tk,
-        }
-        return bytes(buf)
-
-    # ---- Main entry points ----
-
-    def generate(self, array_size: int | None = None) -> bytes:
-        """Generate cuTile bytecode from the analyzed program."""
-        if self._is_gemm_kernel():
-            return self._generate_gemm_kernel()
-
-        if self._is_array_kernel():
-            size = array_size or self.array_size
-            if size is None:
-                raise BytecodeBackendError(
-                    "array_size must be provided for array kernels"
-                )
-            return self._generate_array_kernel(size)
-
-        buf = bytearray()
-
-        with write_bytecode(1, buf, BytecodeVersion.V_13_2) as writer:
-            self._init_types(writer.type_table)
-
-            with writer.function(
-                "main", [], [], True, self._entry_hints(), DebugAttrId(0)
-            ) as fb:
-                self.builder = fb.code_builder
-                self.var_map = {}
                 self.data_index = 0
                 self._returned = False
+                self._views = {}
+                self._tensor_views = {}
+                self._array_dims = {}
+                self._tile_config = None
+                self._tile_types = {}
+                self._token = None
+                self._var_ir_types = {}
+
+                # Map function parameters to array names
+                self._param_values = {
+                    name: fb.parameters[i]
+                    for i, name in enumerate(self._param_arrays)
+                }
+
+                if self._param_arrays:
+                    bid_x, _, _ = encode_GetTileBlockIdOp(
+                        self.builder, self.i32_t, self.i32_t, self.i32_t
+                    )
+                    self.var_map["BID"] = bid_x
+                    self._token = encode_MakeTokenOp(
+                        self.builder, self._token_type
+                    )
 
                 for stmt in self.analyzed.statements:
                     self._gen_stmt(stmt)
@@ -1238,6 +1069,7 @@ class BytecodeBackend:
                 if not self._returned:
                     encode_ReturnOp(self.builder, operands=[])
 
+        self._compute_metadata()
         return bytes(buf)
 
     def compile_to_cubin(self, output_dir: str | None = None, array_size: int | None = None) -> str:

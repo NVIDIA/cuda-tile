@@ -191,6 +191,85 @@ class TestTextualStructure:
                     defined.add(tok.strip())
 
 
+def _run_cli(*args: str, timeout: int = 120) -> subprocess.CompletedProcess:
+    """Run python -m cutile_basic.cli with the given arguments."""
+    return subprocess.run(
+        [sys.executable, "-m", "cutile_basic.cli", *args],
+        cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+class TestDocsCLIExamples:
+    """Test every CLI command that appears in the documentation.
+
+    Each test reproduces the exact command syntax shown in the docs so that
+    documentation examples are guaranteed to work.
+    """
+
+    # -- docs/getting_started.rst ----------------------------------------
+
+    def test_getting_started_textual_stdout(self):
+        """``python -m cutile_basic.cli examples/hello.bas``"""
+        r = _run_cli("examples/hello.bas")
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+        assert "cuda_tile.module @basic_program" in r.stdout
+
+    def test_getting_started_textual_to_file(self, tmp_path):
+        """``python -m cutile_basic.cli examples/hello.bas -o hello.mlir``"""
+        out = tmp_path / "hello.mlir"
+        r = _run_cli("examples/hello.bas", "-o", str(out))
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+        assert out.exists()
+        assert "cuda_tile.module @basic_program" in out.read_text()
+
+    def test_getting_started_compile_cubin(self, tmp_path):
+        """``python -m cutile_basic.cli examples/vector_add.bas --compile-cubin -o vector_add.cubin``"""
+        out = tmp_path / "vector_add.cubin"
+        r = _run_cli("examples/vector_add.bas", "--compile-cubin", "-o", str(out))
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+        assert out.exists()
+        assert out.stat().st_size > 0
+
+    # -- docs/cli.rst ----------------------------------------------------
+
+    def test_cli_textual_stdout(self):
+        """``python -m cutile_basic.cli examples/vector_add.bas``"""
+        r = _run_cli("examples/vector_add.bas")
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+        assert "cuda_tile.module @basic_program" in r.stdout
+
+    def test_cli_textual_to_file(self, tmp_path):
+        """``python -m cutile_basic.cli examples/vector_add.bas -o vector_add.mlir``"""
+        out = tmp_path / "vector_add.mlir"
+        r = _run_cli("examples/vector_add.bas", "-o", str(out))
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+        assert out.exists()
+        assert "cuda_tile.module @basic_program" in out.read_text()
+
+    def test_cli_dump_tokens(self):
+        """``python -m cutile_basic.cli examples/hello.bas --dump-tokens``"""
+        r = _run_cli("examples/hello.bas", "--dump-tokens")
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+        assert r.stdout.strip()
+
+    def test_cli_dump_ast(self):
+        """``python -m cutile_basic.cli examples/hello.bas --dump-ast``"""
+        r = _run_cli("examples/hello.bas", "--dump-ast")
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+        assert r.stdout.strip()
+
+    def test_cli_compile_cubin(self, tmp_path):
+        """``python -m cutile_basic.cli examples/vector_add.bas --compile-cubin -o vector_add.cubin``"""
+        out = tmp_path / "vector_add.cubin"
+        r = _run_cli("examples/vector_add.bas", "--compile-cubin", "-o", str(out))
+        assert r.returncode == 0, f"stderr: {r.stderr}"
+        assert out.exists()
+        assert out.stat().st_size > 0
+
+
 def _run_example(script_name: str, timeout: int = 120) -> subprocess.CompletedProcess:
     """Run an example .py script as a subprocess and return the result."""
     script = EXAMPLES_DIR / script_name
