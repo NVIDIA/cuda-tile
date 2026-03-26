@@ -81,4 +81,4 @@ pip install -r requirements.txt
 
 ## License
 
-Apache License 2.0 with LLVM Exceptions. See [LICENSE](LICENSE) for details.
+Apache License 2.0 with LLVM Exceptions. See [LICENSE](LICENSE.TXT) for details.
