@@ -96,6 +96,30 @@ class TestBytecodeGeneration:
         )
         assert bc[:7] == TILEIRAS_MAGIC
 
+    def test_while_loop(self):
+        bc = _compile(
+            "10 LET X = 10\n"
+            "20 WHILE X > 0\n"
+            "30   LET X = X - 1\n"
+            "40 WEND\n"
+            "50 END"
+        )
+        assert bc[:7] == TILEIRAS_MAGIC
+
+    def test_while_loop_with_iter_values(self):
+        """Test WHILE loop that modifies outer variables (summation pattern)."""
+        bc = _compile(
+            "10 LET S = 0\n"
+            "20 LET I = 1\n"
+            "30 WHILE I <= 5\n"
+            "40   LET S = S + I\n"
+            "50   LET I = I + 1\n"
+            "60 WEND\n"
+            "70 PRINT S\n"
+            "80 END"
+        )
+        assert bc[:7] == TILEIRAS_MAGIC
+
     def test_data_read(self):
         bc = _compile(
             "10 DATA 10, 20, 30\n"

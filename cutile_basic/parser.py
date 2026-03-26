@@ -1,7 +1,7 @@
 """Recursive descent parser for BASIC."""
 
 from __future__ import annotations
-from .tokens import Token, TokenType, KEYWORDS
+from .tokens import Token, TokenType
 from .lexer import BUILTIN_FUNCTIONS
 from . import ast_nodes as ast
 

@@ -455,6 +455,8 @@ class BytecodeBackend:
             self._gen_if(stmt)
         elif isinstance(stmt, ast.ForStatement):
             self._gen_for(stmt)
+        elif isinstance(stmt, ast.WhileStatement):
+            self._gen_while(stmt)
         elif isinstance(stmt, ast.ReadStatement):
             self._gen_read(stmt)
         elif isinstance(stmt, ast.DimStatement):
@@ -599,6 +601,61 @@ class BytecodeBackend:
             # Yield current values of iter vars
             yield_vals = [self.var_map[name] for name, _ in iter_vars]
             encode_ContinueOp(self.builder, operands=yield_vals)
+
+        results = nbb.done()
+        self.var_map = dict(saved)
+        for i, (name, _) in enumerate(iter_vars):
+            self.var_map[name] = results[i]
+
+    def _gen_while(self, stmt: ast.WhileStatement):
+        lb = self._const_i32(0)
+        ub = self._const_i32(1000000)
+        step = self._const_i32(1)
+
+        modified = self._find_modified_vars(stmt.body)
+        iter_vars = [(name, self.var_map[name]) for name in modified if name in self.var_map]
+        iter_type_ids = [self._type_id(self.symbols[n].type) for n, _ in iter_vars]
+        init_values = [v for _, v in iter_vars]
+
+        nbb = encode_ForOp(
+            self.builder,
+            result_types=iter_type_ids,
+            lowerBound=lb,
+            upperBound=ub,
+            step=step,
+            initValues=init_values,
+            unsignedCmp=False,
+        )
+
+        block_arg_types = [self.i32_t] + iter_type_ids
+
+        saved = dict(self.var_map)
+        with nbb.new_block(block_arg_types) as body_args:
+            for i, (name, _) in enumerate(iter_vars):
+                self.var_map[name] = body_args[1 + i]
+
+            cond = self._gen_expr(stmt.condition)
+
+            if_nbb = encode_IfOp(self.builder, result_types=list(iter_type_ids), condition=cond)
+
+            pre_body = dict(self.var_map)
+            with if_nbb.new_block([]) as _then:
+                for s in stmt.body:
+                    self._gen_stmt(s)
+                yield_vals = [self.var_map[name] for name, _ in iter_vars]
+                encode_YieldOp(self.builder, operands=yield_vals)
+
+            self.var_map = dict(pre_body)
+            with if_nbb.new_block([]) as _else:
+                yield_vals = [self.var_map[name] for name, _ in iter_vars]
+                encode_YieldOp(self.builder, operands=yield_vals)
+
+            if_results = if_nbb.done()
+            self.var_map = dict(pre_body)
+            for i, (name, _) in enumerate(iter_vars):
+                self.var_map[name] = if_results[i]
+
+            encode_ContinueOp(self.builder, operands=[self.var_map[name] for name, _ in iter_vars])
 
         results = nbb.done()
         self.var_map = dict(saved)
@@ -1179,108 +1236,6 @@ class BytecodeBackend:
                     encode_ReturnOp(self.builder, operands=[])
 
         return bytes(buf)
-
-    def dump_tileir(self, array_size: int | None = None) -> str:
-        """Return a readable TileIR text representation of the kernel."""
-        if not self._is_array_kernel():
-            raise BytecodeBackendError("dump_tileir only supports array kernels")
-
-        info = self._get_array_info()
-        input_arrays = info["input_arrays"]
-        output_arrays = info["output_arrays"]
-        array_let_stmts = info["array_let_stmts"]
-        tile_size = info["tile_size"] or self.TILE_SIZE
-        size = array_size or self.array_size
-        if size is None:
-            raise BytecodeBackendError("array_size must be provided")
-        grid_size = (size + tile_size - 1) // tile_size
-
-        all_arrays: list[str] = []
-        seen: set[str] = set()
-        for name in input_arrays + output_arrays:
-            if name not in seen:
-                seen.add(name)
-                all_arrays.append(name)
-
-        lines: list[str] = []
-        tv_type = f"tensor_view<f32, [{size}], [1]>"
-        pv_type = f"partition_view<[{tile_size}], {tv_type}, [0], zero>"
-        tile_type = f"tile<f32, [{tile_size}]>"
-        token_type = "token"
-
-        # Function signature
-        params = ", ".join(f"%{name}_ptr: tile<ptr<f32>>" for name in all_arrays)
-        lines.append(f"func @main({params}) {{")
-
-        # Block ID
-        lines.append(f"  %bid, %_, %__ = tileir.get_tile_block_id : i32, i32, i32")
-
-        # Tensor views and partition views
-        for name in all_arrays:
-            lines.append(f"  %{name}_tv = tileir.make_tensor_view %{name}_ptr : {tv_type}")
-            lines.append(f"  %{name}_pv = tileir.make_partition_view %{name}_tv : {pv_type}")
-
-        # Initial token
-        lines.append(f"  %tok0 = tileir.make_token : {token_type}")
-
-        # Process each array LET statement
-        tok_counter = 0
-        ssa_counter = 0
-        for body_stmt in array_let_stmts:
-            target_name = body_stmt.target.name
-            if target_name not in seen:
-                continue
-
-            # Generate loads from the RHS expression
-            def _ir_expr(expr) -> str:
-                nonlocal tok_counter, ssa_counter, lines
-                if isinstance(expr, ast.ArrayAccess) and expr.name in seen:
-                    name = expr.name
-                    ssa_counter += 1
-                    val = f"%{name}_tile"
-                    tok_counter += 1
-                    tok_in = f"%tok{tok_counter - 1}" if tok_counter > 1 else "%tok0"
-                    tok_out = f"%tok{tok_counter}"
-                    lines.append(
-                        f"  {val}, {tok_out} = tileir.load_view %{name}_pv[%bid], {tok_in}"
-                        f" : {tile_type}, {token_type}"
-                    )
-                    return val
-                if isinstance(expr, ast.BinaryOp):
-                    left = _ir_expr(expr.left)
-                    right = _ir_expr(expr.right)
-                    op_map = {"+": "addf", "-": "subf", "*": "mulf", "/": "divf"}
-                    op_name = op_map.get(expr.op, expr.op)
-                    ssa_counter += 1
-                    result = f"%v{ssa_counter}"
-                    lines.append(f"  {result} = tileir.{op_name} {left}, {right} : {tile_type}")
-                    return result
-                if isinstance(expr, ast.NumberLiteral):
-                    ssa_counter += 1
-                    result = f"%c{ssa_counter}"
-                    lines.append(f"  {result} = tileir.constant {expr.value} : f32")
-                    return result
-                return f"%{expr.name}" if isinstance(expr, ast.Variable) else "%?"
-
-            result_val = _ir_expr(body_stmt.value)
-
-            # Join tokens if multiple loads
-            if tok_counter > 1:
-                tok_list = ", ".join(f"%tok{i}" for i in range(1, tok_counter + 1))
-                tok_counter += 1
-                lines.append(f"  %tok{tok_counter} = tileir.join_tokens {tok_list} : {token_type}")
-
-            store_tok = f"%tok{tok_counter}" if tok_counter > 0 else "%tok0"
-            lines.append(
-                f"  tileir.store_view {result_val}, %{target_name}_pv[%bid], {store_tok}"
-                f" : {tile_type}, {token_type}"
-            )
-
-        lines.append("  tileir.return")
-        lines.append("}")
-        lines.append(f"// grid: ({grid_size}, 1, 1)  tile_size: {tile_size}  array_size: {size}")
-
-        return "\n".join(lines)
 
     def compile_to_cubin(self, output_dir: str = "/tmp", array_size: int | None = None) -> str:
         """Generate bytecode, run tileiras, return path to .cubin."""

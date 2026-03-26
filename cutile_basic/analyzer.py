@@ -1,7 +1,7 @@
 """Semantic analyzer: type inference, GOTO elimination, DATA/READ resolution."""
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from . import ast_nodes as ast
 

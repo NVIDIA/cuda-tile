@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from . import ast_nodes as ast
-from .analyzer import AnalyzedProgram, BasicType, SymbolInfo
+from .analyzer import AnalyzedProgram, BasicType
 from .lexer import lex
 from .parser import parse
 from .analyzer import analyze
