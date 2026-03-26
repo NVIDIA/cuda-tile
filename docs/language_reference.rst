@@ -204,27 +204,32 @@ process efficiently using tensor cores. Tile dimensions must be powers of two
 (e.g. 128 x 128). Unlike arrays, tiles are not directly addressable by the
 programmer -- they are implicit in operations like ``MMA`` and ``STORE``.
 
-When a kernel executes, each block works on a **tile-sized region** of the
-arrays:
+The ``TILE`` statement partitions each array into fixed-size tiles and
+determines how work is distributed across GPU blocks. Each block uses ``BID``
+to select which tile it operates on.
 
-- For element-wise operations (vector add), each block processes one element
-  via ``BID``:
+For a 1D element-wise kernel, ``TILE`` partitions vectors into 1D chunks:
 
-  .. code-block:: basic
+.. code-block:: basic
 
-     30 LET C(BID) = A(BID) + B(BID)
+   20 DIM A(1024), B(1024), C(1024)
+   30 TILE A(128), B(128), C(128)
+   50 LET C(BID) = A(BID) + B(BID)
 
-- ``TILE`` declares the tile/partition shape for each variable. ``MMA`` loads
-  tile-sized sub-matrices from arrays, multiplies them on tensor cores, and
-  accumulates the result:
+Here, each of the 8 blocks (1024 / 128) processes a 128-element tile.
+``C(BID)`` refers to the ``BID``-th tile of ``C``, not a single element.
 
-  .. code-block:: basic
+For a 2D matrix kernel, ``TILE`` partitions matrices into 2D sub-blocks and
+``MMA`` performs tensor-core multiply-accumulate on those tiles:
 
-     30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
-     80 MMA ACC, A(TILEM, K), B(K, TILEN)
+.. code-block:: basic
 
-  Here, ``A(TILEM, K)`` does not access a single element -- it loads a
-  128 x 32 tile from array ``A``. The hardware handles the bulk data movement.
+   20 DIM A(512, 512), B(512, 512), C(512, 512)
+   30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
+   80 MMA ACC, A(TILEM, K), B(K, TILEN)
+
+``A(TILEM, K)`` does not access a single element -- it loads a 128 x 32 tile
+from array ``A``. The hardware handles the bulk data movement.
 
 ``STORE`` writes a tile back to an array, and ``OUTPUT`` marks which arrays
 should be copied back to the host after execution. See :doc:`execution_model`
