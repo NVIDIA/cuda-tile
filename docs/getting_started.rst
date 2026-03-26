@@ -6,7 +6,7 @@ Prerequisites
 
 **Hardware:**
 
-- NVIDIA GPU with compute capability 8.x, 9.x, 10.x, 11.x, or 12.x
+- NVIDIA GPU with compute capability 8.x, 10.x, 11.x, or 12.x
 
 **Software:**
 
@@ -34,29 +34,18 @@ source tree (no separate install step).
 Quick Start
 -----------
 
-Write a BASIC program (``hello.bas``):
-
-.. code-block:: basic
-
-   10 REM Hello World in BASIC
-   20 PRINT "Hello, World!"
-   30 LET X = 42.0
-   40 LET Y = X * 2.0
-   50 PRINT "X = "; X
-   60 PRINT "Y = "; Y
-   70 END
-
-Compile it to CUDA Tile IR textual output:
+The repository ships with example BASIC programs in the ``examples/`` directory.
+Compile one to CUDA Tile IR textual output:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli hello.bas
+   $ python -m cutile_basic.cli examples/hello.bas
 
 This prints the generated textual output to stdout. To write it to a file:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli hello.bas -o hello.mlir
+   $ python -m cutile_basic.cli examples/hello.bas -o hello.mlir
 
 Compile to a ``.cubin``:
 
@@ -107,8 +96,8 @@ cutile-basic supports two output modes:
    backend. This is the default CLI output and is useful for inspection and
    debugging.
 
-**Cubin (via Bytecode)**
-   Source is compiled directly to cuTile bytecode using the ``cuda.tile._bytecode``
+**Bytecode**
+   Source is compiled to cuTile bytecode using the ``cuda.tile._bytecode``
    Python APIs, assembled into a ``.cubin`` with ``tileiras``, and can then be
    launched on the GPU from a Python host script. This is used by
    ``--compile-cubin`` on the CLI and by the demo scripts.

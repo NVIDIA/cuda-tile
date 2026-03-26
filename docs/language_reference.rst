@@ -25,6 +25,7 @@ Type          Description
 ============  ===================================
 ``F32``       32-bit floating point (default for numeric variables)
 ``I32``       32-bit integer
+``I1``        Boolean (result of comparisons and logical operators)
 ``STRING``    String literals (quoted with ``""``)
 ============  ===================================
 

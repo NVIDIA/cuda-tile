@@ -16,7 +16,7 @@ vector addition and matrix multiplication.
 Two output modes are supported:
 
 - **Textual** -- emits human-readable CUDA Tile IR text
-- **Cubin** -- compiles directly to `.cubin` via cuTile bytecode and `tileiras`
+- **Bytecode** -- compiles to `.cubin` via cuTile bytecode and `tileiras`
 
 ## Quick Start
 
@@ -91,7 +91,7 @@ pip install -r requirements.txt
 ## Prerequisites
 
 - Python 3.10+
-- NVIDIA GPU with compute capability 8.x, 9.x, 10.x, 11.x, or 12.x
+- NVIDIA GPU with compute capability 8.x, 10.x, 11.x, or 12.x
 - NVIDIA Driver r580 or later
 - CUDA Toolkit 13.1 or later
 - `cuda-tile[tileiras]` (bytecode backend + `tileiras` assembler)

@@ -1,11 +1,11 @@
 Examples
 ========
 
-cutile-basic ships with several example programs demonstrating both standard BASIC
-and GPU tile operations.
+cutile-basic ships with example programs in the ``examples/`` directory
+demonstrating both standard BASIC and GPU tile operations.
 
-Hello World
------------
+Hello World (``examples/hello.bas``)
+-------------------------------------
 
 A classic BASIC program showing variables, arithmetic, conditionals, and loops.
 
@@ -27,45 +27,8 @@ A classic BASIC program showing variables, arithmetic, conditionals, and loops.
    140 NEXT I
    150 END
 
-Fibonacci
----------
-
-Computes the first 10 Fibonacci numbers using a simple loop.
-
-.. code-block:: basic
-
-   10 REM Fibonacci sequence
-   20 LET A = 0
-   30 LET B = 1
-   40 PRINT "Fibonacci sequence:"
-   50 FOR I = 1 TO 10
-   60   PRINT A
-   70   LET C = A + B
-   80   LET A = B
-   90   LET B = C
-   100 NEXT I
-   110 END
-
-Array Sum
----------
-
-Demonstrates ``DATA``/``READ`` statements to sum an inline array.
-
-.. code-block:: basic
-
-   10 REM Array sum example
-   20 DIM A(5)
-   30 DATA 10, 20, 30, 40, 50
-   40 LET SUM = 0
-   50 FOR I = 1 TO 5
-   60   READ X
-   70   LET SUM = SUM + X
-   80 NEXT I
-   90 PRINT "Sum = "; SUM
-   100 END
-
-Vector Add (GPU)
-----------------
+Vector Add (``examples/vector_add.bas``)
+----------------------------------------
 
 A GPU kernel that computes ``C = A + B`` element-wise using the block ID.
 
@@ -90,8 +53,8 @@ Run it end-to-end with the Python demo script:
 This script lexes, parses, analyzes, compiles to cubin via the bytecode backend,
 launches the kernel with test data, and verifies the result.
 
-GEMM (GPU)
-----------
+GEMM (``examples/gemm.bas``)
+----------------------------
 
 A tiled matrix multiply: ``C(M,N) = A(M,K) * B(K,N)``.
 
@@ -134,7 +97,9 @@ Three demo scripts in ``examples/`` show end-to-end GPU execution:
    reference (``d_a @ d_b``).
 
 ``hello.py``
-   Compiles ``hello.bas`` and runs it on the GPU via the bytecode backend.
+   Compiles ``hello.bas`` to a cubin via the bytecode backend and launches it
+   as a single-block kernel. Because ``hello.bas`` has no GPU extensions, this
+   serves as a minimal smoke test of the compilation and launch pipeline.
 
    .. code-block:: bash
 

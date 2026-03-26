@@ -1310,7 +1310,7 @@ def compile_basic_to_cubin(
 
     Args:
         source: BASIC source code.
-        gpu_arch: Target GPU architecture (e.g. ``"sm_90"``).
+        gpu_arch: Target GPU architecture (e.g. ``"sm_120"``).
             ``None`` auto-detects from the current device.
         array_size: Total elements per array; ``None`` infers from DIM.
         num_ctas: CTAs-per-CGA optimisation hint; ``None`` disables.

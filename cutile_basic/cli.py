@@ -61,6 +61,8 @@ def main():
                 print(f"\nDATA values: {analyzed.data_values}")
             if analyzed.input_vars:
                 print(f"\nINPUT vars: {analyzed.input_vars}")
+            if analyzed.output_vars:
+                print(f"\nOUTPUT vars: {analyzed.output_vars}")
             print(f"\nHas GOTO: {analyzed.has_goto}")
             print(f"\nStatements: {len(analyzed.statements)}")
             return

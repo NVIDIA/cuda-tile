@@ -79,7 +79,7 @@ Analyzer
 
 Performs semantic analysis on the AST:
 
-- Infers types (``F32``, ``I32``, ``STRING``) for all variables
+- Infers types (``F32``, ``I32``, ``I1``, ``STRING``) for all variables
 - Tracks array declarations and sizes
 - Identifies ``INPUT`` and ``OUTPUT`` variables for GPU kernels
 - Collects ``DATA`` values

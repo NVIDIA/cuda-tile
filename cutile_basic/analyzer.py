@@ -1,4 +1,4 @@
-"""Semantic analyzer: type inference, GOTO elimination, DATA/READ resolution."""
+"""Semantic analyzer: type inference, INPUT/OUTPUT tracking, DATA/READ collection."""
 
 from __future__ import annotations
 from dataclasses import dataclass
