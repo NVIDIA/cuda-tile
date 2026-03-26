@@ -124,8 +124,6 @@ class Parser:
             return self.parse_tile()
         elif tok.type == TokenType.MMA:
             return self.parse_mma()
-        elif tok.type == TokenType.STORE:
-            return self.parse_tile_store()
         elif tok.type == TokenType.OUTPUT:
             return self.parse_output()
         elif tok.type == TokenType.IDENTIFIER:
@@ -391,20 +389,6 @@ class Parser:
         self.expect(TokenType.RPAREN)
         b_access = ast.ArrayAccess(name=b_name.value, index=b_idx, index2=b_idx2, line=b_name.line)
         return ast.MmaStatement(acc_var=acc_tok.value, a_access=a_access, b_access=b_access, line=tok.line)
-
-    def parse_tile_store(self) -> ast.TileStoreStatement:
-        """STORE C(row, col), ACC"""
-        tok = self.expect(TokenType.STORE)
-        name = self.expect(TokenType.IDENTIFIER)
-        self.expect(TokenType.LPAREN)
-        idx = self.parse_expression()
-        self.expect(TokenType.COMMA)
-        idx2 = self.parse_expression()
-        self.expect(TokenType.RPAREN)
-        target = ast.ArrayAccess(name=name.value, index=idx, index2=idx2, line=name.line)
-        self.expect(TokenType.COMMA)
-        value_tok = self.expect(TokenType.IDENTIFIER)
-        return ast.TileStoreStatement(target=target, value_var=value_tok.value, line=tok.line)
 
     def parse_read(self) -> ast.ReadStatement:
         tok = self.expect(TokenType.READ)

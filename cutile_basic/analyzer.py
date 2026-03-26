@@ -192,12 +192,6 @@ class Analyzer:
                     self.symbols[name] = SymbolInfo(
                         name=name, type=BasicType.F32, is_array=True)
 
-        elif isinstance(stmt, ast.TileStoreStatement):
-            name = stmt.target.name
-            if name not in self.symbols:
-                self.symbols[name] = SymbolInfo(
-                    name=name, type=BasicType.F32, is_array=True)
-
         elif isinstance(stmt, ast.OutputStatement):
             for var in stmt.variables:
                 name = var.name

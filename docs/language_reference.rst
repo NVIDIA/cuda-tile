@@ -202,7 +202,7 @@ them.
 **Tiles** are fixed-size rectangular chunks of data that the GPU hardware can
 process efficiently using tensor cores. Tile dimensions must be powers of two
 (e.g. 128 x 128). Unlike arrays, tiles are not directly addressable by the
-programmer -- they are implicit in operations like ``MMA`` and ``STORE``.
+programmer -- they are implicit in operations like ``MMA``.
 
 The ``TILE`` statement partitions each array into fixed-size tiles and
 determines how work is distributed across GPU blocks. Each block uses ``BID``
@@ -231,9 +231,9 @@ For a 2D matrix kernel, ``TILE`` partitions matrices into 2D sub-blocks and
 ``A(TILEM, K)`` does not access a single element -- it loads a 128 x 32 tile
 from array ``A``. The hardware handles the bulk data movement.
 
-``STORE`` writes a tile back to an array, and ``OUTPUT`` marks which arrays
-should be copied back to the host after execution. See :doc:`execution_model`
-for more on how kernels, grids, and data transfer work.
+``OUTPUT`` marks which arrays should be copied back to the host after execution.
+See :doc:`execution_model` for more on how kernels, grids, and data transfer
+work.
 
 Tile/GPU Extensions
 -------------------
@@ -269,15 +269,6 @@ into an accumulator variable.
 .. code-block:: basic
 
    80 MMA ACC, A(TILEM, K), B(K, TILEN)
-
-STORE
-^^^^^
-
-Stores a tile value (typically an MMA accumulator) into an array.
-
-.. code-block:: basic
-
-   100 STORE C(TILEM, TILEN), ACC
 
 OUTPUT
 ^^^^^^

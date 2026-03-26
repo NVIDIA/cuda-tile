@@ -53,7 +53,7 @@ Tokenizes BASIC source text into a flat list of ``Token`` objects. Each token
 carries its type (from ``TokenType`` enum), string value, line number, and column.
 
 The lexer recognizes all standard BASIC keywords plus the tile extensions
-(``TILE``, ``MMA``, ``STORE``, ``OUTPUT``, ``BID``).
+(``TILE``, ``MMA``, ``OUTPUT``, ``BID``).
 
 Parser
 ^^^^^^

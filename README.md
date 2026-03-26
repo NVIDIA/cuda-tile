@@ -10,8 +10,8 @@ A BASIC to CUDA Tile IR compiler. Write GPU kernels in BASIC, compile them to
 ## Overview
 
 cutile-basic extends classic BASIC with tile-based GPU operations (`TILE`, `MMA`,
-`STORE`, `OUTPUT`, `BID`), enabling concise expression of GPU kernels such as
-vector addition and matrix multiplication.
+`OUTPUT`, `BID`), enabling concise expression of GPU kernels such as vector
+addition and matrix multiplication.
 
 ## Quick Start
 
@@ -52,7 +52,7 @@ print(result.meta)          # kernel metadata (arrays, grid size, etc.)
 |---|---|
 | `examples/hello.bas` | Variables, arithmetic, conditionals, loops |
 | `examples/vector_add.bas` | GPU vector addition using BID |
-| `examples/gemm.bas` | Tiled GPU matrix multiply (MMA, STORE) |
+| `examples/gemm.bas` | Tiled GPU matrix multiply (MMA) |
 
 End-to-end GPU demos:
 

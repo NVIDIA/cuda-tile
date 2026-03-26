@@ -533,8 +533,6 @@ class BytecodeBackend:
             self._gen_tile(stmt)
         elif isinstance(stmt, ast.MmaStatement):
             self._gen_mma(stmt)
-        elif isinstance(stmt, ast.TileStoreStatement):
-            self._gen_tile_store(stmt)
         elif isinstance(stmt, ast.InputStatement):
             pass
         elif isinstance(stmt, ast.DataStatement):
@@ -661,7 +659,7 @@ class BytecodeBackend:
     def _body_has_token_ops(self, stmts: list[ast.Statement]) -> bool:
         """Check if a body contains operations that thread the token."""
         for stmt in stmts:
-            if isinstance(stmt, (ast.MmaStatement, ast.TileStoreStatement)):
+            if isinstance(stmt, ast.MmaStatement):
                 return True
             if isinstance(stmt, ast.LetStatement):
                 if isinstance(stmt.target, ast.ArrayAccess) and stmt.target.name in self._views:
@@ -814,7 +812,7 @@ class BytecodeBackend:
                 typ = info.type if info else BasicType.F32
                 self.var_map[var.name] = self._const(val, typ)
 
-    # ---- DIM / TILE / MMA / STORE lowering ----
+    # ---- DIM / TILE / MMA lowering ----
 
     def _gen_dim(self, stmt: ast.DimStatement):
         """Lower a DIM statement: record sizes and create tensor views for parameter arrays."""
@@ -915,22 +913,6 @@ class BytecodeBackend:
             self.builder, acc_type, tile_a_val, tile_b_val, acc,
         )
         self.var_map[stmt.acc_var] = new_acc
-
-    def _gen_tile_store(self, stmt: ast.TileStoreStatement):
-        """Generate StoreViewTkoOp. Partition shape from DIM TILE declaration."""
-        self._ensure_partition_view(stmt.target.name)
-
-        idx0 = self._ensure_i32(self._gen_expr(stmt.target.index), stmt.target.index)
-        idx1 = self._ensure_i32(self._gen_expr(stmt.target.index2), stmt.target.index2)
-
-        pv = self._views[stmt.target.name]
-        tile_val = self.var_map[stmt.value_var]
-
-        encode_StoreViewTkoOp(
-            self.builder, self._token_type, tile_val,
-            pv, [idx0, idx1], self._token,
-            MemoryOrderingSemantics.WEAK, None, None,
-        )
 
     # ---- Main entry points ----
 

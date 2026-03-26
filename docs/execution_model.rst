@@ -9,7 +9,7 @@ Kernels
 -------
 
 A cutile-basic program that uses GPU extensions (``INPUT``, ``OUTPUT``, ``BID``,
-``TILE``, ``MMA``, ``STORE``) compiles into a **kernel** -- a function that runs
+``TILE``, ``MMA``) compiles into a **kernel** -- a function that runs
 on the GPU rather than the CPU. The host (CPU) is responsible for launching the
 kernel, transferring data to/from GPU memory, and collecting results.
 
@@ -112,7 +112,7 @@ compute the result:
    70 FOR K = 0 TO 15
    80   MMA ACC, A(TILEM, K), B(K, TILEN)
    90 NEXT K
-   100 STORE C(TILEM, TILEN), ACC
+   100 LET C(TILEM, TILEN) = ACC
 
 Host-Device Data Flow
 ---------------------

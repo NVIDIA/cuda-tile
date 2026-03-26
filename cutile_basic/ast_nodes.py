@@ -151,12 +151,6 @@ class MmaStatement:
     line: int = 0
 
 @dataclass
-class TileStoreStatement:
-    target: ArrayAccess     # 2D tile store target
-    value_var: str          # tile value to store
-    line: int = 0
-
-@dataclass
 class OutputStatement:
     variables: list[Variable]
     line: int = 0
@@ -166,7 +160,7 @@ Statement = (
     ForStatement | WhileStatement | GotoStatement | GosubStatement |
     ReturnStatement | DimStatement | RemStatement | DataStatement |
     ReadStatement | EndStatement | StopStatement |
-    TileStatement | MmaStatement | TileStoreStatement | OutputStatement
+    TileStatement | MmaStatement | OutputStatement
 )
 
 

@@ -340,13 +340,6 @@ class TestExampleGemm:
         assert mmas[0].a_access.name == "A"
         assert mmas[0].b_access.name == "B"
 
-    def test_tile_store(self):
-        prog = parse_src(_read_example("gemm.bas"))
-        stores = [s for s in prog.statements if isinstance(s, ast.TileStoreStatement)]
-        assert len(stores) == 1
-        assert stores[0].target.name == "C"
-        assert stores[0].value_var == "ACC"
-
     def test_mod_expression(self):
         prog = parse_src(_read_example("gemm.bas"))
         lets = [s for s in prog.statements if isinstance(s, ast.LetStatement)]
