@@ -120,6 +120,42 @@ class TestBytecodeGeneration:
         )
         assert bc[:7] == TILEIRAS_MAGIC
 
+    def test_function_abs(self):
+        bc = _compile("10 LET X = ABS(-5.0)\n20 END")
+        assert bc[:7] == TILEIRAS_MAGIC
+
+    def test_function_sqr(self):
+        bc = _compile("10 LET X = SQR(16.0)\n20 END")
+        assert bc[:7] == TILEIRAS_MAGIC
+
+    def test_function_int(self):
+        bc = _compile("10 LET X = INT(3.7)\n20 END")
+        assert bc[:7] == TILEIRAS_MAGIC
+
+    def test_function_sin(self):
+        bc = _compile("10 LET X = SIN(1.0)\n20 END")
+        assert bc[:7] == TILEIRAS_MAGIC
+
+    def test_function_cos(self):
+        bc = _compile("10 LET X = COS(1.0)\n20 END")
+        assert bc[:7] == TILEIRAS_MAGIC
+
+    def test_function_tan(self):
+        bc = _compile("10 LET X = TAN(1.0)\n20 END")
+        assert bc[:7] == TILEIRAS_MAGIC
+
+    def test_function_exp(self):
+        bc = _compile("10 LET X = EXP(1.0)\n20 END")
+        assert bc[:7] == TILEIRAS_MAGIC
+
+    def test_function_log(self):
+        bc = _compile("10 LET X = LOG(1.0)\n20 END")
+        assert bc[:7] == TILEIRAS_MAGIC
+
+    def test_function_sgn(self):
+        bc = _compile("10 LET X = SGN(5.0)\n20 END")
+        assert bc[:7] == TILEIRAS_MAGIC
+
     def test_data_read(self):
         bc = _compile(
             "10 DATA 10, 20, 30\n"

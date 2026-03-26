@@ -1,7 +1,6 @@
 ---
 description: How to run the test suite for cutile-basic
-globs: tests/**
-alwaysApply: false
+alwaysApply: True
 ---
 
 # Running Tests

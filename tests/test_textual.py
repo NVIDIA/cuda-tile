@@ -131,6 +131,32 @@ def test_function_sin():
     assert "= sin " in text
 
 
+def test_function_cos():
+    text = compile_src("LET X = COS(1.0)")
+    assert "= cos " in text
+
+
+def test_function_tan():
+    text = compile_src("LET X = TAN(1.0)")
+    assert "= tan " in text
+
+
+def test_function_exp():
+    text = compile_src("LET X = EXP(1.0)")
+    assert "= exp " in text
+
+
+def test_function_log():
+    text = compile_src("LET X = LOG(1.0)")
+    assert "= log " in text
+
+
+def test_function_sgn():
+    text = compile_src("LET X = SGN(5.0)")
+    assert "cmpf" in text
+    assert "select" in text
+
+
 def test_rem_comment():
     text = compile_src("REM This is a comment")
     assert "// This is a comment" in text

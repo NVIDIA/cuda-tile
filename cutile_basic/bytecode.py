@@ -403,8 +403,12 @@ class BytecodeBackend:
             return encode_SinOp(self.builder, self.f32_t, arg)
         elif expr.name == "COS":
             return encode_CosOp(self.builder, self.f32_t, arg)
+        elif expr.name == "TAN":
+            s = encode_SinOp(self.builder, self.f32_t, arg)
+            c = encode_CosOp(self.builder, self.f32_t, arg)
+            return self._divf(s, c)
         elif expr.name == "EXP":
-            return encode_ExpOp(self.builder, self.f32_t, arg)
+            return encode_ExpOp(self.builder, self.f32_t, arg, RoundingMode.FULL)
         elif expr.name == "LOG":
             return encode_LogOp(self.builder, self.f32_t, arg)
         elif expr.name == "INT":
