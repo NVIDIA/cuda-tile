@@ -3,7 +3,7 @@
 ![cutile-basic](graphic.jpg)
 
 A BASIC to CUDA Tile IR compiler. Write GPU kernels in BASIC, compile them to
-CUDA Tile IR (MLIR), and launch them on NVIDIA GPUs.
+`.cubin` files via cuTile bytecode and `tileiras`, and launch them on NVIDIA GPUs.
 
 **[Documentation](https://basic-tile-a22467.gitlab-master-pages.nvidia.com/)**
 
@@ -13,23 +13,12 @@ cutile-basic extends classic BASIC with tile-based GPU operations (`TILE`, `MMA`
 `STORE`, `OUTPUT`, `BID`), enabling concise expression of GPU kernels such as
 vector addition and matrix multiplication.
 
-Two output modes are supported:
-
-- **Textual** -- emits human-readable CUDA Tile IR text
-- **Bytecode** -- compiles to `.cubin` via cuTile bytecode and `tileiras`
-
 ## Quick Start
 
-Generate textual output from a BASIC program:
+Compile a BASIC program to a `.cubin`:
 
 ```bash
-python -m cutile_basic.cli examples/vector_add.bas
-```
-
-Compile to a `.cubin`:
-
-```bash
-python -m cutile_basic.cli examples/vector_add.bas --compile-cubin -o vector_add.cubin
+python -m cutile_basic.cli examples/vector_add.bas -o vector_add.cubin
 ```
 
 Run an end-to-end GPU demo:
@@ -44,24 +33,17 @@ Or use the Python API:
 from cutile_basic import compile_basic_to_cubin
 
 source = """
-10 DIM A(128), B(128), C(128)
-20 INPUT A(), B()
-30 LET C(BID) = A(BID) + B(BID)
-40 OUTPUT C
-50 END
+10 DIM A(1024), B(1024), C(1024)
+20 TILE A(128), B(128), C(128)
+30 INPUT A(), B()
+40 LET C(BID) = A(BID) + B(BID)
+50 OUTPUT C
+60 END
 """
 
-result = compile_basic_to_cubin(source, array_size=1024)
+result = compile_basic_to_cubin(source)
 print(result.cubin_path)   # path to the compiled .cubin
 print(result.meta)          # kernel metadata (arrays, grid size, etc.)
-```
-
-To emit textual output instead:
-
-```python
-from cutile_basic import compile_basic_to_textual
-
-print(compile_basic_to_textual(source))
 ```
 
 ## Examples
@@ -70,7 +52,7 @@ print(compile_basic_to_textual(source))
 |---|---|
 | `examples/hello.bas` | Variables, arithmetic, conditionals, loops |
 | `examples/vector_add.bas` | GPU vector addition using BID |
-| `examples/gemm.bas` | Tiled GPU matrix multiply (TILE, MMA, STORE) |
+| `examples/gemm.bas` | Tiled GPU matrix multiply (MMA, STORE) |
 
 End-to-end GPU demos:
 
@@ -94,7 +76,7 @@ pip install -r requirements.txt
 - NVIDIA GPU with compute capability 8.x, 10.x, 11.x, or 12.x
 - NVIDIA Driver r580 or later
 - CUDA Toolkit 13.1 or later
-- `cuda-tile[tileiras]` (bytecode backend + `tileiras` assembler)
+- `cuda-tile[tileiras]` (`tileiras` assembler)
 - `cuda-python`, `cuda-core`, `cupy-cuda13x` (GPU launch and memory management)
 
 ## License
