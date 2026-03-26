@@ -146,7 +146,7 @@ class BytecodeBackend:
         }[typ]
 
     def _type_of_expr(self, expr: ast.Expression) -> BasicType:
-        """Infer the type of an expression (mirrors TextualBackend._type_of_expr)."""
+        """Infer the BasicType of an expression."""
         if isinstance(expr, ast.NumberLiteral):
             return BasicType.I32 if isinstance(expr.value, int) else BasicType.F32
         if isinstance(expr, ast.StringLiteral):

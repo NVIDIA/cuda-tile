@@ -35,23 +35,23 @@ Quick Start
 -----------
 
 The repository ships with example BASIC programs in the ``examples/`` directory.
-Compile one to CUDA Tile IR textual output:
+Compile one to a ``.cubin`` (the compiler prints the path to stdout):
 
 .. code-block:: bash
 
    $ python -m cutile_basic.cli examples/hello.bas
 
-This prints the generated textual output to stdout. To write it to a file:
+Write the ``.cubin`` to a specific path:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/hello.bas -o hello.mlir
+   $ python -m cutile_basic.cli examples/hello.bas -o hello.cubin
 
-Compile to a ``.cubin``:
+Another example:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/vector_add.bas --compile-cubin -o vector_add.cubin
+   $ python -m cutile_basic.cli examples/vector_add.bas -o vector_add.cubin
 
 Run a GPU demo end-to-end:
 
@@ -77,27 +77,3 @@ Using the Python API
    result = compile_basic_to_cubin(source, array_size=1024)
    print(result.cubin_path)   # path to the compiled .cubin
    print(result.meta)          # kernel metadata (arrays, grid size, etc.)
-
-To emit textual output instead:
-
-.. code-block:: python
-
-   from cutile_basic import compile_basic_to_textual
-
-   print(compile_basic_to_textual(source))
-
-Two Output Modes
-----------------
-
-cutile-basic supports two output modes:
-
-**Textual**
-   Source is compiled to human-readable CUDA Tile IR text via the textual
-   backend. This is the default CLI output and is useful for inspection and
-   debugging.
-
-**Bytecode**
-   Source is compiled to cuTile bytecode using the ``cuda.tile._bytecode``
-   Python APIs, assembled into a ``.cubin`` with ``tileiras``, and can then be
-   launched on the GPU from a Python host script. This is used by
-   ``--compile-cubin`` on the CLI and by the demo scripts.

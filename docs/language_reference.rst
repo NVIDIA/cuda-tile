@@ -121,9 +121,7 @@ Conditional loop.
 
 .. note::
 
-   ``WHILE``/``WEND`` is supported by the textual backend (emitted as a
-   bounded for-loop with a conditional break). The bytecode backend does not
-   currently support it.
+   ``WHILE``/``WEND`` is not currently supported by the backend.
 
 .. code-block:: basic
 
@@ -139,9 +137,8 @@ Unconditional jump to a line number.
 
 .. note::
 
-   ``GOTO`` is parsed and analyzed, but is not fully supported by the GPU
-   backends. The textual backend emits a comment placeholder and the bytecode
-   backend skips it.
+   ``GOTO`` is parsed and analyzed, but is not fully supported by the backend;
+   it is skipped during code generation.
 
 .. code-block:: basic
 
@@ -155,8 +152,7 @@ Subroutine call and return.
 .. note::
 
    ``GOSUB``/``RETURN`` are parsed and analyzed, but are not fully supported
-   by the GPU backends. The textual backend emits a comment placeholder and
-   the bytecode backend skips them.
+   by the backend; they are skipped during code generation.
 
 .. code-block:: basic
 

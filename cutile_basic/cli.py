@@ -8,7 +8,6 @@ from pathlib import Path
 from .lexer import lex, LexError
 from .parser import parse, ParseError
 from .analyzer import analyze, AnalyzeError
-from .textual import compile_basic_to_textual, TextualBackendError
 from .bytecode import compile_basic_to_cubin, BytecodeBackendError
 
 
@@ -23,11 +22,7 @@ def main():
     parser.add_argument("--dump-ast", action="store_true", help="Dump AST and exit")
     parser.add_argument("--dump-analyzed", action="store_true", help="Dump analyzed program and exit")
 
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--compile-textual", action="store_true", help="Compile to CUDA Tile IR textual output (default)")
-    mode.add_argument("--compile-cubin", action="store_true", help="Compile to .cubin via the bytecode backend")
-
-    parser.add_argument("--gpu-arch", default=None, help="GPU architecture for --compile-cubin (e.g. sm_120). Default: auto-detect")
+    parser.add_argument("--gpu-arch", default=None, help="GPU architecture (e.g. sm_120). Default: auto-detect")
 
     args = parser.parse_args()
 
@@ -67,26 +62,16 @@ def main():
             print(f"\nStatements: {len(analyzed.statements)}")
             return
 
-        if args.compile_cubin:
-            result = compile_basic_to_cubin(source, gpu_arch=args.gpu_arch)
-
-            if args.output:
-                Path(args.output).parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(result.cubin_path, args.output)
-                print(f"Wrote {args.output}", file=sys.stderr)
-            else:
-                print(result.cubin_path)
-            return
-
-        textual = compile_basic_to_textual(source)
+        result = compile_basic_to_cubin(source, gpu_arch=args.gpu_arch)
 
         if args.output:
-            Path(args.output).write_text(textual)
+            Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(result.cubin_path, args.output)
             print(f"Wrote {args.output}", file=sys.stderr)
         else:
-            print(textual)
+            print(result.cubin_path)
 
-    except (LexError, ParseError, AnalyzeError, TextualBackendError, BytecodeBackendError) as e:
+    except (LexError, ParseError, AnalyzeError, BytecodeBackendError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 

@@ -32,34 +32,31 @@ Options
    * - Option
      - Description
    * - ``-o, --output FILE``
-     - Output file path. Defaults to stdout for textual output.
+     - Write the compiled ``.cubin`` to ``FILE``. If omitted, the path to the
+       ``.cubin`` is printed to stdout.
    * - ``--dump-tokens``
      - Dump the token stream and exit.
    * - ``--dump-ast``
      - Dump the parsed AST and exit.
    * - ``--dump-analyzed``
      - Dump the analyzed program (symbols, types, metadata) and exit.
-   * - ``--compile-textual``
-     - Compile to CUDA Tile IR textual output (default).
-   * - ``--compile-cubin``
-     - Compile to ``.cubin`` via the bytecode backend.
    * - ``--gpu-arch ARCH``
-     - GPU architecture for ``--compile-cubin`` (e.g. ``sm_120``). Default: auto-detect.
+     - GPU architecture for compilation (e.g. ``sm_120``). Default: auto-detect.
 
 Examples
 --------
 
-Generate textual output to stdout:
+Compile and print the path to the ``.cubin``:
 
 .. code-block:: bash
 
    $ python -m cutile_basic.cli examples/vector_add.bas
 
-Write textual output to a file:
+Write the ``.cubin`` to a file:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/vector_add.bas -o vector_add.mlir
+   $ python -m cutile_basic.cli examples/vector_add.bas -o vector_add.cubin
 
 Inspect the token stream:
 
@@ -73,8 +70,8 @@ Inspect the AST:
 
    $ python -m cutile_basic.cli examples/hello.bas --dump-ast
 
-Compile to cubin:
+Compile to cubin with an explicit GPU architecture:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/vector_add.bas --compile-cubin -o vector_add.cubin
+   $ python -m cutile_basic.cli examples/vector_add.bas --gpu-arch sm_120 -o vector_add.cubin
