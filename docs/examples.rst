@@ -35,11 +35,12 @@ A GPU kernel that computes ``C = A + B`` element-wise using the block ID.
 .. code-block:: basic
 
    10 REM Vector Add: C = A + B
-   20 DIM A(128), B(128), C(128)
-   30 INPUT A(), B()
-   40 LET C(BID) = A(BID) + B(BID)
-   50 OUTPUT C
-   60 END
+   20 DIM A(1024), B(1024), C(1024)
+   30 TILE A(128), B(128), C(128)
+   40 INPUT A(), B()
+   50 LET C(BID) = A(BID) + B(BID)
+   60 OUTPUT C
+   70 END
 
 The ``INPUT`` statement declares ``A`` and ``B`` as kernel parameters. ``BID``
 maps to the CUDA block index, and ``OUTPUT`` marks ``C`` for host readback.

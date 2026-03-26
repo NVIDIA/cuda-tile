@@ -69,14 +69,15 @@ For matrix operations, a single element per block is not efficient. Instead,
 the data is divided into **tiles** -- rectangular sub-regions that the hardware
 can process efficiently using tensor cores.
 
-The ``TILE`` statement declares the tile dimensions:
+The ``TILE`` statement declares the tile/partition shape for each variable:
 
 .. code-block:: basic
 
-   30 TILE 128, 128, 32
+   30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
 
-This sets up tiles of size 128 x 128 with a K-dimension of 32 for matrix
-multiply. Each block processes one output tile of the result matrix.
+Here, ``A`` is partitioned into 128 x 32 tiles, ``B`` into 32 x 128 tiles, and
+the output ``C`` and accumulator ``ACC`` are 128 x 128 tiles. Each block
+processes one output tile of the result matrix.
 
 .. code-block:: text
 

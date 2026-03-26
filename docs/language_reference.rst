@@ -119,10 +119,6 @@ WHILE / WEND
 
 Conditional loop.
 
-.. note::
-
-   ``WHILE``/``WEND`` is not currently supported by the backend.
-
 .. code-block:: basic
 
    10 LET X = 1
