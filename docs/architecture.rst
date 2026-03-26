@@ -9,37 +9,36 @@ Pipeline Overview
 
 .. code-block:: text
 
-   .bas Source
-       │
-       ▼
-   ┌────────┐
-   │ Lexer  │  tokens.py, lexer.py
-   └───┬────┘
-       │  list[Token]
-       ▼
-   ┌────────┐
-   │ Parser │  ast_nodes.py, parser.py
-   └───┬────┘
-       │  Program (AST)
-       ▼
-   ┌──────────┐
-   │ Analyzer │  analyzer.py
-   └───┬──────┘
-       │  AnalyzedProgram
-       ▼
-   ┌────────────────┐
-   │ Bytecode       │  bytecode.py
-   │ Backend        │
-   └────────┬───────┘
+       .bas Source
             │
             ▼
-         tileiras
+   ┌──────────────────┐
+   │      Lexer       │  tokens.py, lexer.py
+   └────────┬─────────┘
+            │  list[Token]
+            ▼
+   ┌──────────────────┐
+   │      Parser      │  ast_nodes.py, parser.py
+   └────────┬─────────┘
+            │  Program (AST)
+            ▼
+   ┌──────────────────┐
+   │     Analyzer     │  analyzer.py
+   └────────┬─────────┘
+            │  AnalyzedProgram
+            ▼
+   ┌──────────────────┐
+   │ Bytecode Backend │  bytecode.py
+   └────────┬─────────┘
             │
             ▼
-          .cubin
+        tileiras
             │
             ▼
-      GPU Launch
+         .cubin
+            │
+            ▼
+       GPU Launch
    (CUDA driver API)
 
 Stage Details
