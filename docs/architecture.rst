@@ -83,7 +83,7 @@ Performs semantic analysis on the AST:
 - Tracks array declarations and sizes
 - Identifies ``INPUT`` and ``OUTPUT`` variables for GPU kernels
 - Collects ``DATA`` values
-- Validates ``GOTO``/``GOSUB`` targets
+- Collects ``GOTO``/``GOSUB`` targets
 
 Produces an ``AnalyzedProgram`` with a symbol table and metadata.
 

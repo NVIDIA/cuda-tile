@@ -130,8 +130,8 @@ Three demo scripts in ``examples/`` show end-to-end GPU execution:
    ``C[i] = A[i] + B[i]``.
 
 ``gemm.py``
-   Compiles ``gemm.bas``, launches a 512x512 GEMM, verifies against a CPU
-   reference implementation.
+   Compiles ``gemm.bas``, launches a 512x512 GEMM, verifies against a CuPy
+   reference (``d_a @ d_b``).
 
 ``hello.py``
    Compiles ``hello.bas`` and runs it on the GPU via the bytecode backend.

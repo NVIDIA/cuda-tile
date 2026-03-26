@@ -51,7 +51,7 @@ source = """
 50 END
 """
 
-result = compile_basic_to_cubin(source)
+result = compile_basic_to_cubin(source, array_size=1024)
 print(result.cubin_path)   # path to the compiled .cubin
 print(result.meta)          # kernel metadata (arrays, grid size, etc.)
 ```
@@ -91,7 +91,7 @@ pip install -r requirements.txt
 ## Prerequisites
 
 - Python 3.10+
-- NVIDIA GPU with compute capability 8.x, 10.x, 11.x, or 12.x
+- NVIDIA GPU with compute capability 8.x, 9.x, 10.x, 11.x, or 12.x
 - NVIDIA Driver r580 or later
 - CUDA Toolkit 13.1 or later
 - `cuda-tile[tileiras]` (bytecode backend + `tileiras` assembler)

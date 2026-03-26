@@ -61,6 +61,7 @@ autodoc_type_hints = "description"
 
 autodoc_mock_imports = [
     "cuda",
+    "cuda.core",
     "cuda.tile",
     "cuda.tile._bytecode",
 ]

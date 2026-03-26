@@ -6,7 +6,7 @@ Prerequisites
 
 **Hardware:**
 
-- NVIDIA GPU with compute capability 8.x, 10.x, 11.x, or 12.x
+- NVIDIA GPU with compute capability 8.x, 9.x, 10.x, 11.x, or 12.x
 
 **Software:**
 
@@ -73,11 +73,9 @@ Run a GPU demo end-to-end:
 Using the Python API
 --------------------
 
-Generate textual output:
-
 .. code-block:: python
 
-   from cutile_basic import compile_basic_to_textual
+   from cutile_basic import compile_basic_to_cubin
 
    source = """
    10 DIM A(128), B(128), C(128)
@@ -87,18 +85,17 @@ Generate textual output:
    50 END
    """
 
-   text = compile_basic_to_textual(source)
-   print(text)
-
-Or compile directly to a ``.cubin`` via the bytecode backend:
-
-.. code-block:: python
-
-   from cutile_basic import compile_basic_to_cubin
-
    result = compile_basic_to_cubin(source, array_size=1024)
    print(result.cubin_path)   # path to the compiled .cubin
    print(result.meta)          # kernel metadata (arrays, grid size, etc.)
+
+To emit textual output instead:
+
+.. code-block:: python
+
+   from cutile_basic import compile_basic_to_textual
+
+   print(compile_basic_to_textual(source))
 
 Two Output Modes
 ----------------
@@ -113,5 +110,5 @@ cutile-basic supports two output modes:
 **Cubin (via Bytecode)**
    Source is compiled directly to cuTile bytecode using the ``cuda.tile._bytecode``
    Python APIs, assembled into a ``.cubin`` with ``tileiras``, and can then be
-   launched on the GPU from a Python host script. This is used by ``--compile``
-   on the CLI and by the demo scripts.
+   launched on the GPU from a Python host script. This is used by
+   ``--compile-cubin`` on the CLI and by the demo scripts.
