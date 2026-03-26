@@ -1,11 +1,11 @@
 """Textual backend: AST → CUDA Tile IR MLIR text."""
 
 from __future__ import annotations
-from . import _ast_nodes as ast
-from ._analyzer import AnalyzedProgram, BasicType, SymbolInfo
-from ._lexer import lex
-from ._parser import parse
-from ._analyzer import analyze
+from . import ast_nodes as ast
+from .analyzer import AnalyzedProgram, BasicType, SymbolInfo
+from .lexer import lex
+from .parser import parse
+from .analyzer import analyze
 
 
 class TextualBackendError(Exception):

@@ -3,10 +3,10 @@
 from pathlib import Path
 
 import pytest
-from cutile_basic._lexer import lex
-from cutile_basic._parser import parse
-from cutile_basic._analyzer import analyze
-from cutile_basic._textual import TextualBackend
+from cutile_basic.lexer import lex
+from cutile_basic.parser import parse
+from cutile_basic.analyzer import analyze
+from cutile_basic.textual import TextualBackend
 
 
 def compile_src(src: str) -> str:

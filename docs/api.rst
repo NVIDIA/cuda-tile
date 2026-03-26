@@ -8,17 +8,17 @@ cutile_basic
    :members:
    :undoc-members:
 
-cutile_basic._textual
----------------------
+cutile_basic.textual
+--------------------
 
-.. automodule:: cutile_basic._textual
+.. automodule:: cutile_basic.textual
    :members:
    :undoc-members:
 
-cutile_basic._bytecode
-----------------------
+cutile_basic.bytecode
+---------------------
 
-.. automodule:: cutile_basic._bytecode
+.. automodule:: cutile_basic.bytecode
    :members:
    :undoc-members:
 

@@ -1,6 +1,6 @@
 """Lexer for BASIC source code."""
 
-from ._tokens import Token, TokenType, KEYWORDS
+from .tokens import Token, TokenType, KEYWORDS
 
 BUILTIN_FUNCTIONS = {"ABS", "SQR", "INT", "SIN", "COS", "TAN", "EXP", "LOG", "SGN"}
 

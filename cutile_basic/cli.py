@@ -5,11 +5,11 @@ import shutil
 import sys
 from pathlib import Path
 
-from ._lexer import lex, LexError
-from ._parser import parse, ParseError
-from ._analyzer import analyze, AnalyzeError
-from ._textual import compile_basic_to_textual, TextualBackendError
-from ._bytecode import compile_basic_to_cubin, BytecodeBackendError
+from .lexer import lex, LexError
+from .parser import parse, ParseError
+from .analyzer import analyze, AnalyzeError
+from .textual import compile_basic_to_textual, TextualBackendError
+from .bytecode import compile_basic_to_cubin, BytecodeBackendError
 
 
 def main():

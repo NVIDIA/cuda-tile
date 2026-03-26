@@ -3,8 +3,8 @@
 from pathlib import Path
 
 import pytest
-from cutile_basic._lexer import lex, LexError
-from cutile_basic._tokens import TokenType
+from cutile_basic.lexer import lex, LexError
+from cutile_basic.tokens import TokenType
 
 
 def tok_types(source: str) -> list[TokenType]:

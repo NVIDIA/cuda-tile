@@ -13,17 +13,17 @@ Pipeline Overview
        │
        ▼
    ┌────────┐
-   │ Lexer  │  _tokens.py, _lexer.py
+   │ Lexer  │  tokens.py, lexer.py
    └───┬────┘
        │  list[Token]
        ▼
    ┌────────┐
-   │ Parser │  _ast_nodes.py, _parser.py
+   │ Parser │  ast_nodes.py, parser.py
    └───┬────┘
        │  Program (AST)
        ▼
    ┌──────────┐
-   │ Analyzer │  _analyzer.py
+   │ Analyzer │  analyzer.py
    └───┬──────┘
        │  AnalyzedProgram
        ▼
@@ -52,7 +52,7 @@ Stage Details
 Lexer
 ^^^^^
 
-:Module: ``cutile_basic._lexer``
+:Module: ``cutile_basic.lexer``
 
 Tokenizes BASIC source text into a flat list of ``Token`` objects. Each token
 carries its type (from ``TokenType`` enum), string value, line number, and column.
@@ -63,7 +63,7 @@ The lexer recognizes all standard BASIC keywords plus the tile extensions
 Parser
 ^^^^^^
 
-:Module: ``cutile_basic._parser``
+:Module: ``cutile_basic.parser``
 
 Converts the token stream into an AST (``Program`` containing a list of
 ``Statement`` nodes). Handles BASIC line numbers and builds a ``line_map``
@@ -75,7 +75,7 @@ with correct operator precedence.
 Analyzer
 ^^^^^^^^
 
-:Module: ``cutile_basic._analyzer``
+:Module: ``cutile_basic.analyzer``
 
 Performs semantic analysis on the AST:
 
@@ -90,7 +90,7 @@ Produces an ``AnalyzedProgram`` with a symbol table and metadata.
 Textual Backend
 ^^^^^^^^^^^^^^^^
 
-:Module: ``cutile_basic._textual``
+:Module: ``cutile_basic.textual``
 
 Generates CUDA Tile IR text from the analyzed program. ``INPUT`` variables
 become kernel parameters. The output is a ``cuda_tile.module`` with an entry
@@ -100,7 +100,7 @@ debugging.
 Bytecode Backend
 ^^^^^^^^^^^^^^^^
 
-:Module: ``cutile_basic._bytecode``
+:Module: ``cutile_basic.bytecode``
 
 
 Compiles the analyzed program directly to cuTile bytecode using the
