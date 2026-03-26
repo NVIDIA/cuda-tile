@@ -1,10 +1,10 @@
-cuda-tile[tileiras]
-cuda-python
-cuda-core
-cupy-cuda13x
-pytest
+cuda-tile[tileiras]==1.2.0
+cuda-python==13.2.0
+cuda-core==0.6.0
+cupy-cuda13x==14.0.1
+pytest==9.0.2
 
-sphinx>=7.2
-nvidia-sphinx-theme>=0.0.9
-sphinx-design>=0.5
-sphinx-copybutton>=0.5
+sphinx==9.1.0
+nvidia-sphinx-theme==0.0.9.post1
+sphinx-design==0.7.0
+sphinx-copybutton==0.5.2
