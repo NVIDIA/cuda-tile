@@ -1237,7 +1237,7 @@ class BytecodeBackend:
 
         return bytes(buf)
 
-    def compile_to_cubin(self, output_dir: str = "/tmp", array_size: int | None = None) -> str:
+    def compile_to_cubin(self, output_dir: str | None = None, array_size: int | None = None) -> str:
         """Generate bytecode, run tileiras, return path to .cubin."""
         bytecode = self.generate(array_size=array_size)
 
