@@ -29,6 +29,7 @@ from cuda.tile._bytecode import (
     encode_DivIOp,
     encode_ExpOp,
     encode_ForOp,
+    encode_TanOp,
     encode_FToIOp,
     encode_GetTileBlockIdOp,
     encode_IfOp,
@@ -404,9 +405,7 @@ class BytecodeBackend:
         elif expr.name == "COS":
             return encode_CosOp(self.builder, self.f32_t, arg)
         elif expr.name == "TAN":
-            s = encode_SinOp(self.builder, self.f32_t, arg)
-            c = encode_CosOp(self.builder, self.f32_t, arg)
-            return self._divf(s, c)
+            return encode_TanOp(self.builder, self.f32_t, arg)
         elif expr.name == "EXP":
             return encode_ExpOp(self.builder, self.f32_t, arg, RoundingMode.FULL)
         elif expr.name == "LOG":
