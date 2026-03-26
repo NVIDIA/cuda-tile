@@ -30,9 +30,9 @@ Do NOT run `pytest` directly with the local `.venv` -- the sandbox blocks GPU ac
 | `test_lexer.py` | Tokenizer (all examples) |
 | `test_parser.py` | AST construction (all examples) |
 | `test_analyzer.py` | Type inference / symbols (all examples) |
-| `test_codegen.py` | MLIR text generation (all examples) |
+| `test_textual.py` | Textual backend (all examples) |
 | `test_bytecode.py` | Bytecode backend, cubin compilation, GPU execution |
 | `test_examples.py` | Public API + end-to-end example scripts on GPU |
-| `test_runner.py` | MLIR pipeline (tool discovery, compile steps, launch) |
+| `test_gpu.py` | GPU architecture detection |
 
 GPU tests in `test_bytecode.py` and `test_examples.py` are **required**, not skipped. They must pass.

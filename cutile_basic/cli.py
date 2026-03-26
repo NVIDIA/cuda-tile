@@ -1,30 +1,33 @@
 """CLI entry point for the BASIC to CUDA Tile IR compiler."""
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
 from ._lexer import lex, LexError
 from ._parser import parse, ParseError
 from ._analyzer import analyze, AnalyzeError
-from ._codegen import generate, CodeGenError
-from ._runner import compile_and_run, RunnerError
+from ._textual import compile_basic_to_textual, TextualBackendError
+from ._bytecode import compile_basic_to_cubin, BytecodeBackendError
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="cutile_basic",
-        description="Compile BASIC source to CUDA Tile IR MLIR",
+        description="Compile BASIC source to CUDA Tile IR",
     )
     parser.add_argument("input", help="Input .bas file")
-    parser.add_argument("-o", "--output", help="Output .mlir file (default: stdout)")
+    parser.add_argument("-o", "--output", help="Output file path (default: stdout)")
     parser.add_argument("--dump-tokens", action="store_true", help="Dump tokens and exit")
     parser.add_argument("--dump-ast", action="store_true", help="Dump AST and exit")
     parser.add_argument("--dump-analyzed", action="store_true", help="Dump analyzed program and exit")
-    parser.add_argument("--compile", action="store_true", help="Compile to .cubin (stop before GPU launch)")
-    parser.add_argument("--run", action="store_true", help="Compile and launch kernel on GPU")
-    parser.add_argument("--gpu-arch", default=None, help="GPU architecture override (e.g. sm_120). Default: auto-detect")
-    parser.add_argument("--cuda-tile-translate", default=None, help="Path to cuda-tile-translate binary")
+
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--compile-mlir", action="store_true", help="Compile to CUDA Tile IR MLIR text (default)")
+    mode.add_argument("--compile-cubin", action="store_true", help="Compile to .cubin via the bytecode backend")
+
+    parser.add_argument("--gpu-arch", default=None, help="GPU architecture for --compile-cubin (e.g. sm_120). Default: auto-detect")
 
     args = parser.parse_args()
 
@@ -62,33 +65,26 @@ def main():
             print(f"\nStatements: {len(analyzed.statements)}")
             return
 
-        mlir = generate(analyzed)
+        if args.compile_cubin:
+            result = compile_basic_to_cubin(source, gpu_arch=args.gpu_arch)
 
-        if args.compile or args.run:
-            output_dir = None
             if args.output:
-                output_dir = Path(args.output).parent
-                output_dir.mkdir(parents=True, exist_ok=True)
-
-            cubin_path = compile_and_run(
-                mlir,
-                gpu_arch=args.gpu_arch,
-                cuda_tile_translate_path=args.cuda_tile_translate,
-                compile_only=not args.run,
-                output_dir=output_dir,
-            )
-            if cubin_path and args.output:
-                # Move cubin to requested output path
-                import shutil
-                shutil.move(str(cubin_path), args.output)
+                Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(result.cubin_path, args.output)
                 print(f"Wrote {args.output}", file=sys.stderr)
-        elif args.output:
-            Path(args.output).write_text(mlir)
+            else:
+                print(result.cubin_path)
+            return
+
+        textual = compile_basic_to_textual(source)
+
+        if args.output:
+            Path(args.output).write_text(textual)
             print(f"Wrote {args.output}", file=sys.stderr)
         else:
-            print(mlir)
+            print(textual)
 
-    except (LexError, ParseError, AnalyzeError, CodeGenError, RunnerError) as e:
+    except (LexError, ParseError, AnalyzeError, TextualBackendError, BytecodeBackendError) as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 

@@ -15,7 +15,6 @@ Prerequisites
 - CUDA Toolkit 13.1 or later
 - ``cuda-tile[tileiras]``, ``cuda-python``, ``cuda-core``, ``cupy-cuda13x``
   (all installed via ``pip install -r requirements.txt``)
-- ``cuda-tile-translate`` (for the MLIR compilation path only)
 
 Installation
 ------------
@@ -59,11 +58,17 @@ This prints the generated MLIR to stdout. To write it to a file:
 
    $ python -m cutile_basic.cli hello.bas -o hello.mlir
 
-Compile and run on a GPU (requires ``cuda-tile-translate`` and ``tileiras``):
+Compile to a ``.cubin``:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli hello.bas --run
+   $ python -m cutile_basic.cli examples/vector_add.bas --compile-cubin -o vector_add.cubin
+
+Run a GPU demo end-to-end:
+
+.. code-block:: bash
+
+   $ python examples/vector_add.py
 
 Using the Python API
 --------------------
@@ -72,7 +77,7 @@ Generate MLIR text:
 
 .. code-block:: python
 
-   from cutile_basic import compile_basic_to_mlir
+   from cutile_basic import compile_basic_to_textual
 
    source = """
    10 DIM A(128), B(128), C(128)
@@ -82,7 +87,7 @@ Generate MLIR text:
    50 END
    """
 
-   mlir = compile_basic_to_mlir(source)
+   mlir = compile_basic_to_textual(source)
    print(mlir)
 
 Or compile directly to a ``.cubin`` via the bytecode backend:
@@ -95,17 +100,17 @@ Or compile directly to a ``.cubin`` via the bytecode backend:
    print(result.cubin_path)   # path to the compiled .cubin
    print(result.meta)          # kernel metadata (arrays, grid size, etc.)
 
-Two Compilation Paths
----------------------
+Two Output Modes
+----------------
 
-cutile-basic supports two paths from BASIC source to GPU execution:
+cutile-basic supports two output modes:
 
-**MLIR Path**
-   Source is compiled to CUDA Tile IR MLIR text, then passed through
-   ``cuda-tile-translate`` (MLIR to ``.tilebc``) and ``tileiras``
-   (``.tilebc`` to ``.cubin``), and finally launched via the CUDA driver API.
+**MLIR Text**
+   Source is compiled to human-readable CUDA Tile IR MLIR text. This is the
+   default CLI output and is useful for inspection and debugging.
 
-**Bytecode Path**
+**Cubin (via Bytecode)**
    Source is compiled directly to cuTile bytecode using the ``cuda.tile._bytecode``
-   Python APIs, assembled with ``tileiras``, and launched on the GPU. This path
-   bypasses MLIR text entirely and is used by the demo scripts.
+   Python APIs, assembled into a ``.cubin`` with ``tileiras``, and can then be
+   launched on the GPU from a Python host script. This is used by ``--compile``
+   on the CLI and by the demo scripts.

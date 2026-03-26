@@ -8,6 +8,13 @@ cutile_basic
    :members:
    :undoc-members:
 
+cutile_basic._textual
+---------------------
+
+.. automodule:: cutile_basic._textual
+   :members:
+   :undoc-members:
+
 cutile_basic._bytecode
 ----------------------
 

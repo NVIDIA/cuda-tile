@@ -1,4 +1,4 @@
-"""Bytecode backend: AST → cuTile bytecode (bypassing MLIR text)."""
+"""Bytecode backend: AST → cuTile bytecode."""
 
 from __future__ import annotations
 
@@ -7,6 +7,10 @@ import struct
 import subprocess
 import tempfile
 from pathlib import Path
+
+from ._lexer import lex
+from ._parser import parse
+from ._analyzer import analyze
 
 from cuda.tile._bytecode import (
     write_bytecode,
@@ -124,7 +128,7 @@ class BytecodeBackend:
         }[typ]
 
     def _type_of_expr(self, expr: ast.Expression) -> BasicType:
-        """Infer the type of an expression (mirrors CodeGen._type_of_expr)."""
+        """Infer the type of an expression (mirrors TextualBackend._type_of_expr)."""
         if isinstance(expr, ast.NumberLiteral):
             return BasicType.I32 if isinstance(expr.value, int) else BasicType.F32
         if isinstance(expr, ast.StringLiteral):
@@ -1323,4 +1327,51 @@ def _find_tileiras() -> Path:
         pass
     raise BytecodeBackendError(
         "tileiras not found. Ensure CUDA toolkit is installed."
+    )
+
+
+class CompilationResult:
+    """Result of compiling BASIC source to a .cubin file."""
+
+    def __init__(self, cubin_path: str, meta: dict):
+        self.cubin_path = cubin_path
+        self.meta = meta
+
+    def __repr__(self) -> str:
+        return f"CompilationResult(cubin_path={self.cubin_path!r}, meta={self.meta!r})"
+
+
+def compile_basic_to_cubin(
+    source: str,
+    *,
+    gpu_arch: str | None = None,
+    array_size: int | None = None,
+    num_ctas: int | None = None,
+) -> CompilationResult:
+    """Compile BASIC source to a .cubin via the bytecode backend.
+
+    Args:
+        source: BASIC source code.
+        gpu_arch: Target GPU architecture (e.g. ``"sm_90"``).
+            ``None`` auto-detects from the current device.
+        array_size: Total elements per array; ``None`` infers from DIM.
+        num_ctas: CTAs-per-CGA optimisation hint; ``None`` disables.
+
+    Returns:
+        A :class:`CompilationResult` with ``cubin_path`` and kernel ``meta``.
+    """
+    from .gpu import detect_gpu_arch
+
+    if gpu_arch is None:
+        gpu_arch = detect_gpu_arch()
+
+    tokens = lex(source)
+    program = parse(tokens)
+    analyzed = analyze(program)
+    backend = BytecodeBackend(
+        analyzed, gpu_arch=gpu_arch, array_size=array_size, num_ctas=num_ctas,
+    )
+    cubin_path = backend.compile_to_cubin()
+    return CompilationResult(
+        cubin_path=cubin_path, meta=backend._array_kernel_meta or {},
     )

@@ -1,4 +1,4 @@
-"""Tests for the CUDA Tile IR code generator."""
+"""Tests for the textual backend."""
 
 from pathlib import Path
 
@@ -6,14 +6,14 @@ import pytest
 from cutile_basic._lexer import lex
 from cutile_basic._parser import parse
 from cutile_basic._analyzer import analyze
-from cutile_basic._codegen import generate
+from cutile_basic._textual import TextualBackend
 
 
 def compile_src(src: str) -> str:
     tokens = lex(src)
     prog = parse(tokens)
     analyzed = analyze(prog)
-    return generate(analyzed)
+    return TextualBackend(analyzed).generate()
 
 
 def test_module_structure():

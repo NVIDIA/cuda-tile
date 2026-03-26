@@ -32,23 +32,19 @@ Options
    * - Option
      - Description
    * - ``-o, --output FILE``
-     - Output file path. For MLIR output, writes ``.mlir``. For ``--compile``,
-       writes ``.cubin``. Defaults to stdout for MLIR.
+     - Output file path. Defaults to stdout for MLIR text.
    * - ``--dump-tokens``
      - Dump the token stream and exit.
    * - ``--dump-ast``
      - Dump the parsed AST and exit.
    * - ``--dump-analyzed``
      - Dump the analyzed program (symbols, types, metadata) and exit.
-   * - ``--compile``
-     - Compile through to ``.cubin`` but do not launch on GPU.
-   * - ``--run``
-     - Compile and launch the kernel on the GPU.
+   * - ``--compile-mlir``
+     - Compile to CUDA Tile IR MLIR text (default).
+   * - ``--compile-cubin``
+     - Compile to ``.cubin`` via the bytecode backend.
    * - ``--gpu-arch ARCH``
-     - GPU architecture override (e.g. ``sm_120``). Default: auto-detect.
-   * - ``--cuda-tile-translate PATH``
-     - Path to the ``cuda-tile-translate`` binary. Default: searches standard
-       locations.
+     - GPU architecture for ``--compile-cubin`` (e.g. ``sm_120``). Default: auto-detect.
 
 Examples
 --------
@@ -81,10 +77,4 @@ Compile to cubin:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/vector_add.bas --compile -o vector_add.cubin
-
-Compile and run on GPU:
-
-.. code-block:: bash
-
-   $ python -m cutile_basic.cli examples/vector_add.bas --run
+   $ python -m cutile_basic.cli examples/vector_add.bas --compile-cubin -o vector_add.cubin

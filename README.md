@@ -13,12 +13,10 @@ cutile-basic extends classic BASIC with tile-based GPU operations (`TILE`, `MMA`
 `STORE`, `OUTPUT`, `BID`), enabling concise expression of GPU kernels such as
 vector addition and matrix multiplication.
 
-Two compilation paths are supported:
+Two output modes are supported:
 
-- **MLIR path** -- emits CUDA Tile IR MLIR text, compiled via `cuda-tile-translate`
-  and `tileiras` to `.cubin`
-- **Bytecode path** -- compiles directly to cuTile bytecode via `cuda.tile` Python
-  APIs, bypassing MLIR text
+- **MLIR text** -- emits human-readable CUDA Tile IR MLIR
+- **Cubin** -- compiles directly to `.cubin` via cuTile bytecode and `tileiras`
 
 ## Quick Start
 
@@ -28,13 +26,19 @@ Generate MLIR from a BASIC program:
 python -m cutile_basic.cli examples/vector_add.bas
 ```
 
-Compile and run on a GPU:
+Compile to a `.cubin`:
 
 ```bash
-python -m cutile_basic.cli examples/vector_add.bas --run
+python -m cutile_basic.cli examples/vector_add.bas --compile-cubin -o vector_add.cubin
 ```
 
-Or use the Python API to compile straight to a `.cubin`:
+Run an end-to-end GPU demo:
+
+```bash
+python examples/vector_add.py
+```
+
+Or use the Python API:
 
 ```python
 from cutile_basic import compile_basic_to_cubin
@@ -55,9 +59,9 @@ print(result.meta)          # kernel metadata (arrays, grid size, etc.)
 To emit MLIR text instead:
 
 ```python
-from cutile_basic import compile_basic_to_mlir
+from cutile_basic import compile_basic_to_textual
 
-print(compile_basic_to_mlir(source))
+print(compile_basic_to_textual(source))
 ```
 
 ## Examples
@@ -92,7 +96,6 @@ pip install -r requirements.txt
 - CUDA Toolkit 13.1 or later
 - `cuda-tile[tileiras]` (bytecode backend + `tileiras` assembler)
 - `cuda-python`, `cuda-core`, `cupy-cuda13x` (GPU launch and memory management)
-- `cuda-tile-translate` (MLIR compilation path only)
 
 ## License
 

@@ -1,15 +1,18 @@
-"""Code generator: AST → CUDA Tile IR MLIR text."""
+"""Textual backend: AST → CUDA Tile IR MLIR text."""
 
 from __future__ import annotations
 from . import _ast_nodes as ast
 from ._analyzer import AnalyzedProgram, BasicType, SymbolInfo
+from ._lexer import lex
+from ._parser import parse
+from ._analyzer import analyze
 
 
-class CodeGenError(Exception):
+class TextualBackendError(Exception):
     pass
 
 
-class CodeGen:
+class TextualBackend:
     def __init__(self, analyzed: AnalyzedProgram):
         self.analyzed = analyzed
         self.symbols = analyzed.symbols
@@ -400,7 +403,7 @@ class CodeGen:
 
         if isinstance(expr, ast.StringLiteral):
             # Strings only used in PRINT format strings — shouldn't reach here
-            raise CodeGenError("String expressions not supported in Tile IR")
+            raise TextualBackendError("String expressions not supported in Tile IR")
 
         if isinstance(expr, ast.Variable):
             if expr.name in self.var_ssa:
@@ -442,7 +445,7 @@ class CodeGen:
         if isinstance(expr, ast.FunctionCall):
             return self._gen_function(expr)
 
-        raise CodeGenError(f"Unknown expression type: {type(expr).__name__}")
+        raise TextualBackendError(f"Unknown expression type: {type(expr).__name__}")
 
     def _gen_binop(self, expr: ast.BinaryOp) -> str:
         left_ssa = self._gen_expr(expr.left)
@@ -602,7 +605,7 @@ class CodeGen:
             self.emit(f"{sel1} = select {gt_ssa}, {one}, {zero_i} : tile<i32>")
             self.emit(f"{result} = select {lt_ssa}, {neg_one}, {sel1} : tile<i32>")
         else:
-            raise CodeGenError(f"Unknown function: {expr.name}")
+            raise TextualBackendError(f"Unknown function: {expr.name}")
 
         return result
 
@@ -624,6 +627,9 @@ class CodeGen:
         return ssa
 
 
-def generate(analyzed: AnalyzedProgram) -> str:
-    """Generate CUDA Tile IR MLIR from an analyzed program."""
-    return CodeGen(analyzed).generate()
+def compile_basic_to_textual(source: str) -> str:
+    """Compile BASIC source code to CUDA Tile IR MLIR text."""
+    tokens = lex(source)
+    program = parse(tokens)
+    analyzed = analyze(program)
+    return TextualBackend(analyzed).generate()

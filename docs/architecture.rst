@@ -1,8 +1,8 @@
 Architecture
 ============
 
-cutile-basic compiles BASIC source code through a multi-stage pipeline, with two
-paths to GPU execution.
+cutile-basic compiles BASIC source code through a multi-stage pipeline with two
+output modes.
 
 Pipeline Overview
 -----------------
@@ -28,7 +28,7 @@ Pipeline Overview
        │  AnalyzedProgram
        ▼
    ┌───────────────────────────────────┐
-   │         Two Compilation Paths     │
+   │         Two Output Modes          │
    │                                   │
    │  ┌──────────┐    ┌──────────────┐ │
    │  │ Codegen  │    │  Bytecode    │ │
@@ -37,18 +37,14 @@ Pipeline Overview
    └───────┼─────────────────┼─────────┘
            │                 │
            ▼                 ▼
-   cuda-tile-translate    tileiras
-           │                 │
-           ▼                 │
-       tileiras              │
-           │                 │
-           ▼                 ▼
-         .cubin            .cubin
-           │                 │
-           └────────┬────────┘
-                    ▼
-              GPU Launch
-           (CUDA driver API)
+       MLIR text          tileiras
+     (human-readable)       │
+                            ▼
+                          .cubin
+                            │
+                            ▼
+                      GPU Launch
+                   (CUDA driver API)
 
 Stage Details
 -------------
@@ -91,32 +87,26 @@ Performs semantic analysis on the AST:
 
 Produces an ``AnalyzedProgram`` with a symbol table and metadata.
 
-Codegen (MLIR Path)
-^^^^^^^^^^^^^^^^^^^^
+Textual Backend
+^^^^^^^^^^^^^^^^
 
-:Module: ``cutile_basic._codegen``
+:Module: ``cutile_basic._textual``
 
 Generates CUDA Tile IR MLIR text from the analyzed program. ``INPUT`` variables
 become kernel parameters. The output is a ``cuda_tile.module`` with an entry
-function.
+function. This is the default CLI output and is useful for inspection and
+debugging.
 
 Bytecode Backend
 ^^^^^^^^^^^^^^^^
 
 :Module: ``cutile_basic._bytecode``
 
+
 Compiles the analyzed program directly to cuTile bytecode using the
 ``cuda.tile._bytecode`` Python APIs. Bypasses MLIR text entirely and produces
-a ``.cubin`` via ``tileiras``.
-
-Runner
-^^^^^^
-
-:Module: ``cutile_basic._runner``
-
-Orchestrates the MLIR path: locates ``cuda-tile-translate`` and ``tileiras``
-tools, compiles MLIR to ``.tilebc`` to ``.cubin``, optionally detects GPU
-architecture and launches the kernel.
+a ``.cubin`` via ``tileiras``. This is the compilation path used by
+``--compile-cubin`` on the CLI and by the demo scripts.
 
 GPU Utilities
 ^^^^^^^^^^^^^

@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from cutile_basic import compile_basic_to_mlir
+from cutile_basic import compile_basic_to_textual
 
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
@@ -17,37 +17,37 @@ def _read_example(name: str) -> str:
 
 
 class TestCompileBasicToMlir:
-    """Test compile_basic_to_mlir with all example programs."""
+    """Test compile_basic_to_textual with all example programs."""
 
     def test_hello(self):
-        mlir = compile_basic_to_mlir(_read_example("hello.bas"))
+        mlir = compile_basic_to_textual(_read_example("hello.bas"))
         assert "cuda_tile.module @basic_program" in mlir
         assert "entry @main()" in mlir
         assert "Hello, World!" in mlir
         assert "return" in mlir
 
     def test_vector_add(self):
-        mlir = compile_basic_to_mlir(_read_example("vector_add.bas"))
+        mlir = compile_basic_to_textual(_read_example("vector_add.bas"))
         assert "cuda_tile.module @basic_program" in mlir
         assert "entry @main(" in mlir
         assert "return" in mlir
 
     def test_gemm(self):
-        mlir = compile_basic_to_mlir(_read_example("gemm.bas"))
+        mlir = compile_basic_to_textual(_read_example("gemm.bas"))
         assert "cuda_tile.module @basic_program" in mlir
         assert "entry @main(" in mlir
         assert "for %" in mlir
         assert "return" in mlir
 
     def test_return_type_is_str(self):
-        result = compile_basic_to_mlir(_read_example("hello.bas"))
+        result = compile_basic_to_textual(_read_example("hello.bas"))
         assert isinstance(result, str)
 
     def test_all_examples_compile(self):
         """Every .bas file in examples/ should compile without error."""
         for bas_file in sorted(EXAMPLES_DIR.glob("*.bas")):
             source = bas_file.read_text()
-            mlir = compile_basic_to_mlir(source)
+            mlir = compile_basic_to_textual(source)
             assert "cuda_tile.module @basic_program" in mlir, (
                 f"{bas_file.name} did not produce valid MLIR"
             )
