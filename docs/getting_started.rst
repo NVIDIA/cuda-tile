@@ -46,13 +46,13 @@ Write a BASIC program (``hello.bas``):
    60 PRINT "Y = "; Y
    70 END
 
-Compile it to CUDA Tile IR MLIR:
+Compile it to CUDA Tile IR textual output:
 
 .. code-block:: bash
 
    $ python -m cutile_basic.cli hello.bas
 
-This prints the generated MLIR to stdout. To write it to a file:
+This prints the generated textual output to stdout. To write it to a file:
 
 .. code-block:: bash
 
@@ -73,7 +73,7 @@ Run a GPU demo end-to-end:
 Using the Python API
 --------------------
 
-Generate MLIR text:
+Generate textual output:
 
 .. code-block:: python
 
@@ -87,8 +87,8 @@ Generate MLIR text:
    50 END
    """
 
-   mlir = compile_basic_to_textual(source)
-   print(mlir)
+   text = compile_basic_to_textual(source)
+   print(text)
 
 Or compile directly to a ``.cubin`` via the bytecode backend:
 
@@ -105,9 +105,10 @@ Two Output Modes
 
 cutile-basic supports two output modes:
 
-**MLIR Text**
-   Source is compiled to human-readable CUDA Tile IR MLIR text. This is the
-   default CLI output and is useful for inspection and debugging.
+**Textual**
+   Source is compiled to human-readable CUDA Tile IR text via the textual
+   backend. This is the default CLI output and is useful for inspection and
+   debugging.
 
 **Cubin (via Bytecode)**
    Source is compiled directly to cuTile bytecode using the ``cuda.tile._bytecode``

@@ -32,15 +32,15 @@ Options
    * - Option
      - Description
    * - ``-o, --output FILE``
-     - Output file path. Defaults to stdout for MLIR text.
+     - Output file path. Defaults to stdout for textual output.
    * - ``--dump-tokens``
      - Dump the token stream and exit.
    * - ``--dump-ast``
      - Dump the parsed AST and exit.
    * - ``--dump-analyzed``
      - Dump the analyzed program (symbols, types, metadata) and exit.
-   * - ``--compile-mlir``
-     - Compile to CUDA Tile IR MLIR text (default).
+   * - ``--compile-textual``
+     - Compile to CUDA Tile IR textual output (default).
    * - ``--compile-cubin``
      - Compile to ``.cubin`` via the bytecode backend.
    * - ``--gpu-arch ARCH``
@@ -49,13 +49,13 @@ Options
 Examples
 --------
 
-Generate MLIR to stdout:
+Generate textual output to stdout:
 
 .. code-block:: bash
 
    $ python -m cutile_basic.cli examples/vector_add.bas
 
-Write MLIR to a file:
+Write textual output to a file:
 
 .. code-block:: bash
 

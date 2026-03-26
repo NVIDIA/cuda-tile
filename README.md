@@ -15,12 +15,12 @@ vector addition and matrix multiplication.
 
 Two output modes are supported:
 
-- **MLIR text** -- emits human-readable CUDA Tile IR MLIR
+- **Textual** -- emits human-readable CUDA Tile IR text
 - **Cubin** -- compiles directly to `.cubin` via cuTile bytecode and `tileiras`
 
 ## Quick Start
 
-Generate MLIR from a BASIC program:
+Generate textual output from a BASIC program:
 
 ```bash
 python -m cutile_basic.cli examples/vector_add.bas
@@ -56,7 +56,7 @@ print(result.cubin_path)   # path to the compiled .cubin
 print(result.meta)          # kernel metadata (arrays, grid size, etc.)
 ```
 
-To emit MLIR text instead:
+To emit textual output instead:
 
 ```python
 from cutile_basic import compile_basic_to_textual

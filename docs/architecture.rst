@@ -31,13 +31,13 @@ Pipeline Overview
    │         Two Output Modes          │
    │                                   │
    │  ┌──────────┐    ┌──────────────┐ │
-   │  │ Codegen  │    │  Bytecode    │ │
-   │  │ (MLIR)   │    │  Backend     │ │
+   │  │ Textual  │    │  Bytecode    │ │
+   │  │ Backend  │    │  Backend     │ │
    │  └────┬─────┘    └──────┬───────┘ │
    └───────┼─────────────────┼─────────┘
            │                 │
            ▼                 ▼
-       MLIR text          tileiras
+     textual output       tileiras
      (human-readable)       │
                             ▼
                           .cubin
@@ -92,7 +92,7 @@ Textual Backend
 
 :Module: ``cutile_basic._textual``
 
-Generates CUDA Tile IR MLIR text from the analyzed program. ``INPUT`` variables
+Generates CUDA Tile IR text from the analyzed program. ``INPUT`` variables
 become kernel parameters. The output is a ``cuda_tile.module`` with an entry
 function. This is the default CLI output and is useful for inspection and
 debugging.
@@ -104,7 +104,7 @@ Bytecode Backend
 
 
 Compiles the analyzed program directly to cuTile bytecode using the
-``cuda.tile._bytecode`` Python APIs. Bypasses MLIR text entirely and produces
+``cuda.tile._bytecode`` Python APIs. Bypasses the textual backend entirely and produces
 a ``.cubin`` via ``tileiras``. This is the compilation path used by
 ``--compile-cubin`` on the CLI and by the demo scripts.
 

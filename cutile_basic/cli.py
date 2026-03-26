@@ -24,7 +24,7 @@ def main():
     parser.add_argument("--dump-analyzed", action="store_true", help="Dump analyzed program and exit")
 
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--compile-mlir", action="store_true", help="Compile to CUDA Tile IR MLIR text (default)")
+    mode.add_argument("--compile-textual", action="store_true", help="Compile to CUDA Tile IR textual output (default)")
     mode.add_argument("--compile-cubin", action="store_true", help="Compile to .cubin via the bytecode backend")
 
     parser.add_argument("--gpu-arch", default=None, help="GPU architecture for --compile-cubin (e.g. sm_120). Default: auto-detect")
