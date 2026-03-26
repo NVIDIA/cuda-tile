@@ -81,4 +81,4 @@ pip install -r requirements.txt
 
 ## License
 
-Copyright NVIDIA Corporation. All rights reserved.
+Apache License 2.0 with LLVM Exceptions. See [LICENSE](LICENSE) for details.
