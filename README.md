@@ -1,6 +1,12 @@
 # cutile-basic
 
-![cutile-basic](graphic.jpg)
+<p align="center" style="padding: 20px 0;">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/cutile_basic_icon__padded__white_text.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/cutile_basic_icon__padded__black_text.png">
+    <img alt="cutile-basic" src="docs/images/cutile_basic_icon__padded__black_text.png" width="400">
+  </picture>
+</p>
 
 A BASIC to CUDA Tile IR compiler. Write GPU kernels in BASIC, compile them to
 `.cubin` files via cuTile bytecode and `tileiras`, and launch them on NVIDIA GPUs.

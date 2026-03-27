@@ -12,6 +12,22 @@ div.highlight pre {
     line-height: 1.5;
 }
 
+html[data-theme="dark"] .only-light,
+html[data-theme="light"] .only-dark {
+    display: none !important;
+}
+
+.hero-logo-container {
+    text-align: center;
+    padding: 24px 0;
+}
+
+.hero-logo-container img {
+    max-width: 400px;
+    width: 100%;
+    height: auto;
+}
+
 .sd-card {
     transition: box-shadow 0.2s ease, transform 0.2s ease;
 }

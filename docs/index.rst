@@ -1,6 +1,18 @@
 cutile-basic
 ============
 
+.. rst-class:: hero-logo-container
+
+   .. image:: images/cutile_basic_icon__padded__black_text.png
+      :alt: cutile-basic
+      :class: only-light
+
+.. rst-class:: hero-logo-container
+
+   .. image:: images/cutile_basic_icon__padded__white_text.png
+      :alt: cutile-basic
+      :class: only-dark
+
 A BASIC to CUDA Tile IR compiler. Write GPU kernels in BASIC, compile them to
 ``.cubin`` files, and launch them on NVIDIA GPUs.
 
