@@ -9,8 +9,8 @@ Kernels
 -------
 
 A cutile-basic program that uses GPU extensions (``INPUT``, ``OUTPUT``, ``BID``,
-``TILE``, ``MMA``) compiles into a **kernel** -- a function that runs
-on the GPU rather than the CPU. The host (CPU) is responsible for launching the
+``TILE``) or GPU built-in functions like ``MMA`` compiles into a **kernel** -- a
+function that runs on the GPU rather than the CPU. The host (CPU) is responsible for launching the
 kernel, transferring data to/from GPU memory, and collecting results.
 
 .. code-block:: basic

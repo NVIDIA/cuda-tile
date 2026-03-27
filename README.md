@@ -15,9 +15,9 @@ A BASIC to CUDA Tile IR compiler. Write GPU kernels in BASIC, compile them to
 
 ## Overview
 
-cutile-basic extends classic BASIC with tile-based GPU operations (`TILE`, `MMA`,
-`OUTPUT`, `BID`), enabling concise expression of GPU kernels such as vector
-addition and matrix multiplication.
+cutile-basic extends classic BASIC with tile-based GPU operations (`TILE`,
+`OUTPUT`, `BID`) and built-in functions like `MMA`, enabling concise expression
+of GPU kernels such as vector addition and matrix multiplication.
 
 ## Quick Start
 

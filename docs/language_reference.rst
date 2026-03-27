@@ -276,17 +276,6 @@ Declares the tile/partition shape for one or more variables.
    20 TILE A(128), B(128), C(128)
    30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
 
-MMA
-^^^
-
-Matrix Multiply-Accumulate on tiles. ``MMA`` is a function-like expression that
-takes two tile operands and an accumulator, and returns the updated accumulator.
-Use it on the right-hand side of a ``LET`` assignment.
-
-.. code-block:: basic
-
-   80 LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
-
 OUTPUT
 ^^^^^^
 
@@ -336,16 +325,25 @@ Operator          Description
 Built-in Functions
 ------------------
 
-===============  ============================
-Function         Description
-===============  ============================
-``ABS(x)``       Absolute value
-``SQR(x)``       Square root
-``INT(x)``       Integer truncation
-``SIN(x)``       Sine
-``COS(x)``       Cosine
-``TAN(x)``       Tangent
-``EXP(x)``       Exponential (e^x)
-``LOG(x)``       Natural logarithm
-``SGN(x)``       Sign (-1, 0, or 1)
-===============  ============================
+============================  ==========================================
+Function                      Description
+============================  ==========================================
+``ABS(x)``                    Absolute value
+``SQR(x)``                    Square root
+``INT(x)``                    Integer truncation
+``SIN(x)``                    Sine
+``COS(x)``                    Cosine
+``TAN(x)``                    Tangent
+``EXP(x)``                    Exponential (e^x)
+``LOG(x)``                    Natural logarithm
+``SGN(x)``                    Sign (-1, 0, or 1)
+``MMA(A, B, ACC)``            Matrix multiply-accumulate on tiles
+============================  ==========================================
+
+``MMA`` loads tiles from arrays ``A`` and ``B``, multiplies them, and
+accumulates the result into ``ACC``, returning the updated accumulator.
+Use it on the right-hand side of a ``LET`` assignment:
+
+.. code-block:: basic
+
+   80 LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
