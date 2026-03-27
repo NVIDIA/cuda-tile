@@ -4,6 +4,7 @@
 import sys
 from pathlib import Path
 
+import numpy as np
 import cupy as cp
 from cuda.core import Device, LaunchConfig, ObjectCode, launch
 
@@ -18,12 +19,14 @@ def main():
     source = (Path(__file__).parent / "vector_add.bas").read_text()
 
     print("[1/2] Compiling to cubin ...", flush=True)
-    result = compile_basic_to_cubin(source, array_size=N)
+    result = compile_basic_to_cubin(source)
     meta = result.meta
     tile_shapes = meta.get("tile_shapes", {})
-    print(f"      Arrays: {meta['all_arrays']}, "
+    tile_c = tile_shapes["C"]
+    grid_size = N // tile_c[0]
+    print(f"      N={N}, "
           f"tile_shapes={tile_shapes}, "
-          f"grid_size={meta['grid_size']}")
+          f"grid_size={grid_size}")
 
     print("[2/2] Launching kernel on GPU ...", flush=True)
     dev = Device(0)
@@ -36,8 +39,9 @@ def main():
     d_b = cp.arange(N, dtype=cp.float32) * 2.0
     d_c = cp.zeros(N, dtype=cp.float32)
 
-    config = LaunchConfig(grid=(meta["grid_size"], 1, 1), block=(1, 1, 1))
-    launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
+    config = LaunchConfig(grid=(grid_size, 1, 1), block=(1, 1, 1))
+    launch(stream, config, kernel,
+           np.int32(N), d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
     stream.sync()
 
     expected = d_a + d_b

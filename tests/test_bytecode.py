@@ -2,6 +2,7 @@
 
 import os
 
+import numpy as np
 import cupy as cp
 import pytest
 from cuda.core import Device, LaunchConfig, ObjectCode, launch
@@ -203,7 +204,7 @@ class TestArrayKernel:
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        bc = BytecodeBackend(analyzed, array_size=self.N).generate()
+        bc = BytecodeBackend(analyzed).generate()
         assert bc[:7] == TILEIRAS_MAGIC
 
     def test_vector_add_cubin(self):
@@ -211,12 +212,13 @@ class TestArrayKernel:
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch(), array_size=self.N)
+        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
         cubin_path = backend.compile_to_cubin()
         assert os.path.isfile(cubin_path)
         assert os.path.getsize(cubin_path) > 0
-        assert backend._array_kernel_meta is not None
-        assert backend._array_kernel_meta["grid_size"] == 8
+        meta = backend._array_kernel_meta
+        assert meta is not None
+        assert "N" in meta["scalar_params"]
 
     def test_vector_add_gpu_execution(self):
         """Full end-to-end: compile + launch + verify on GPU."""
@@ -224,9 +226,11 @@ class TestArrayKernel:
         tokens = lex(source)
         program = parse(tokens)
         analyzed = analyze(program)
-        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch(), array_size=self.N)
+        backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
         cubin_path = backend.compile_to_cubin()
         meta = backend._array_kernel_meta
+        tile_c = meta["tile_shapes"]["C"]
+        grid_size = self.N // tile_c[0]
 
         dev = Device(0)
         dev.set_current()
@@ -238,8 +242,9 @@ class TestArrayKernel:
         d_b = cp.arange(N, dtype=cp.float32) * 2.0
         d_c = cp.zeros(N, dtype=cp.float32)
 
-        config = LaunchConfig(grid=(meta["grid_size"], 1, 1), block=(1, 1, 1))
-        launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
+        config = LaunchConfig(grid=(grid_size, 1, 1), block=(1, 1, 1))
+        launch(stream, config, kernel,
+               np.int32(N), d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
         stream.sync()
 
         assert float(cp.max(cp.abs(d_c - (d_a + d_b)))) < 0.01
@@ -247,6 +252,8 @@ class TestArrayKernel:
 
 class TestGemmKernel:
     """Test the tiled GEMM kernel path."""
+
+    M, N, K = 512, 512, 512
 
     def test_gemm_bytecode(self):
         source = open("examples/gemm.bas").read()
@@ -265,13 +272,14 @@ class TestGemmKernel:
         backend.generate()
         meta = backend._array_kernel_meta
         assert meta is not None
-        assert meta["dims"]["A"] == [512, 512]
-        assert meta["dims"]["B"] == [512, 512]
-        assert meta["dims"]["C"] == [512, 512]
+        assert meta["dims"]["A"] == [None, None]
+        assert meta["dims"]["B"] == [None, None]
+        assert meta["dims"]["C"] == [None, None]
         assert meta["tile_shapes"]["A"] == [128, 32]
         assert meta["tile_shapes"]["B"] == [32, 128]
         assert meta["tile_shapes"]["C"] == [128, 128]
         assert set(meta["all_arrays"]) == {"A", "B", "C"}
+        assert set(meta["scalar_params"]) == {"M", "N", "K"}
 
     def test_gemm_cubin(self):
         source = open("examples/gemm.bas").read()
@@ -292,8 +300,9 @@ class TestGemmKernel:
         backend = BytecodeBackend(analyzed, gpu_arch=detect_gpu_arch())
         cubin_path = backend.compile_to_cubin()
         meta = backend._array_kernel_meta
-        M, K = meta["dims"]["A"]
-        N = meta["dims"]["B"][1]
+        tile_c = meta["tile_shapes"]["C"]
+        M, N, K = self.M, self.N, self.K
+        grid_size = (M // tile_c[0]) * (N // tile_c[1])
 
         dev = Device(0)
         dev.set_current()
@@ -305,8 +314,10 @@ class TestGemmKernel:
         d_b = cp.random.uniform(-1.0, 1.0, (K, N)).astype(cp.float32)
         d_c = cp.zeros((M, N), dtype=cp.float32)
 
-        config = LaunchConfig(grid=(meta["grid_size"], 1, 1), block=(1, 1, 1))
-        launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
+        config = LaunchConfig(grid=(grid_size, 1, 1), block=(1, 1, 1))
+        launch(stream, config, kernel,
+               np.int32(M), np.int32(N), np.int32(K),
+               d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
         stream.sync()
 
         expected = d_a @ d_b

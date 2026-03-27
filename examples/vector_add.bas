@@ -1,7 +1,7 @@
 10 REM Vector Add: C = A + B
-20 DIM A(1024), B(1024), C(1024)
-30 TILE A(128), B(128), C(128)
-40 INPUT A(), B()
+20 INPUT N, A(), B()
+30 DIM A(N), B(N), C(N)
+40 TILE A(128), B(128), C(128)
 50 LET C(BID) = A(BID) + B(BID)
 60 OUTPUT C
 70 END

@@ -15,6 +15,7 @@ from .analyzer import analyze
 from cuda.tile._bytecode import (
     write_bytecode,
     BytecodeVersion,
+    DYNAMIC_SHAPE,
     EntryHints,
     encode_AbsFOp,
     encode_AddFOp,
@@ -86,7 +87,7 @@ class BytecodeBackend:
         self.analyzed = analyzed
         self.symbols = analyzed.symbols
         self.gpu_arch = gpu_arch
-        self.array_size = array_size if array_size is not None else self._infer_array_size(analyzed)
+        self.array_size = array_size
         self.num_ctas = num_ctas
         self.data_index = 0
         self._returned = False
@@ -105,20 +106,13 @@ class BytecodeBackend:
         # Compositional codegen state (built up as statements are lowered)
         self._views: dict[str, Value] = {}
         self._tensor_views: dict[str, Value] = {}
-        self._array_dims: dict[str, list[int]] = {}
+        self._array_dims: dict[str, list[int | None]] = {}
         self._tile_types: dict[str, object] = {}
         self._token: Value | None = None
         self._token_type = None
         self._var_ir_types: dict[str, object] = {}
         self._param_arrays: list[str] = []
-
-    @staticmethod
-    def _infer_array_size(analyzed: AnalyzedProgram) -> int | None:
-        """Infer array_size from DIM-declared 1-D arrays in the analyzed program."""
-        for info in analyzed.symbols.values():
-            if info.is_array and info.array_size is not None:
-                return info.array_size
-        return None
+        self._all_params: list[tuple[str, bool]] = []
 
     def _entry_hints(self) -> dict:
         """Build hints dict for writer.function based on num_ctas."""
@@ -684,8 +678,17 @@ class BytecodeBackend:
     def _gen_for(self, stmt: ast.ForStatement):
         lb = self._gen_expr(stmt.start)
         end_val = self._gen_expr(stmt.end)
-        var_type = self._type_of_expr(stmt.start)
+        start_type = self._type_of_expr(stmt.start)
+        end_type = self._type_of_expr(stmt.end)
+        var_type = BasicType.I32 if (start_type == BasicType.I32
+                                     and end_type == BasicType.I32) else BasicType.F32
         type_id = self._type_id(var_type)
+
+        if var_type == BasicType.F32:
+            if start_type == BasicType.I32:
+                lb = self._cast_to_f32(lb)
+            if end_type == BasicType.I32:
+                end_val = self._cast_to_f32(end_val)
 
         if stmt.step:
             step = self._gen_expr(stmt.step)
@@ -817,8 +820,24 @@ class BytecodeBackend:
     def _gen_dim(self, stmt: ast.DimStatement):
         """Lower a DIM statement: record sizes and create tensor views for parameter arrays."""
         name = stmt.name
-        sizes = [int(s.value) for s in stmt.sizes if isinstance(s, ast.NumberLiteral)]
-        self._array_dims[name] = sizes
+
+        type_shape: list[int] = []
+        dim_vals: list[Value | None] = []
+        meta_sizes: list[int | None] = []
+
+        for s in stmt.sizes:
+            if isinstance(s, ast.NumberLiteral):
+                type_shape.append(int(s.value))
+                dim_vals.append(None)
+                meta_sizes.append(int(s.value))
+            else:
+                type_shape.append(DYNAMIC_SHAPE)
+                val = self._gen_expr(s)
+                val = self._ensure_i32(val, s)
+                dim_vals.append(val)
+                meta_sizes.append(None)
+
+        self._array_dims[name] = meta_sizes
 
         if name not in self._param_values:
             return
@@ -826,16 +845,25 @@ class BytecodeBackend:
         tt = self.tt
         f32_s = tt.simple(SimpleType.F32)
 
-        if len(sizes) == 1:
-            total = sizes[0]
-            tv_t = tt.tensor_view(f32_s, [total], [1])
-        elif len(sizes) == 2:
-            tv_t = tt.tensor_view(f32_s, sizes, [sizes[1], 1])
+        dynamic_shape_vals = [v for v in dim_vals if v is not None]
+
+        if len(type_shape) == 1:
+            type_strides = [1]
+            dynamic_stride_vals: list[Value] = []
+        elif len(type_shape) == 2:
+            if dim_vals[1] is not None:
+                type_strides = [DYNAMIC_SHAPE, 1]
+                dynamic_stride_vals = [dim_vals[1]]
+            else:
+                type_strides = [type_shape[1], 1]
+                dynamic_stride_vals = []
         else:
             return
 
+        tv_t = tt.tensor_view(f32_s, type_shape, type_strides)
         tv_val = encode_MakeTensorViewOp(
-            self.builder, tv_t, self._param_values[name], [], []
+            self.builder, tv_t, self._param_values[name],
+            dynamic_shape_vals, dynamic_stride_vals,
         )
         self._tensor_views[name] = tv_val
         self._tile_types[f"__tv_type_{name}__"] = tv_t
@@ -875,7 +903,9 @@ class BytecodeBackend:
         tv_t = self._tile_types.get(f"__tv_type_{name}__")
         if tv_t is None:
             dims = self._array_dims.get(name, part_shape)
-            tv_t = tt.tensor_view(f32_s, dims, [dims[-1], 1] if len(dims) == 2 else [1])
+            static_dims = [d if d is not None else DYNAMIC_SHAPE for d in dims]
+            strides = [static_dims[-1], 1] if len(static_dims) == 2 else [1]
+            tv_t = tt.tensor_view(f32_s, static_dims, strides)
 
         pv_t = tt.partition_view(
             part_shape, tv_t, list(range(len(part_shape))), PaddingValue.Zero
@@ -916,31 +946,48 @@ class BytecodeBackend:
 
     # ---- Main entry points ----
 
-    def _derive_param_arrays(self) -> list[str]:
-        """Build deduplicated list of arrays that become function parameters."""
-        param_arrays: list[str] = []
+    def _derive_params(self) -> tuple[list[tuple[str, bool]], list[str]]:
+        """Build deduplicated ordered list of all kernel parameters.
+
+        Returns (all_params, param_arrays) where all_params is a list of
+        (name, is_array) tuples preserving INPUT declaration order, and
+        param_arrays is the sublist of array-only names.
+        """
+        all_params: list[tuple[str, bool]] = []
         seen: set[str] = set()
-        for name in (self.analyzed.input_vars or []) + (self.analyzed.output_vars or []):
+        for name in self.analyzed.input_vars or []:
+            if name in seen:
+                continue
+            seen.add(name)
+            info = self.symbols.get(name)
+            if info:
+                all_params.append((name, info.is_array))
+        for name in self.analyzed.output_vars or []:
             info = self.symbols.get(name)
             if info and info.is_array and name not in seen:
                 seen.add(name)
-                param_arrays.append(name)
-        return param_arrays
+                all_params.append((name, True))
+        param_arrays = [n for n, is_arr in all_params if is_arr]
+        return all_params, param_arrays
 
     def _compute_metadata(self):
         """Compute _array_kernel_meta from accumulated codegen state."""
-        if not self._param_arrays:
+        if not self._all_params:
             return
 
         input_arrays = [n for n in self.analyzed.input_vars
                         if self.symbols.get(n) and self.symbols[n].is_array]
         output_arrays = [n for n in (self.analyzed.output_vars or [])
                          if self.symbols.get(n) and self.symbols[n].is_array]
+        scalar_params = [n for n, is_arr in self._all_params if not is_arr]
 
         meta: dict = {
             "all_arrays": self._param_arrays,
             "input_arrays": input_arrays,
             "output_arrays": output_arrays,
+            "scalar_params": scalar_params,
+            "params": [(n, "array" if is_arr else "scalar")
+                       for n, is_arr in self._all_params],
             "dims": {},
             "tile_shapes": {},
         }
@@ -951,12 +998,13 @@ class BytecodeBackend:
             if info and info.tile_shape:
                 meta["tile_shapes"][name] = info.tile_shape
 
-        # Compute grid_size from the first output array's dims and tile shape.
         for name in output_arrays:
             dims = self._array_dims.get(name)
             info = self.symbols.get(name)
             if not dims or not info or not info.tile_shape:
                 continue
+            if any(d is None for d in dims):
+                break
             tiles_per_dim = [
                 (d + t - 1) // t
                 for d, t in zip(dims, info.tile_shape)
@@ -974,7 +1022,7 @@ class BytecodeBackend:
         if array_size is not None:
             self.array_size = array_size
 
-        self._param_arrays = self._derive_param_arrays()
+        self._all_params, self._param_arrays = self._derive_params()
 
         buf = bytearray()
 
@@ -987,7 +1035,12 @@ class BytecodeBackend:
             tile_ptr_f32 = tt.tile(ptr_f32, [])
             self._token_type = tt.simple(SimpleType.Token)
 
-            param_types = [tile_ptr_f32] * len(self._param_arrays)
+            param_types = []
+            for _name, is_array in self._all_params:
+                if is_array:
+                    param_types.append(tile_ptr_f32)
+                else:
+                    param_types.append(self.i32_t)
 
             with writer.function(
                 "main", param_types, [], True, self._entry_hints(), DebugAttrId(0)
@@ -1003,11 +1056,14 @@ class BytecodeBackend:
                 self._token = None
                 self._var_ir_types = {}
 
-                # Map function parameters to array names
                 self._param_values = {
                     name: fb.parameters[i]
-                    for i, name in enumerate(self._param_arrays)
+                    for i, (name, _) in enumerate(self._all_params)
                 }
+
+                for name, is_array in self._all_params:
+                    if not is_array:
+                        self.var_map[name] = self._param_values[name]
 
                 if self._param_arrays:
                     bid_x, _, _ = encode_GetTileBlockIdOp(

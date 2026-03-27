@@ -211,4 +211,3 @@ class TestExampleGemm:
         ints = [t.value for t in tokens if t.type == TokenType.INTEGER]
         assert "128" in ints
         assert "32" in ints
-        assert "512" in ints

@@ -71,20 +71,27 @@ INPUT
 ^^^^^
 
 Reads values into variables. For GPU kernels, ``INPUT`` declares kernel parameters.
+Variables followed by ``()`` become array (pointer) parameters; plain variables
+become scalar integer parameters that can be used to specify array dimensions
+and control loop bounds.
 
 .. code-block:: basic
 
-   10 INPUT A(), B()
+   10 INPUT M, N, K, A(), B()
 
 DIM
 ^^^
 
-Declares arrays with specified sizes. Supports 1D and 2D arrays.
+Declares arrays with specified sizes. Supports 1D and 2D arrays. Sizes may be
+literal numbers or variables declared via ``INPUT``, enabling dynamically sized
+arrays whose dimensions are passed in at launch time.
 
 .. code-block:: basic
 
    10 DIM A(128)
    20 DIM M(512, 512)
+   30 DIM V(N)
+   40 DIM X(M, K)
 
 IF / THEN / ELSE / ENDIF
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -231,6 +238,15 @@ For a 2D matrix kernel, ``TILE`` partitions matrices into 2D sub-blocks and
 ``A(TILEM, K)`` does not access a single element -- it loads a 128 x 32 tile
 from array ``A``. The hardware handles the bulk data movement.
 
+Array dimensions can also be variables declared via ``INPUT``, creating
+dynamically sized arrays whose shapes are passed in as scalar kernel parameters:
+
+.. code-block:: basic
+
+   15 INPUT M, N, K, A(), B()
+   20 DIM A(M, K), B(K, N), C(M, N)
+   30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
+
 ``OUTPUT`` marks which arrays should be copied back to the host after execution.
 See :doc:`execution_model` for more on how kernels, grids, and data transfer
 work.
@@ -283,12 +299,15 @@ back to the host.
 INPUT (GPU mode)
 ^^^^^^^^^^^^^^^^
 
-In GPU kernels, ``INPUT`` declares which arrays are kernel parameters passed from
-the host.
+In GPU kernels, ``INPUT`` declares kernel parameters passed from the host.
+Variables with ``()`` become array (pointer) parameters; plain variables become
+scalar ``i32`` parameters. Scalar parameters are commonly used to pass array
+dimensions so that kernels work with any size.
 
 .. code-block:: basic
 
-   40 INPUT A(), B()
+   10 INPUT N, A(), B()
+   20 INPUT M, N, K, A(), B()
 
 Operators
 ---------

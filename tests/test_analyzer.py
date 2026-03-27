@@ -177,10 +177,16 @@ class TestExampleVectorAdd:
         for name in ("A", "B", "C"):
             assert name in result.symbols
             assert result.symbols[name].is_array is True
-            assert result.symbols[name].array_size == 1024
+
+    def test_scalar_input_param(self):
+        result = analyze_src(_read_example("vector_add.bas"))
+        assert "N" in result.symbols
+        assert result.symbols["N"].is_array is False
+        assert result.symbols["N"].type == BasicType.I32
 
     def test_input_vars(self):
         result = analyze_src(_read_example("vector_add.bas"))
+        assert "N" in result.input_vars
         assert "A" in result.input_vars
         assert "B" in result.input_vars
 
@@ -202,17 +208,17 @@ class TestExampleGemm:
             assert name in result.symbols
             assert result.symbols[name].is_array is True
 
-    def test_dim_sizes(self):
+    def test_scalar_input_params(self):
         result = analyze_src(_read_example("gemm.bas"))
-        assert result.symbols["A"].array_size == 512
-        assert result.symbols["B"].array_size == 512
-        assert result.symbols["C"].array_size == 512
+        for name in ("M", "N", "K"):
+            assert name in result.symbols
+            assert result.symbols[name].is_array is False
+            assert result.symbols[name].type == BasicType.I32
 
     def test_scalar_variables(self):
         result = analyze_src(_read_example("gemm.bas"))
         assert "TILEM" in result.symbols
         assert "TILEN" in result.symbols
-        assert result.symbols["K"].type == BasicType.I32
 
     def test_accumulator_registered(self):
         result = analyze_src(_read_example("gemm.bas"))
@@ -222,6 +228,9 @@ class TestExampleGemm:
 
     def test_input_and_output(self):
         result = analyze_src(_read_example("gemm.bas"))
+        assert "M" in result.input_vars
+        assert "N" in result.input_vars
+        assert "K" in result.input_vars
         assert "A" in result.input_vars
         assert "B" in result.input_vars
         assert "C" in result.output_vars

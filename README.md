@@ -39,9 +39,9 @@ Or use the Python API:
 from cutile_basic import compile_basic_to_cubin
 
 source = """
-10 DIM A(1024), B(1024), C(1024)
-20 TILE A(128), B(128), C(128)
-30 INPUT A(), B()
+10 INPUT N, A(), B()
+20 DIM A(N), B(N), C(N)
+30 TILE A(128), B(128), C(128)
 40 LET C(BID) = A(BID) + B(BID)
 50 OUTPUT C
 60 END
@@ -49,7 +49,7 @@ source = """
 
 result = compile_basic_to_cubin(source)
 print(result.cubin_path)   # path to the compiled .cubin
-print(result.meta)          # kernel metadata (arrays, grid size, etc.)
+print(result.meta)          # kernel metadata (arrays, tile shapes, etc.)
 ```
 
 ## Examples

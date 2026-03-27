@@ -125,7 +125,10 @@ class Analyzer:
                 name = var.name
                 is_arr = stmt.is_array[i] if i < len(stmt.is_array) else False
                 if name not in self.symbols:
-                    typ = BasicType.I32 if name.endswith("%") else BasicType.F32
+                    if is_arr:
+                        typ = BasicType.I32 if name.endswith("%") else BasicType.F32
+                    else:
+                        typ = BasicType.I32
                     self.symbols[name] = SymbolInfo(name=name, type=typ, is_array=is_arr)
                 elif is_arr:
                     self.symbols[name].is_array = True

@@ -4,12 +4,15 @@
 import sys
 from pathlib import Path
 
+import numpy as np
 import cupy as cp
 from cuda.core import Device, LaunchConfig, ObjectCode, launch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cutile_basic import compile_basic_to_cubin, detect_gpu_arch
+
+M, N, K = 512, 512, 512
 
 
 def main():
@@ -22,12 +25,12 @@ def main():
     print("[1/2] Compiling to cubin ...", flush=True)
     result = compile_basic_to_cubin(source, num_ctas=num_ctas)
     meta = result.meta
-    M, K = meta["dims"]["A"]
-    N = meta["dims"]["B"][1]
     tile_shapes = meta.get("tile_shapes", {})
+    tile_c = tile_shapes["C"]
+    grid_size = (M // tile_c[0]) * (N // tile_c[1])
     print(f"      M={M}, N={N}, K={K}, "
           f"tile_shapes={tile_shapes}, "
-          f"grid_size={meta['grid_size']}")
+          f"grid_size={grid_size}")
 
     print("[2/2] Launching kernel on GPU ...", flush=True)
     dev = Device(0)
@@ -41,8 +44,10 @@ def main():
     d_b = cp.random.uniform(-1.0, 1.0, (K, N)).astype(cp.float32)
     d_c = cp.zeros((M, N), dtype=cp.float32)
 
-    config = LaunchConfig(grid=(meta["grid_size"], 1, 1), block=(1, 1, 1))
-    launch(stream, config, kernel, d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
+    config = LaunchConfig(grid=(grid_size, 1, 1), block=(1, 1, 1))
+    launch(stream, config, kernel,
+           np.int32(M), np.int32(N), np.int32(K),
+           d_a.data.ptr, d_b.data.ptr, d_c.data.ptr)
     stream.sync()
 
     expected = d_a @ d_b

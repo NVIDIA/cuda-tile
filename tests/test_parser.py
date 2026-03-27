@@ -279,14 +279,16 @@ class TestExampleVectorAdd:
         names = {d.name for d in dims}
         assert names == {"A", "B", "C"}
         for d in dims:
-            assert d.sizes[0].value == 1024
+            assert isinstance(d.sizes[0], ast.Variable)
+            assert d.sizes[0].name == "N"
 
-    def test_input_arrays(self):
+    def test_input_params(self):
         prog = parse_src(_read_example("vector_add.bas"))
         inputs = [s for s in prog.statements if isinstance(s, ast.InputStatement)]
         assert len(inputs) == 1
         var_names = [v.name for v in inputs[0].variables]
-        assert var_names == ["A", "B"]
+        assert var_names == ["N", "A", "B"]
+        assert inputs[0].is_array == [False, True, True]
 
     def test_array_let_with_bid(self):
         prog = parse_src(_read_example("vector_add.bas"))
@@ -317,8 +319,8 @@ class TestExampleGemm:
         assert len(dims) == 3
         for d in dims:
             assert len(d.sizes) == 2
-            assert d.sizes[0].value == 512
-            assert d.sizes[1].value == 512
+            for s in d.sizes:
+                assert isinstance(s, ast.Variable)
 
     def test_tile_statement(self):
         prog = parse_src(_read_example("gemm.bas"))
