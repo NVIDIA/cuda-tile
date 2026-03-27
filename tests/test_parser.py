@@ -332,15 +332,23 @@ class TestExampleGemm:
         assert tile_map["C"] == [128, 128]
         assert tile_map["ACC"] == [128, 128]
 
-    def test_mma_statement(self):
+    def test_mma_expression(self):
         prog = parse_src(_read_example("gemm.bas"))
         fors = [s for s in prog.statements if isinstance(s, ast.ForStatement)]
         assert len(fors) == 1
-        mmas = [s for s in fors[0].body if isinstance(s, ast.MmaStatement)]
-        assert len(mmas) == 1
-        assert mmas[0].acc_var == "ACC"
-        assert mmas[0].a_access.name == "A"
-        assert mmas[0].b_access.name == "B"
+        lets = [s for s in fors[0].body if isinstance(s, ast.LetStatement)]
+        mma_lets = [s for s in lets
+                    if isinstance(s.value, ast.FunctionCall) and s.value.name == "MMA"]
+        assert len(mma_lets) == 1
+        mma = mma_lets[0].value
+        assert len(mma.args) == 3
+        assert isinstance(mma.args[0], ast.ArrayAccess)
+        assert mma.args[0].name == "A"
+        assert isinstance(mma.args[1], ast.ArrayAccess)
+        assert mma.args[1].name == "B"
+        assert isinstance(mma.args[2], ast.Variable)
+        assert mma.args[2].name == "ACC"
+        assert mma_lets[0].target.name == "ACC"
 
     def test_mod_expression(self):
         prog = parse_src(_read_example("gemm.bas"))

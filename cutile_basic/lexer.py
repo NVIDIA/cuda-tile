@@ -2,7 +2,7 @@
 
 from .tokens import Token, TokenType, KEYWORDS
 
-BUILTIN_FUNCTIONS = {"ABS", "SQR", "INT", "SIN", "COS", "TAN", "EXP", "LOG", "SGN"}
+BUILTIN_FUNCTIONS = {"ABS", "SQR", "INT", "SIN", "COS", "TAN", "EXP", "LOG", "SGN", "MMA"}
 
 
 class LexError(Exception):

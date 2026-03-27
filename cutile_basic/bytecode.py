@@ -188,10 +188,6 @@ class BytecodeBackend:
                     if var.name not in seen:
                         seen.add(var.name)
                         modified.append(var.name)
-            elif isinstance(stmt, ast.MmaStatement):
-                if stmt.acc_var not in seen:
-                    seen.add(stmt.acc_var)
-                    modified.append(stmt.acc_var)
             elif isinstance(stmt, ast.IfStatement):
                 for name in self._find_modified_vars(stmt.then_body):
                     if name not in seen:
@@ -343,11 +339,18 @@ class BytecodeBackend:
             if info and info.tile_shape:
                 return info.tile_shape
             return None
+        if isinstance(expr, ast.Variable):
+            info = self.symbols.get(expr.name)
+            if info and info.tile_shape:
+                return info.tile_shape
+            return None
         if isinstance(expr, ast.BinaryOp):
             ls = self._expr_tile_shape(expr.left)
             if ls is not None:
                 return ls
             return self._expr_tile_shape(expr.right)
+        if isinstance(expr, ast.FunctionCall) and expr.name == "MMA":
+            return self._expr_tile_shape(expr.args[2])
         return None
 
     def _gen_binop(self, expr: ast.BinaryOp) -> Value:
@@ -448,8 +451,11 @@ class BytecodeBackend:
             )
 
     def _gen_function(self, expr: ast.FunctionCall) -> Value:
-        arg = self._gen_expr(expr.arg)
-        arg_type = self._type_of_expr(expr.arg)
+        if expr.name == "MMA":
+            return self._gen_mma_call(expr)
+
+        arg = self._gen_expr(expr.args[0])
+        arg_type = self._type_of_expr(expr.args[0])
 
         # Cast to f32 for math functions (except SGN)
         if arg_type == BasicType.I32 and expr.name not in ("SGN",):
@@ -525,8 +531,6 @@ class BytecodeBackend:
             self._gen_dim(stmt)
         elif isinstance(stmt, ast.TileStatement):
             self._gen_tile(stmt)
-        elif isinstance(stmt, ast.MmaStatement):
-            self._gen_mma(stmt)
         elif isinstance(stmt, ast.InputStatement):
             pass
         elif isinstance(stmt, ast.DataStatement):
@@ -650,13 +654,26 @@ class BytecodeBackend:
         for i, name in enumerate(all_modified):
             self.var_map[name] = results[i]
 
+    @staticmethod
+    def _expr_has_mma(expr: ast.Expression) -> bool:
+        """Check if an expression tree contains an MMA call."""
+        if isinstance(expr, ast.FunctionCall):
+            if expr.name == "MMA":
+                return True
+            return any(BytecodeBackend._expr_has_mma(a) for a in expr.args)
+        if isinstance(expr, ast.BinaryOp):
+            return BytecodeBackend._expr_has_mma(expr.left) or BytecodeBackend._expr_has_mma(expr.right)
+        if isinstance(expr, ast.UnaryOp):
+            return BytecodeBackend._expr_has_mma(expr.operand)
+        return False
+
     def _body_has_token_ops(self, stmts: list[ast.Statement]) -> bool:
         """Check if a body contains operations that thread the token."""
         for stmt in stmts:
-            if isinstance(stmt, ast.MmaStatement):
-                return True
             if isinstance(stmt, ast.LetStatement):
                 if isinstance(stmt.target, ast.ArrayAccess) and stmt.target.name in self._views:
+                    return True
+                if self._expr_has_mma(stmt.value):
                     return True
             if isinstance(stmt, ast.ForStatement):
                 if self._body_has_token_ops(stmt.body):
@@ -923,26 +940,26 @@ class BytecodeBackend:
             return self._cast_to_i32(val)
         return val
 
-    def _gen_mma(self, stmt: ast.MmaStatement):
-        """Generate MmaFOp. Partition shapes come from each array's DIM TILE declaration."""
-        if stmt.acc_var not in self.var_map:
-            raise BytecodeBackendError(
-                f"Accumulator '{stmt.acc_var}' used in MMA but not initialized. "
-                f"Add 'LET {stmt.acc_var} = 0' before the loop."
-            )
+    def _gen_mma_call(self, expr: ast.FunctionCall) -> Value:
+        """Generate MmaFOp from an MMA(A, B, ACC) call."""
+        a_expr, b_expr, acc_expr = expr.args
 
-        self._ensure_partition_view(stmt.a_access.name)
-        self._ensure_partition_view(stmt.b_access.name)
+        if isinstance(a_expr, ast.ArrayAccess):
+            self._ensure_partition_view(a_expr.name)
+        if isinstance(b_expr, ast.ArrayAccess):
+            self._ensure_partition_view(b_expr.name)
 
-        tile_a_val = self._gen_expr(stmt.a_access)
-        tile_b_val = self._gen_expr(stmt.b_access)
-        acc = self.var_map[stmt.acc_var]
+        tile_a_val = self._gen_expr(a_expr)
+        tile_b_val = self._gen_expr(b_expr)
+        acc_val = self._gen_expr(acc_expr)
 
-        acc_type = self._var_ir_types.get(stmt.acc_var)
-        new_acc = encode_MmaFOp(
-            self.builder, acc_type, tile_a_val, tile_b_val, acc,
+        acc_type = None
+        if isinstance(acc_expr, ast.Variable):
+            acc_type = self._var_ir_types.get(acc_expr.name)
+
+        return encode_MmaFOp(
+            self.builder, acc_type, tile_a_val, tile_b_val, acc_val,
         )
-        self.var_map[stmt.acc_var] = new_acc
 
     # ---- Main entry points ----
 

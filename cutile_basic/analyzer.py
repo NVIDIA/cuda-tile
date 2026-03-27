@@ -183,18 +183,6 @@ class Analyzer:
                     name=name, type=typ, is_array=True, tile_shape=tile_shape,
                 )
 
-        elif isinstance(stmt, ast.MmaStatement):
-            if stmt.acc_var not in self.symbols:
-                self.symbols[stmt.acc_var] = SymbolInfo(
-                    name=stmt.acc_var, type=BasicType.F32, is_array=True)
-            else:
-                self.symbols[stmt.acc_var].type = BasicType.F32
-                self.symbols[stmt.acc_var].is_array = True
-            for name in (stmt.a_access.name, stmt.b_access.name):
-                if name not in self.symbols:
-                    self.symbols[name] = SymbolInfo(
-                        name=name, type=BasicType.F32, is_array=True)
-
         elif isinstance(stmt, ast.OutputStatement):
             for var in stmt.variables:
                 name = var.name
@@ -253,7 +241,14 @@ class Analyzer:
             return BasicType.I32
 
         if isinstance(expr, ast.FunctionCall):
-            self._infer_type(expr.arg)
+            for a in expr.args:
+                self._infer_type(a)
+            if expr.name == "MMA":
+                for a in expr.args[:2]:
+                    if isinstance(a, ast.ArrayAccess) and a.name not in self.symbols:
+                        self.symbols[a.name] = SymbolInfo(
+                            name=a.name, type=BasicType.F32, is_array=True)
+                return BasicType.F32
             if expr.name == "INT":
                 return BasicType.I32
             if expr.name == "SGN":

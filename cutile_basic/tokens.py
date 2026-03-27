@@ -40,7 +40,6 @@ class TokenType(Enum):
     MOD = auto()
     OUTPUT = auto()
     TILE = auto()
-    MMA = auto()
     BID = auto()
 
     # Operators
@@ -97,7 +96,6 @@ KEYWORDS = {
     "MOD": TokenType.MOD,
     "OUTPUT": TokenType.OUTPUT,
     "TILE": TokenType.TILE,
-    "MMA": TokenType.MMA,
     "BID": TokenType.BID,
 }
 

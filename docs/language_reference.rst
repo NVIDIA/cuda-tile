@@ -233,7 +233,7 @@ For a 2D matrix kernel, ``TILE`` partitions matrices into 2D sub-blocks and
 
    20 DIM A(512, 512), B(512, 512), C(512, 512)
    30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
-   80 MMA ACC, A(TILEM, K), B(K, TILEN)
+   80 LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
 
 ``A(TILEM, K)`` does not access a single element -- it loads a 128 x 32 tile
 from array ``A``. The hardware handles the bulk data movement.
@@ -279,12 +279,13 @@ Declares the tile/partition shape for one or more variables.
 MMA
 ^^^
 
-Matrix Multiply-Accumulate on tiles. Loads tiles from two arrays and accumulates
-into an accumulator variable.
+Matrix Multiply-Accumulate on tiles. ``MMA`` is a function-like expression that
+takes two tile operands and an accumulator, and returns the updated accumulator.
+Use it on the right-hand side of a ``LET`` assignment.
 
 .. code-block:: basic
 
-   80 MMA ACC, A(TILEM, K), B(K, TILEN)
+   80 LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
 
 OUTPUT
 ^^^^^^

@@ -122,8 +122,6 @@ class Parser:
             return ast.StopStatement(line=tok.line)
         elif tok.type == TokenType.TILE:
             return self.parse_tile()
-        elif tok.type == TokenType.MMA:
-            return self.parse_mma()
         elif tok.type == TokenType.OUTPUT:
             return self.parse_output()
         elif tok.type == TokenType.IDENTIFIER:
@@ -368,28 +366,6 @@ class Parser:
         self.expect(TokenType.RPAREN)
         return ast.TileStatement(name=name_tok.value, sizes=sizes, line=line)
 
-    def parse_mma(self) -> ast.MmaStatement:
-        """MMA ACC, A(row, col), B(row, col)"""
-        tok = self.expect(TokenType.MMA)
-        acc_tok = self.expect(TokenType.IDENTIFIER)
-        self.expect(TokenType.COMMA)
-        a_name = self.expect(TokenType.IDENTIFIER)
-        self.expect(TokenType.LPAREN)
-        a_idx = self.parse_expression()
-        self.expect(TokenType.COMMA)
-        a_idx2 = self.parse_expression()
-        self.expect(TokenType.RPAREN)
-        a_access = ast.ArrayAccess(name=a_name.value, index=a_idx, index2=a_idx2, line=a_name.line)
-        self.expect(TokenType.COMMA)
-        b_name = self.expect(TokenType.IDENTIFIER)
-        self.expect(TokenType.LPAREN)
-        b_idx = self.parse_expression()
-        self.expect(TokenType.COMMA)
-        b_idx2 = self.parse_expression()
-        self.expect(TokenType.RPAREN)
-        b_access = ast.ArrayAccess(name=b_name.value, index=b_idx, index2=b_idx2, line=b_name.line)
-        return ast.MmaStatement(acc_var=acc_tok.value, a_access=a_access, b_access=b_access, line=tok.line)
-
     def parse_read(self) -> ast.ReadStatement:
         tok = self.expect(TokenType.READ)
         variables: list[ast.Variable] = []
@@ -500,9 +476,11 @@ class Parser:
             if upper in BUILTIN_FUNCTIONS:
                 self.advance()
                 self.expect(TokenType.LPAREN)
-                arg = self.parse_expression()
+                args = [self.parse_expression()]
+                while self.match(TokenType.COMMA):
+                    args.append(self.parse_expression())
                 self.expect(TokenType.RPAREN)
-                return ast.FunctionCall(name=upper, arg=arg, line=tok.line)
+                return ast.FunctionCall(name=upper, args=args, line=tok.line)
             self.advance()
             if self.at(TokenType.LPAREN):
                 self.advance()

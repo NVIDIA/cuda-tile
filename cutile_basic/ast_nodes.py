@@ -44,8 +44,8 @@ class BinaryOp:
 
 @dataclass
 class FunctionCall:
-    name: str        # ABS, SQR, INT, SIN, COS, TAN, EXP, LOG, SGN
-    arg: Expression
+    name: str        # ABS, SQR, INT, SIN, COS, TAN, EXP, LOG, SGN, MMA
+    args: list[Expression]
     line: int = 0
 
 Expression = NumberLiteral | StringLiteral | Variable | ArrayAccess | UnaryOp | BinaryOp | FunctionCall
@@ -144,13 +144,6 @@ class TileStatement:
     line: int = 0
 
 @dataclass
-class MmaStatement:
-    acc_var: str            # accumulator variable name
-    a_access: ArrayAccess   # 2D tile load from A
-    b_access: ArrayAccess   # 2D tile load from B
-    line: int = 0
-
-@dataclass
 class OutputStatement:
     variables: list[Variable]
     line: int = 0
@@ -160,7 +153,7 @@ Statement = (
     ForStatement | WhileStatement | GotoStatement | GosubStatement |
     ReturnStatement | DimStatement | RemStatement | DataStatement |
     ReadStatement | EndStatement | StopStatement |
-    TileStatement | MmaStatement | OutputStatement
+    TileStatement | OutputStatement
 )
 
 

@@ -69,7 +69,7 @@ A tiled matrix multiply: ``C(M,N) = A(M,K) * B(K,N)``.
    60 LET TILEN = BID MOD 4
    70 LET ACC = 0.0
    80 FOR K = 0 TO 15
-   90   MMA ACC, A(TILEM, K), B(K, TILEN)
+   90   LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
    100 NEXT K
    110 LET C(TILEM, TILEN) = ACC
    120 OUTPUT C

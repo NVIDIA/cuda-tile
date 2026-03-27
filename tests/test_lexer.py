@@ -197,7 +197,6 @@ class TestExampleGemm:
         assert TokenType.LET in types
         assert TokenType.FOR in types
         assert TokenType.TO in types
-        assert TokenType.MMA in types
         assert TokenType.NEXT in types
         assert TokenType.OUTPUT in types
         assert TokenType.END in types
