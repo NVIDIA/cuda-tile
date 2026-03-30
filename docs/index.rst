@@ -1,3 +1,5 @@
+.. title:: cutile-basic
+
 .. rst-class:: hero-logo-container
 
    .. image:: images/cutile_basic_icon__padded__black_text.png
