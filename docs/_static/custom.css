@@ -23,8 +23,6 @@ html[data-theme="light"] .only-dark {
 }
 
 .hero-logo-container img {
-    max-width: 400px;
-    width: 100%;
     height: auto;
 }
 
