@@ -14,4 +14,7 @@ uv pip install -r "$REPO_ROOT/requirements.txt"
 
 nvidia-smi
 
+# CVE-2025-71176: use a securely-created temp directory to prevent symlink attacks.
+export PYTEST_DEBUG_TEMPROOT="$(mktemp -d)"
+
 PYTHONPATH="$REPO_ROOT" pytest "$REPO_ROOT/tests/" -v "$@"
