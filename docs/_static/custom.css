@@ -25,6 +25,8 @@ html[data-theme="light"] .only-dark {
 .hero-logo-container img {
     max-width: 400px;
     height: auto;
+    display: block;
+    margin: 0 auto;
 }
 
 .sd-card {
