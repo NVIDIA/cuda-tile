@@ -11,7 +11,7 @@
 A BASIC to CUDA Tile IR compiler. Write GPU kernels in BASIC, compile them to
 `.cubin` files via cuTile bytecode and `tileiras`, and launch them on NVIDIA GPUs.
 
-**[Documentation](https://basic-tile-a22467.gitlab-master-pages.nvidia.com/)**
+**[Documentation](https://docs.nvidia.com/cuda/cutile-basic-experimental/)**
 
 ## Overview
 

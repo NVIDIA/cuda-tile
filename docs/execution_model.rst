@@ -34,15 +34,17 @@ independently and in parallel. The number of blocks in the grid is determined
 by the problem size and the tile shape: for a vector of 1024 elements with a
 tile size of 128, the grid has ``1024 / 128 = 8`` blocks.
 
-.. code-block:: text
+Grid:
 
-   Grid (N = 1024, tile size = 128)
-   +---------+---------+---------+---------+---------+---------+---------+---------+
-   | Block 0 | Block 1 | Block 2 | Block 3 | Block 4 | Block 5 | Block 6 | Block 7 |
-   +---------+---------+---------+---------+---------+---------+---------+---------+
-    128 elts  128 elts  128 elts  128 elts  128 elts  128 elts  128 elts  128 elts
+.. table::
+   :align: center
+   :class: small table-no-stripes longtable
 
-   Each block processes one 128-element tile of the vector.
+   +---------+---------+---------+--------+-----------+
+   | Block 0 | Block 1 | Block 2 | . . .  | Block 127 | 
+   +---------+---------+---------+--------+-----------+
+
+Each block runs the same BASIC program independently.
 
 Blocks execute concurrently on the GPU's streaming multiprocessors (SMs). The
 GPU hardware schedules blocks onto available SMs -- the programmer does not
@@ -54,6 +56,7 @@ BID: Block Identification
 Inside a kernel, the built-in variable ``BID`` evaluates to the **block index**
 of the currently executing block (0, 1, 2, ...). This is how each block knows
 which portion of the data to process.
+
 
 .. code-block:: basic
 
@@ -90,26 +93,24 @@ Here, ``A`` is partitioned into 128 x 32 tiles, ``B`` into 32 x 128 tiles, and
 the output ``C`` and accumulator ``ACC`` are 128 x 128 tiles. Each block
 processes one output tile of the result matrix.
 
+
 .. code-block:: text
 
    Output matrix C (512 x 512)
-   +---------+---------+---------+---------+
-   | Tile    | Tile    | Tile    | Tile    |
-   | (0,0)   | (0,1)   | (0,2)   | (0,3)   |
-   | 128x128 | 128x128 | 128x128 | 128x128 |
-   +---------+---------+---------+---------+
-   | Tile    | Tile    | Tile    | Tile    |
-   | (1,0)   | (1,1)   | (1,2)   | (1,3)   |
-   | 128x128 | 128x128 | 128x128 | 128x128 |
-   +---------+---------+---------+---------+
-   | Tile    | Tile    | Tile    | Tile    |
-   | (2,0)   | (2,1)   | (2,2)   | (2,3)   |
-   | 128x128 | 128x128 | 128x128 | 128x128 |
-   +---------+---------+---------+---------+
-   | Tile    | Tile    | Tile    | Tile    |
-   | (3,0)   | (3,1)   | (3,2)   | (3,3)   |
-   | 128x128 | 128x128 | 128x128 | 128x128 |
-   +---------+---------+---------+---------+
+   +--------+--------+--------+--------+
+   │ Tile   │ Tile   │ Tile   │ Tile   │
+   │ (0,0)  │ (0,1)  │ (0,2)  │ (0,3)  │
+   │ 128x128│ 128x128│ 128x128│ 128x128│
+   +--------+--------+--------+--------+
+   │ Tile   │ Tile   │ Tile   │ Tile   │
+   │ (1,0)  │ (1,1)  │ (1,2)  │ (1,3)  │
+   +--------+--------+--------+--------+
+   │ Tile   │ Tile   │ Tile   │ Tile   │
+   │ (2,0)  │ (2,1)  │ (2,2)  │ (2,3)  │
+   +--------+--------+--------+--------+
+   │ Tile   │ Tile   │ Tile   │ Tile   │
+   │ (3,0)  │ (3,1)  │ (3,2)  │ (3,3)  │
+   +--------+--------+--------+--------+
 
    16 blocks total (4 x 4 grid of tiles).
    Each block computes one 128x128 output tile.
@@ -144,15 +145,15 @@ declarations:
 
 .. code-block:: text
 
-   Host (CPU)                          Device (GPU)
-   +----------+    INPUT A(), B()     +----------+
-   | A, B     | --------------------> | A, B     |
-   |          |                       |          |
-   |          |                       | Kernel   |
-   |          |                       | executes |
-   |          |                       |          |
-   | C        | <-------------------- | C        |
-   +----------+    OUTPUT C           +----------+
+   Host (CPU)                        Device (GPU)
+    _________    INPUT A(), B()       __________
+   │ A, B    │ --------------------> │ A, B     │
+   │         │                       │          │
+   │         │                       │ Kernel   │
+   │         │                       │ executes │
+   │         │  OUTPUT C             │          │
+   │ C       │ <-------------------- │ C        │
+   |_________|                       |__________|
 
 For more details on the compilation pipeline that transforms BASIC source into
 GPU-executable code, see :doc:`architecture`.

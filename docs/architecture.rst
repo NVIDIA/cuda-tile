@@ -10,28 +10,28 @@ Pipeline Overview
 .. code-block:: text
 
         .bas Source
-             |
-             v
-   +---------------------+
-   |       Lexer         |  tokens.py, lexer.py
-   +----------+----------+
-              |  list[Token]
-              v
-   +---------------------+
-   |      Parser         |  ast_nodes.py, parser.py
-   +----------+----------+
-              |  Program (AST)
-              v
-   +---------------------+
-   |     Analyzer        |  analyzer.py
-   +----------+----------+
-              |  AnalyzedProgram
-              v
-   +---------------------+
-   | Bytecode Backend    |  bytecode.py
-   +----------+----------+
-              |
-              v
+             │
+             ▼
+    ___________________
+   │       Lexer       │  tokens.py, lexer.py
+   |___________________|
+             │  list[Token]
+             ▼
+    ___________________
+   │      Parser       │  ast_nodes.py, parser.py
+   |___________________|
+             │  Program (AST)
+             ▼
+    ___________________
+   │     Analyzer      │  analyzer.py
+   |___________________|
+             │  AnalyzedProgram
+             ▼
+    ___________________
+   │ Bytecode Backend  │  bytecode.py
+   |___________________|
+             │
+             ▼
          tileiras
               |
               v
