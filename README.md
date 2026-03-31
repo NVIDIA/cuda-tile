@@ -71,19 +71,19 @@ python examples/hello.py
 ## Installation
 
 ```bash
-git clone <repo-url> cutile-basic
-cd cutile-basic
-pip install -r requirements.txt
+pip install git+https://github.com/nvidia/cuda-tile.git@basic-experimental
 ```
 
 ## Prerequisites
 
-- Python 3.10+
-- NVIDIA GPU with compute capability 8.x, 10.x, 11.x, or 12.x
+Hardware:
+- NVIDIA GPU with Compute Capability 8.x (Ampere), 10.x, 11.x, or 12.x (Blackwell)
+
+Software:
 - NVIDIA Driver r580 or later
+- Python 3.10 or later
 - CUDA Toolkit 13.1 or later
-- `cuda-tile[tileiras]` (`tileiras` assembler)
-- `cuda-python`, `cuda-core`, `cupy-cuda13x` (GPU launch and memory management)
+- ``cuda-tile[tileiras]``, ``cuda-python``, ``cuda-core``, ``cupy-cuda13x``
 
 ## License
 

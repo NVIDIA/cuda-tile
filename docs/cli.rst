@@ -8,7 +8,7 @@ Usage
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli [options] <input.bas>
+   python -m cutile_basic.cli [options] <input.bas>
 
 Arguments
 ---------
@@ -50,28 +50,28 @@ Compile and print the path to the ``.cubin``:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/vector_add.bas
+   python -m cutile_basic.cli examples/vector_add.bas
 
 Write the ``.cubin`` to a file:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/vector_add.bas -o vector_add.cubin
+   python -m cutile_basic.cli examples/vector_add.bas -o vector_add.cubin
 
 Inspect the token stream:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/hello.bas --dump-tokens
+   python -m cutile_basic.cli examples/hello.bas --dump-tokens
 
 Inspect the AST:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/hello.bas --dump-ast
+   python -m cutile_basic.cli examples/hello.bas --dump-ast
 
 Compile to cubin with an explicit GPU architecture:
 
 .. code-block:: bash
 
-   $ python -m cutile_basic.cli examples/vector_add.bas --gpu-arch sm_120 -o vector_add.cubin
+   python -m cutile_basic.cli examples/vector_add.bas --gpu-arch sm_120 -o vector_add.cubin

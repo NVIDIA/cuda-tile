@@ -49,7 +49,7 @@ Run it end-to-end with the Python demo script:
 
 .. code-block:: bash
 
-   $ python examples/vector_add.py
+   python examples/vector_add.py
 
 This script lexes, parses, analyzes, compiles to cubin via the bytecode backend,
 launches the kernel with test data, and verifies the result.
@@ -83,7 +83,7 @@ Run it with:
 
 .. code-block:: bash
 
-   $ python examples/gemm.py
+   python examples/gemm.py
 
 Python Demo Scripts
 -------------------
@@ -105,4 +105,4 @@ Three demo scripts in ``examples/`` show end-to-end GPU execution:
 
    .. code-block:: bash
 
-      $ python examples/hello.py
+      python examples/hello.py
