@@ -46,8 +46,8 @@ A BASIC to CUDA Tile IR compiler. Write GPU kernels in BASIC, compile them to
 
          Compiler pipeline from source to GPU execution.
 
-      .. grid-item-card:: API Reference
-         :link: api
+      .. grid-item-card:: Python Compilation API
+         :link: python_compilation_api
          :link-type: doc
 
          Python API documentation for all modules.
@@ -72,6 +72,6 @@ A BASIC to CUDA Tile IR compiler. Write GPU kernels in BASIC, compile them to
    execution_model
    language_reference
    architecture
-   api
+   python_compilation_api
    examples
    cli
