@@ -8,7 +8,9 @@ Program Structure
 -----------------
 
 Every statement begins with a line number. Statements execute in line-number order
-unless control flow (``GOTO``, ``GOSUB``, ``FOR``, ``WHILE``) redirects execution.
+unless control flow (``FOR``, ``WHILE``, ``IF``) redirects execution. Multiple
+statements can share a line when separated by ``:``  (e.g.
+``10 LET X = 1 : LET Y = 2``).
 
 .. code-block:: basic
 
@@ -26,14 +28,19 @@ Type          Description
 ``F32``       32-bit floating point (default for numeric variables)
 ``I32``       32-bit integer
 ``I1``        Boolean (result of comparisons and logical operators)
-``STRING``    String literals (quoted with ``""``)
 ============  ===================================
+
+String literals (quoted with ``""``) may appear in ``PRINT`` statements and
+``DATA`` lists, but there is no general-purpose string type. Strings cannot be
+assigned to variables or used in expressions.
 
 Variables
 ---------
 
-Variable names are uppercase identifiers. Arrays are declared with ``DIM`` and
-accessed with parenthesized indices.
+Variable names are identifiers (conventionally uppercase). Identifiers are
+case-sensitive, so ``X`` and ``x`` are distinct variables. A trailing ``%``
+suffix forces the variable to ``I32`` (e.g. ``COUNT%``). Arrays are declared
+with ``DIM`` and accessed with parenthesized indices.
 
 .. code-block:: basic
 
@@ -49,18 +56,20 @@ Standard Statements
 LET
 ^^^
 
-Assigns a value to a variable or array element.
+Assigns a value to a variable or array element. The ``LET`` keyword is
+optional -- ``10 X = 42`` is equivalent to ``10 LET X = 42``.
 
 .. code-block:: basic
 
    10 LET X = 42
    20 LET A(I) = X + 1
+   30 Y = X + 1
 
 PRINT
 ^^^^^
 
-Prints values to output. Use ``;`` to separate items or suppress the trailing
-newline.
+Prints values to output. Use ``;`` or ``,`` to separate items. A trailing
+separator suppresses the trailing newline.
 
 .. code-block:: basic
 
@@ -70,10 +79,11 @@ newline.
 INPUT
 ^^^^^
 
-Reads values into variables. For GPU kernels, ``INPUT`` declares kernel parameters.
-Variables followed by ``()`` become array (pointer) parameters; plain variables
-become scalar integer parameters that can be used to specify array dimensions
-and control loop bounds.
+Declares kernel parameters passed from the host. Variables followed by ``()``
+become array (pointer) parameters; plain variables become scalar integer
+parameters that can be used to specify array dimensions and control loop bounds.
+An optional string prompt may precede the variable list (e.g.
+``INPUT "Size"; N``).
 
 .. code-block:: basic
 
@@ -96,15 +106,17 @@ arrays whose dimensions are passed in at launch time.
 IF / THEN / ELSE / ENDIF
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Conditional execution.
+Conditional execution. Both single-line and multi-line forms are supported.
 
 .. code-block:: basic
 
-   10 IF X > 10 THEN
-   20   PRINT "Large"
-   30 ELSE
-   40   PRINT "Small"
-   50 ENDIF
+   10 IF X > 10 THEN PRINT "Large" ELSE PRINT "Small"
+
+   20 IF X > 10 THEN
+   30   PRINT "Large"
+   40 ELSE
+   50   PRINT "Small"
+   60 ENDIF
 
 FOR / NEXT
 ^^^^^^^^^^
@@ -126,6 +138,11 @@ WHILE / WEND
 
 Conditional loop.
 
+.. note::
+
+   ``WHILE`` is lowered as a bounded loop with a maximum of 1,000,000 iterations.
+   Loops that exceed this limit will terminate silently.
+
 .. code-block:: basic
 
    10 LET X = 1
@@ -138,10 +155,10 @@ GOTO
 
 Unconditional jump to a line number.
 
-.. note::
+.. warning::
 
-   ``GOTO`` is parsed and analyzed, but is not fully supported by the backend;
-   it is skipped during code generation.
+   ``GOTO`` is parsed but **unimplemented** in code generation. ``GOTO``
+   statements are silently ignored at runtime.
 
 .. code-block:: basic
 
@@ -152,10 +169,10 @@ GOSUB / RETURN
 
 Subroutine call and return.
 
-.. note::
+.. warning::
 
-   ``GOSUB``/``RETURN`` are parsed and analyzed, but are not fully supported
-   by the backend; they are skipped during code generation.
+   ``GOSUB``/``RETURN`` are parsed but **unimplemented** in code generation.
+   These statements are silently ignored at runtime.
 
 .. code-block:: basic
 
@@ -167,7 +184,8 @@ Subroutine call and return.
 DATA / READ
 ^^^^^^^^^^^^
 
-Inline data values read sequentially.
+Inline numeric data values read sequentially. Only numeric values are supported;
+string values in ``DATA`` will produce an error during analysis.
 
 .. code-block:: basic
 
@@ -227,13 +245,21 @@ Here, each of the 8 blocks (1024 / 128) processes a 128-element tile.
 ``C(BID)`` refers to the ``BID``-th tile of ``C``, not a single element.
 
 For a 2D matrix kernel, ``TILE`` partitions matrices into 2D sub-blocks and
-``MMA`` performs tensor-core multiply-accumulate on those tiles:
+``MMA`` performs tensor-core multiply-accumulate on those tiles. The programmer
+computes tile row/column indices from ``BID`` -- there are no built-in tile
+index variables:
 
 .. code-block:: basic
 
    20 DIM A(512, 512), B(512, 512), C(512, 512)
    30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
-   80 LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
+   40 LET TILEM = INT(BID / INT(512 / 128))
+   50 LET TILEN = BID MOD INT(512 / 128)
+   60 LET ACC = 0.0
+   70 FOR K = 0 TO INT(512 / 32) - 1
+   80   LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
+   90 NEXT K
+   100 LET C(TILEM, TILEN) = ACC
 
 ``A(TILEM, K)`` does not access a single element -- it loads a 128 x 32 tile
 from array ``A``. The hardware handles the bulk data movement.
@@ -286,19 +312,6 @@ back to the host.
 
    110 OUTPUT C
 
-INPUT (GPU mode)
-^^^^^^^^^^^^^^^^
-
-In GPU kernels, ``INPUT`` declares kernel parameters passed from the host.
-Variables with ``()`` become array (pointer) parameters; plain variables become
-scalar ``i32`` parameters. Scalar parameters are commonly used to pass array
-dimensions so that kernels work with any size.
-
-.. code-block:: basic
-
-   10 INPUT N, A(), B()
-   20 INPUT M, N, K, A(), B()
-
 Operators
 ---------
 
@@ -328,17 +341,20 @@ Built-in Functions
 ============================  ==========================================
 Function                      Description
 ============================  ==========================================
-``ABS(x)``                    Absolute value
+``ABS(x)``                    Absolute value (always returns ``F32``)
 ``SQR(x)``                    Square root
-``INT(x)``                    Integer truncation
+``INT(x)``                    Integer truncation (returns ``I32``)
 ``SIN(x)``                    Sine
 ``COS(x)``                    Cosine
 ``TAN(x)``                    Tangent
 ``EXP(x)``                    Exponential (e^x)
 ``LOG(x)``                    Natural logarithm
-``SGN(x)``                    Sign (-1, 0, or 1)
+``SGN(x)``                    Sign (-1, 0, or 1); returns ``I32``
 ``MMA(A, B, ACC)``            Matrix multiply-accumulate on tiles
 ============================  ==========================================
+
+All math functions except ``INT`` and ``SGN`` cast their argument to ``F32``
+and return ``F32``.
 
 ``MMA`` loads tiles from arrays ``A`` and ``B``, multiplies them, and
 accumulates the result into ``ACC``, returning the updated accumulator.
@@ -346,4 +362,4 @@ Use it on the right-hand side of a ``LET`` assignment:
 
 .. code-block:: basic
 
-   80 LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
+   80 LET ACC = MMA(A(ROW, K), B(K, COL), ACC)
