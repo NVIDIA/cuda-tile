@@ -49,7 +49,7 @@ source = """
 
 result = compile_basic_to_cubin(source)
 print(result.cubin_path)   # path to the compiled .cubin
-print(result.meta)          # kernel metadata (arrays, tile shapes, etc.)
+print(result.meta)         # kernel metadata (arrays, tile shapes, etc.)
 ```
 
 ## Examples
