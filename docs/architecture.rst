@@ -39,7 +39,7 @@ Pipeline Overview
               |
               v
         GPU Launch
-    (CUDA Driver API)
+       (cuda.core)
 
 Stage Details
 -------------
@@ -74,11 +74,11 @@ Analyzer
 
 Performs semantic analysis on the AST:
 
-- Infers types (``F16``, ``F32``, ``I32``, ``I1``, ``STRING``) for all variables
+- Infers types (``F32``, ``I32``, ``I1``, ``STRING``) for all variables
 - Tracks array declarations and sizes
 - Identifies ``INPUT`` and ``OUTPUT`` variables for GPU kernels
 - Collects ``DATA`` values
-- Collects ``GOTO``/``GOSUB`` targets
+- Detects ``GOTO``/``GOSUB`` and attempts structured elimination
 
 Produces an ``AnalyzedProgram`` with a symbol table and metadata.
 
@@ -92,6 +92,15 @@ Compiles the analyzed program to cuTile bytecode using the
 ``cuda.tile._bytecode`` Python APIs, assembles a ``.cubin`` with ``tileiras``, and
 exposes the result for launch on the GPU. This is the compilation path used by
 the CLI and by the demo scripts.
+
+CLI
+^^^
+
+:Module: ``cutile_basic.cli``
+
+Command-line entry point that drives the full pipeline: lex, parse, analyze,
+and compile to ``.cubin``. Supports ``--dump-tokens``, ``--dump-ast``, and
+``--dump-analyzed`` flags for inspecting intermediate stages.
 
 GPU Utilities
 ^^^^^^^^^^^^^
