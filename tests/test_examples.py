@@ -62,6 +62,34 @@ def _run_example(script_name: str, timeout: int = 120) -> subprocess.CompletedPr
     return result
 
 
+class TestReadmeExample:
+    """Validate the exact code example shown in the README."""
+
+    README_SOURCE = """
+10 INPUT N, A(), B()
+20 DIM A(N), B(N), C(N)
+30 TILE A(128), B(128), C(128)
+40 LET C(BID) = A(BID) + B(BID)
+50 OUTPUT C
+60 END
+"""
+
+    def test_compile_and_metadata(self):
+        from cutile_basic import compile_basic_to_cubin
+
+        result = compile_basic_to_cubin(self.README_SOURCE)
+
+        assert Path(result.cubin_path).exists()
+        assert Path(result.cubin_path).stat().st_size > 0
+        assert isinstance(result.meta, dict)
+        assert "tile_shapes" in result.meta
+        for name in ("A", "B", "C"):
+            assert name in result.meta["tile_shapes"], (
+                f"expected tile shape for array {name!r} in meta"
+            )
+            assert result.meta["tile_shapes"][name] == [128]
+
+
 class TestExampleScripts:
     """End-to-end tests that run the example .py scripts on the GPU."""
 
