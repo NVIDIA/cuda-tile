@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cutile-basic"
+version = "0.1.0"
+description = "A BASIC to CUDA Tile IR compiler"
+readme = "README.md"
+license = "Apache-2.0 WITH LLVM-exception"
+requires-python = ">=3.10"
+authors = [
+    { name = "NVIDIA Corporation" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Compilers",
+]
+
+dependencies = [
+    "cuda-tile[tileiras]==1.2.0",
+    "cuda-python==13.2.0",
+    "cuda-core==0.6.0",
+    "cupy-cuda13x==14.0.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.0.2",
+]
+docs = [
+    "sphinx==9.1.0",
+    "nvidia-sphinx-theme==0.0.9.post1",
+    "sphinx-design==0.7.0",
+    "sphinx-copybutton==0.5.2",
+]
+
+[project.scripts]
+cutile-basic = "cutile_basic.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cutile_basic*"]
