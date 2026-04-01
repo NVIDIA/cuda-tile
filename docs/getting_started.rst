@@ -5,9 +5,11 @@ Prerequisites
 -------------
 
 Hardware:
+
 - NVIDIA GPU with Compute Capability 8.x (Ampere), 10.x, 11.x, or 12.x (Blackwell)
 
 Software:
+
 - NVIDIA Driver r580 or later
 - Python 3.10 or later
 - CUDA Toolkit 13.1 or later
@@ -24,6 +26,14 @@ Install the ``cutile-basic`` package from GitHub:
 
 Quick Start
 -----------
+
+Clone the repository and check out the ``basic-experimental`` branch:
+
+.. code-block:: bash
+
+   git clone https://github.com/nvidia/cuda-tile.git
+   cd cuda-tile
+   git checkout basic-experimental
 
 The repository ships with example BASIC programs in the ``examples/`` directory.
 Compile one to a ``.cubin`` (the compiler prints the path to stdout):

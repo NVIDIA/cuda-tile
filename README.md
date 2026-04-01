@@ -19,7 +19,21 @@ cutile-basic extends classic BASIC with tile-based GPU operations (`TILE`,
 `OUTPUT`, `BID`) and built-in functions like `MMA`, enabling concise expression
 of GPU kernels such as vector addition and matrix multiplication.
 
+## Installation
+
+```bash
+pip install git+https://github.com/nvidia/cuda-tile.git@basic-experimental
+```
+
 ## Quick Start
+
+Clone the repository and check out the `basic-experimental` branch:
+
+```bash
+git clone https://github.com/nvidia/cuda-tile.git
+cd cuda-tile
+git checkout basic-experimental
+```
 
 Compile a BASIC program to a `.cubin`:
 
@@ -66,12 +80,6 @@ End-to-end GPU demos:
 python examples/vector_add.py
 python examples/gemm.py
 python examples/hello.py
-```
-
-## Installation
-
-```bash
-pip install git+https://github.com/nvidia/cuda-tile.git@basic-experimental
 ```
 
 ## Prerequisites
