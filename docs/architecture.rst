@@ -10,34 +10,34 @@ Pipeline Overview
 .. code-block:: text
 
         .bas Source
-             │
-             ▼
+             |
+             v
     ___________________
-   │       Lexer       │  tokens.py, lexer.py
+   |       Lexer       |  tokens.py, lexer.py
    |___________________|
-             │  list[Token]
-             ▼
+             |  list[Token]
+             v
     ___________________
-   │      Parser       │  ast_nodes.py, parser.py
+   |      Parser       |  ast_nodes.py, parser.py
    |___________________|
-             │  Program (AST)
-             ▼
+             |  Program (AST)
+             v
     ___________________
-   │     Analyzer      │  analyzer.py
+   |     Analyzer      |  analyzer.py
    |___________________|
-             │  AnalyzedProgram
-             ▼
+             |  AnalyzedProgram
+             v
     ___________________
-   │ Bytecode Backend  │  bytecode.py
+   | Bytecode Backend  |  bytecode.py
    |___________________|
-             │
-             ▼
+             |
+             v
          tileiras
-              |
-              v
+             |
+             v
           .cubin
-              |
-              v
+             |
+             v
         GPU Launch
        (cuda.core)
 

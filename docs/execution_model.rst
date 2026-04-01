@@ -41,7 +41,7 @@ Grid:
    :class: small table-no-stripes longtable
 
    +---------+---------+---------+--------+-----------+
-   | Block 0 | Block 1 | Block 2 | . . .  | Block 127 | 
+   | Block 0 | Block 1 | Block 2 | . . .  | Block 127 |
    +---------+---------+---------+--------+-----------+
 
 Each block runs the same BASIC program independently.
@@ -98,18 +98,21 @@ processes one output tile of the result matrix.
 
    Output matrix C (512 x 512)
    +--------+--------+--------+--------+
-   │ Tile   │ Tile   │ Tile   │ Tile   │
-   │ (0,0)  │ (0,1)  │ (0,2)  │ (0,3)  │
-   │ 128x128│ 128x128│ 128x128│ 128x128│
+   | Tile   | Tile   | Tile   | Tile   |
+   | (0,0)  | (0,1)  | (0,2)  | (0,3)  |
+   | 128x128| 128x128| 128x128| 128x128|
    +--------+--------+--------+--------+
-   │ Tile   │ Tile   │ Tile   │ Tile   │
-   │ (1,0)  │ (1,1)  │ (1,2)  │ (1,3)  │
+   | Tile   | Tile   | Tile   | Tile   |
+   | (1,0)  | (1,1)  | (1,2)  | (1,3)  |
+   | 128x128| 128x128| 128x128| 128x128|
    +--------+--------+--------+--------+
-   │ Tile   │ Tile   │ Tile   │ Tile   │
-   │ (2,0)  │ (2,1)  │ (2,2)  │ (2,3)  │
+   | Tile   | Tile   | Tile   | Tile   |
+   | (2,0)  | (2,1)  | (2,2)  | (2,3)  |
+   | 128x128| 128x128| 128x128| 128x128|
    +--------+--------+--------+--------+
-   │ Tile   │ Tile   │ Tile   │ Tile   │
-   │ (3,0)  │ (3,1)  │ (3,2)  │ (3,3)  │
+   | Tile   | Tile   | Tile   | Tile   |
+   | (3,0)  | (3,1)  | (3,2)  | (3,3)  |
+   | 128x128| 128x128| 128x128| 128x128|
    +--------+--------+--------+--------+
 
    16 blocks total (4 x 4 grid of tiles).
@@ -121,12 +124,12 @@ compute the result:
 
 .. code-block:: basic
 
-   50 LET TILEM = BID / 4
-   60 LET TILEN = BID MOD 4
-   65 LET ACC = 0.0
-   70 FOR K = 0 TO 15
-   80   LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
-   90 NEXT K
+   50  LET TILEM = BID / 4
+   60  LET TILEN = BID MOD 4
+   65  LET ACC = 0.0
+   70  FOR K = 0 TO 15
+   80    LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
+   90  NEXT K
    100 LET C(TILEM, TILEN) = ACC
 
 Host-Device Data Flow
@@ -147,12 +150,12 @@ declarations:
 
    Host (CPU)                        Device (GPU)
     _________    INPUT A(), B()       __________
-   │ A, B    │ --------------------> │ A, B     │
-   │         │                       │          │
-   │         │                       │ Kernel   │
-   │         │                       │ executes │
-   │         │  OUTPUT C             │          │
-   │ C       │ <-------------------- │ C        │
+   | A, B    | --------------------> | A, B     |
+   |         |                       |          |
+   |         |                       | Kernel   |
+   |         |                       | executes |
+   |         |  OUTPUT C             |          |
+   | C       | <-------------------- | C        |
    |_________|                       |__________|
 
 For more details on the compilation pipeline that transforms BASIC source into

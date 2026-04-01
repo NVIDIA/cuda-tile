@@ -176,8 +176,8 @@ Subroutine call and return.
 
 .. code-block:: basic
 
-   10 GOSUB 100
-   20 END
+   10  GOSUB 100
+   20  END
    100 PRINT "In subroutine"
    110 RETURN
 
@@ -251,14 +251,14 @@ index variables:
 
 .. code-block:: basic
 
-   20 DIM A(512, 512), B(512, 512), C(512, 512)
-   30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
-   40 LET TILEM = INT(BID / INT(512 / 128))
-   50 LET TILEN = BID MOD INT(512 / 128)
-   60 LET ACC = 0.0
-   70 FOR K = 0 TO INT(512 / 32) - 1
-   80   LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
-   90 NEXT K
+   20  DIM A(512, 512), B(512, 512), C(512, 512)
+   30  TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
+   40  LET TILEM = INT(BID / INT(512 / 128))
+   50  LET TILEN = BID MOD INT(512 / 128)
+   60  LET ACC = 0.0
+   70  FOR K = 0 TO INT(512 / 32) - 1
+   80    LET ACC = MMA(A(TILEM, K), B(K, TILEN), ACC)
+   90  NEXT K
    100 LET C(TILEM, TILEN) = ACC
 
 ``A(TILEM, K)`` does not access a single element -- it loads a 128 x 32 tile
@@ -269,7 +269,7 @@ dynamically sized arrays whose shapes are passed in as scalar kernel parameters:
 
 .. code-block:: basic
 
-   15 INPUT M, N, K, A(), B()
+   10 INPUT M, N, K, A(), B()
    20 DIM A(M, K), B(K, N), C(M, N)
    30 TILE A(128, 32), B(32, 128), C(128, 128), ACC(128, 128)
 
