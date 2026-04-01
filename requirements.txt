@@ -1,7 +1,7 @@
 cuda-tile[tileiras]==1.2.0
 cuda-python==13.2.0
-cuda-core==0.6.0
-cupy-cuda13x==14.0.1
+cuda-core[cu13]==0.6.0
+cupy-cuda13x[ctk]==14.0.1
 pytest==9.0.2
 
 sphinx==9.1.0
