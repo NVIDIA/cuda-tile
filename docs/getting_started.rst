@@ -13,7 +13,7 @@ Software:
 - NVIDIA Driver r580 or later
 - Python 3.10 or later
 - CUDA Toolkit 13.1 or later
-- ``cuda-tile[tileiras]``, ``cuda-python``, ``cuda-core``, ``cupy-cuda13x``
+- ``cuda-tile[tileiras]``, ``cuda-python``, ``cuda-core[cu13]``, ``cupy-cuda13x[ctk]``
 
 Installation
 ------------
