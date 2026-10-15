@@ -110,12 +110,12 @@ std::optional<EnumAttrInfo> extractEnumAttrInfo(const RecordKeeper &records,
 
 static const Record *findEnumByClassName(const RecordKeeper &records,
                                          StringRef className) {
-  for (const auto &def : records.getDefs()) {
-    if (!isCudaTileEnumDef(records, def.second.get())) {
+  for (const Record *def : records.getDefs()) {
+    if (!isCudaTileEnumDef(records, def)) {
       continue;
     }
-    if (def.second->getValueAsString("className") == className) {
-      return def.second.get();
+    if (def->getValueAsString("className") == className) {
+      return def;
     }
   }
   return nullptr;
@@ -134,9 +134,9 @@ static bool genEnumAttrList(const RecordKeeper &records, raw_ostream &os) {
   os << "#endif\n\n";
 
   std::vector<EnumAttrInfo> infos;
-  for (const auto &def : records.getDefs()) {
-    if (isCudaTileEnumAttrWrapper(records, def.second.get())) {
-      if (auto info = extractEnumAttrInfo(records, def.second.get())) {
+  for (const Record *def : records.getDefs()) {
+    if (isCudaTileEnumAttrWrapper(records, def)) {
+      if (auto info = extractEnumAttrInfo(records, def)) {
         infos.push_back(*info);
       }
     }

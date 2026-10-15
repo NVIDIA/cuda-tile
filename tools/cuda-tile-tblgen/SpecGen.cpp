@@ -84,18 +84,16 @@ getRequestedOpDefinitions(const RecordKeeper &records) {
 
   Regex includeRegex(opIncFilter), excludeRegex(opExcFilter);
   std::vector<const Record *> defs;
-  for (const auto &def : records.getDefs()) {
-    if (!def.second->isSubClassOf(classDef))
+  for (const Record *def : records.getDefs()) {
+    if (!def->isSubClassOf(classDef))
       continue;
     // Include if no include filter or include filter matches.
-    if (!opIncFilter.empty() &&
-        !includeRegex.match(getOperationName(*def.second)))
+    if (!opIncFilter.empty() && !includeRegex.match(getOperationName(*def)))
       continue;
     // Unless there is an exclude filter and it matches.
-    if (!opExcFilter.empty() &&
-        excludeRegex.match(getOperationName(*def.second)))
+    if (!opExcFilter.empty() && excludeRegex.match(getOperationName(*def)))
       continue;
-    defs.push_back(def.second.get());
+    defs.push_back(def);
   }
 
   return defs;
@@ -565,11 +563,11 @@ static void emitHintKeyDoc(SpecEmitter &emitter, const RecordKeeper &records,
                            StringRef opClassName = "") {
   // Find the HintKey enum.
   const Record *hintKeyEnum = nullptr;
-  for (const auto &def : records.getDefs()) {
+  for (const Record *def : records.getDefs()) {
     const Record *cls = records.getClass("CudaTileI32EnumAttr");
-    if (cls && def.second->isSubClassOf(cls) &&
-        def.second->getValueAsString("className") == "HintKey") {
-      hintKeyEnum = def.second.get();
+    if (cls && def->isSubClassOf(cls) &&
+        def->getValueAsString("className") == "HintKey") {
+      hintKeyEnum = def;
       break;
     }
   }
@@ -580,11 +578,11 @@ static void emitHintKeyDoc(SpecEmitter &emitter, const RecordKeeper &records,
   // Collect family -> SM prefix mapping for arch override docs.
   std::map<std::string, std::vector<std::string>> familyPrefixes;
   const Record *gpuArchEnum = nullptr;
-  for (const auto &def : records.getDefs()) {
+  for (const Record *def : records.getDefs()) {
     const Record *cls = records.getClass("CudaTileI32EnumAttr");
-    if (cls && def.second->isSubClassOf(cls) &&
-        def.second->getValueAsString("className") == "GpuArchitecture") {
-      gpuArchEnum = def.second.get();
+    if (cls && def->isSubClassOf(cls) &&
+        def->getValueAsString("className") == "GpuArchitecture") {
+      gpuArchEnum = def;
       break;
     }
   }
@@ -888,9 +886,9 @@ void cudatile::tblgen::generateSpec(
   auto orderedSections = splitBySections(records);
 
   std::vector<const Record *> attrDefs;
-  for (const auto &def : records.getDefs()) {
-    if (def.second->isSubClassOf("AttrDef")) {
-      attrDefs.push_back(def.second.get());
+  for (const Record *def : records.getDefs()) {
+    if (def->isSubClassOf("AttrDef")) {
+      attrDefs.push_back(def);
     }
   }
 
