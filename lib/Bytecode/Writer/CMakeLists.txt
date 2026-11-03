@@ -24,7 +24,7 @@ endif()
 # Helper macro to generate bytecode includes from TableGen definitions.
 macro(cuda_tile_tablegen output_file input_td gen_flag)
   set(LLVM_TARGET_DEFINITIONS ${input_td})
-  tablegen(CUDA_TILE ${output_file} ${gen_flag})
+  tablegen_internal(CUDA_TILE ${output_file} ${gen_flag})
   set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
                ${CMAKE_CURRENT_BINARY_DIR}/${output_file})
 endmacro()

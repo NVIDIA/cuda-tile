@@ -28,13 +28,13 @@ endif()
 set(LLVM_TARGET_DEFINITIONS ../../../include/cuda_tile/Dialect/CudaTile/IR/Ops.td)
 
 # Use the custom tablegen command with our generator
-tablegen(CUDA_TILE BytecodeReader.inc -gen-cuda-tile-bytecode-reader)
+tablegen_internal(CUDA_TILE BytecodeReader.inc -gen-cuda-tile-bytecode-reader)
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
              ${CMAKE_CURRENT_BINARY_DIR}/BytecodeReader.inc)
 
 # Generate type reader functions from type opcodes
 set(LLVM_TARGET_DEFINITIONS ../../../include/cuda_tile/Dialect/CudaTile/IR/BytecodeTypeOpcodes.td)
-tablegen(CUDA_TILE TypeBytecodeReader.inc -gen-cuda-tile-type-bytecode-reader)
+tablegen_internal(CUDA_TILE TypeBytecodeReader.inc -gen-cuda-tile-type-bytecode-reader)
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
              ${CMAKE_CURRENT_BINARY_DIR}/TypeBytecodeReader.inc)
 

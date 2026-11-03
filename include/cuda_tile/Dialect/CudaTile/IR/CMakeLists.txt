@@ -33,11 +33,11 @@ mlir_tablegen(Ops.cpp.inc -gen-op-defs)
 
 # Attribute code generation (from cuda-tile-tblgen).
 set(LLVM_TARGET_DEFINITIONS AttrDefs.td)
-tablegen(CUDA_TILE CudaTileEnumAttrs.inc -gen-enum-attr-list)
-tablegen(CUDA_TILE GpuArchitectures.inc -gen-gpu-arch-def)
-tablegen(CUDA_TILE GpuArchConstants.inc -gen-gpu-arch-constants)
-tablegen(CUDA_TILE HintKeyAccessors.inc -gen-hint-key-accessors)
-tablegen(CUDA_TILE HintKeyImpl.inc -gen-hint-key-impl)
+tablegen_internal(CUDA_TILE CudaTileEnumAttrs.inc -gen-enum-attr-list)
+tablegen_internal(CUDA_TILE GpuArchitectures.inc -gen-gpu-arch-def)
+tablegen_internal(CUDA_TILE GpuArchConstants.inc -gen-gpu-arch-constants)
+tablegen_internal(CUDA_TILE HintKeyAccessors.inc -gen-hint-key-accessors)
+tablegen_internal(CUDA_TILE HintKeyImpl.inc -gen-hint-key-impl)
 
 add_public_tablegen_target(CudaTileIncGen)
 add_dependencies(mlir-headers CudaTileIncGen)
@@ -48,11 +48,11 @@ add_dependencies(mlir-headers CudaTileIncGen)
 # Note: MLIR generated documentation use Hugo, so we enable Hugo specific features
 # here.
 set(LLVM_TARGET_DEFINITIONS Dialect.td)
-tablegen(MLIR CudaTile.md -gen-dialect-doc -allow-hugo-specific-features)
+mlir_tablegen(CudaTile.md -gen-dialect-doc -allow-hugo-specific-features)
 set(LLVM_TARGET_DEFINITIONS Ops.td)
-tablegen(MLIR CudaTileOps.md -gen-op-doc -allow-hugo-specific-features)
+mlir_tablegen(CudaTileOps.md -gen-op-doc -allow-hugo-specific-features)
 set(LLVM_TARGET_DEFINITIONS Types.td)
-tablegen(MLIR CudaTileTypes.md -gen-typedef-doc -allow-hugo-specific-features)
+mlir_tablegen(CudaTileTypes.md -gen-typedef-doc -allow-hugo-specific-features)
 
 set(GEN_DOC_DIR ${CMAKE_SOURCE_DIR}/media/docs/Dialects/CudaTile)
 file(MAKE_DIRECTORY ${GEN_DOC_DIR})
@@ -83,7 +83,7 @@ file(MAKE_DIRECTORY ${GEN_SPEC_DIR}/examples)
 # Generate the specification for it.
 set(LLVM_TARGET_DEFINITIONS Dialect.td)
 set(LLVM_TARGET_DEFINITIONS Ops.td)
-tablegen(CUDA_TILE ops.rst -gen-op-spec -examples-directory ${GEN_SPEC_DIR}/examples)
+tablegen_internal(CUDA_TILE ops.rst -gen-op-spec -examples-directory ${GEN_SPEC_DIR}/examples)
 
 add_custom_command(
         OUTPUT ${GEN_SPEC_DIR}/ops.rst
