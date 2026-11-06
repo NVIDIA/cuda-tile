@@ -25,7 +25,9 @@ bool isTileIRBytecode(const char *bytecodeBuffer);
 /// Returns the size of the bytecode defined in the given buffer.
 std::optional<size_t> getBytecodeSize(const char *bytecodeBuffer);
 
-/// Reads a cuda_tile module from the provided bytecode data.
+/// Reads a cuda_tile module from the provided bytecode data. Public-preview
+/// features must be enabled on the CUDA Tile dialect in `context` before
+/// calling this function.
 OwningOpRef<cuda_tile::ModuleOp>
 readBytecode(llvm::MemoryBufferRef bytecodeBuffer, MLIRContext &context);
 

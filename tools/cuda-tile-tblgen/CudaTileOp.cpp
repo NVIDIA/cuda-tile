@@ -522,6 +522,7 @@ std::vector<TileIRAttr> CudaTileOp::getAttributes() {
 
     // Strip off the DefaultValuedAttr first.
     if (record->isSubClassOf("DefaultValuedAttr") ||
+        record->isSubClassOf("DefaultValuedOptionalAttr") ||
         record->isSubClassOf("OptionalAttr")) {
       record = record->getValueAsDef("baseAttr");
     }

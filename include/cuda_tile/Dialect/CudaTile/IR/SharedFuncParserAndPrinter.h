@@ -18,21 +18,79 @@
 
 #include "cuda_tile/Dialect/CudaTile/IR/Dialect.h"
 
+#include <type_traits>
+
 namespace mlir::cuda_tile {
+
+void printCompactConstParams(OpAsmPrinter &printer, Operation *op,
+                             ArrayAttr params);
+ParseResult parseCompactConstParams(OpAsmParser &parser, ArrayAttr &result);
+
+void printCompactConstArgs(OpAsmPrinter &printer, Operation *op,
+                           ArrayAttr args);
+ParseResult parseCompactConstArgs(OpAsmParser &parser, ArrayAttr &result);
+void printOptionalCompactConstArgs(OpAsmPrinter &printer, Operation *op,
+                                   ArrayAttr args);
+ParseResult parseOptionalCompactConstArgs(OpAsmParser &parser,
+                                          ArrayAttr &result);
+
+template <typename OpTy, typename = void>
+struct HasConstParamsAttrName : std::false_type {};
+
+// TODO: Once this helper only serves the extension function op, remove this
+// detection trait and handle const_params directly. It exists today because
+// the test FuncOp shares this parser/printer but does not define const_params.
+template <typename OpTy>
+struct HasConstParamsAttrName<
+    OpTy,
+    std::void_t<decltype(OpTy::getConstParamsAttrName(
+        std::declval<::mlir::OperationName>()))>> : std::true_type {};
+
+static void setPrivateVisibilityIfAbsent(OpAsmParser &parser,
+                                         OperationState &result) {
+  if (!result.attributes.get(
+          SymbolOpInterface::getDefaultVisibilityAttrName())) {
+    // These bodiless external function symbols are declarations, and MLIR
+    // rejects public visibility on declarations. Keep the surface syntax
+    // unchanged for now by defaulting the stored visibility to private.
+    result.addAttribute(SymbolOpInterface::getDefaultVisibilityAttrName(),
+                        parser.getBuilder().getStringAttr("private"));
+  }
+}
 
 template <typename OpTy>
 ParseResult parseFuncOp(OpAsmParser &parser, OperationState &result) {
+  auto &builder = parser.getBuilder();
+  bool isExtern = false;
+  if (succeeded(parser.parseOptionalKeyword("extern"))) {
+    isExtern = true;
+    result.addAttribute(builder.getStringAttr("is_extern"),
+                        builder.getUnitAttr());
+  }
+
   // Parse the name as a symbol.
   StringAttr nameAttr;
   if (parser.parseSymbolName(nameAttr, OpTy::getSymNameAttrName(result.name),
-                             result.attributes))
+                             result.attributes)) {
     return failure();
+  }
+
+  if constexpr (HasConstParamsAttrName<OpTy>::value) {
+    ArrayAttr constParams = builder.getArrayAttr({});
+    if (isExtern && succeeded(parser.parseOptionalLess())) {
+      if (parseCompactConstParams(parser, constParams) ||
+          parser.parseGreater()) {
+        return failure();
+      }
+    }
+    result.addAttribute(OpTy::getConstParamsAttrName(result.name),
+                        constParams);
+  }
 
   // Parse the function signature using custom parsing that supports both
   // short form (tile<ptr<f32>>) and long form (!cuda_tile.tile<ptr<f32>>) types
   // within cuda_tile.module operations via OpAsmOpInterface default dialect
   // context.
-  auto &builder = parser.getBuilder();
   SmallVector<OpAsmParser::Argument> entryArgs;
   SmallVector<Type> resultTypes;
   SmallVector<DictionaryAttr> resultAttrs;
@@ -56,11 +114,27 @@ ParseResult parseFuncOp(OpAsmParser &parser, OperationState &result) {
       llvm::map_range(entryArgs, [](OpAsmParser::Argument arg) -> Attribute {
         return arg.attrs;
       }));
-  result.addAttribute(OpTy::getArgAttrsAttrName(result.name),
-                      ArrayAttr::get(parser.getContext(), argAttrs));
+  if (ArrayAttr normalizedArgAttrs =
+          buildNormalizedArgAttrs(builder, argAttrs)) {
+    result.addAttribute(OpTy::getArgAttrsAttrName(result.name),
+                        normalizedArgAttrs);
+  }
+
+  SmallVector<Attribute> resultAttrStorage(resultAttrs.begin(),
+                                           resultAttrs.end());
+  if (ArrayAttr normalizedResultAttrs =
+          buildNormalizedArgAttrs(builder, resultAttrStorage)) {
+    result.addAttribute(OpTy::getResAttrsAttrName(result.name),
+                        normalizedResultAttrs);
+  }
+
+  Region *body = result.addRegion();
+  if (isExtern) {
+    setPrivateVisibilityIfAbsent(parser, result);
+    return success();
+  }
 
   // Parse the function body.
-  Region *body = result.addRegion();
   ParseResult parseResult = parser.parseRegion(*body, entryArgs,
                                                /*enableNameShadowing=*/false);
   if (failed(parseResult))
@@ -79,21 +153,42 @@ ParseResult parseFuncOp(OpAsmParser &parser, OperationState &result) {
 
 template <typename OpTy>
 void printFuncOp(OpTy op, OpAsmPrinter &printer) {
+  bool isExtern = op.getOperation()->hasAttr("is_extern");
+
   // Print the operation and the function name.
   auto funcName = op.getSymName();
   printer << ' ';
+  if (isExtern) {
+    printer << "extern ";
+  }
   printer.printSymbolName(funcName);
+  if constexpr (HasConstParamsAttrName<OpTy>::value) {
+    if (isExtern) {
+      ArrayAttr params = op.getConstParams();
+      if (!params.empty()) {
+        printer << "<";
+        printCompactConstParams(printer, op.getOperation(), params);
+        printer << ">";
+      }
+    }
+  }
   auto fnType = op.getFunctionType();
   printFunctionSignatureWithCudaTileTypes(printer, op, fnType.getInputs(),
                                           fnType.getResults());
   printer << ' ';
+  if (isExtern) {
+    return;
+  }
   printer.printRegion(op.getBody(), /*printEntryBlockArgs=*/false,
                       /*printBlockTerminators=*/true,
                       /*printEmptyBlock=*/false);
-  printer.printOptionalAttrDict(
-      op.getOperation()->getAttrs(),
-      {op.getArgAttrsAttrName(), op.getFunctionTypeAttrName(),
-       op.getSymNameAttrName(), op.getResAttrsAttrName()});
+  SmallVector<StringRef> elidedAttrs = {
+      op.getArgAttrsAttrName(), op.getFunctionTypeAttrName(),
+      op.getSymNameAttrName(), op.getResAttrsAttrName()};
+  if constexpr (HasConstParamsAttrName<OpTy>::value) {
+    elidedAttrs.push_back(op.getConstParamsAttrName());
+  }
+  printer.printOptionalAttrDict(op.getOperation()->getAttrs(), elidedAttrs);
 }
 
 } // end namespace mlir::cuda_tile.

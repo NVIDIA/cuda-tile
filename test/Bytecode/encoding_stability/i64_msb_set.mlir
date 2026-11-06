@@ -2,7 +2,7 @@
 // Catches regressions in 64-bit value encoding (the path that uses
 // IntegerAttr's getZExtValue for signless integers).
 
-// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module %s -o %t.bc
+// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module -bytecode-version=13.4 %s -o %t.bc
 // RUN: cmp %t.bc %S/goldens/i64_msb_set.golden.tileirbc
 
 cuda_tile.module @kernels {

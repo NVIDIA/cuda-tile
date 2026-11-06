@@ -31,6 +31,9 @@ class BytecodeOpcode<Op op, int opcode> {
 /// Public operations - available in all builds (0x0 - 0xFFF).
 class PublicOpcode<Op op, int opcode> : BytecodeOpcode<op, opcode>;
 
+/// Public-preview operations - available in all builds (0x4000 - 0x4FFF).
+class PreviewOpcode<Op op, int opcode> : BytecodeOpcode<op, opcode>;
+
 /// Supported bytecode version definition.
 class SupportedVersion<int major, int minor> {
   int majorVersion = major;
@@ -45,8 +48,9 @@ class OpcodeRange<int min, int max> {
 
 def PublicOpcodeRange : OpcodeRange<0x0, 0xFFF>;
 #ifdef TILE_IR_INCLUDE_TESTS
-def TestingOpcodeRange : OpcodeRange<0x3000, 0xFFFFFFFF>;
+def TestingOpcodeRange : OpcodeRange<0x3000, 0x3FFF>;
 #endif // TILE_IR_INCLUDE_TESTS
+def PreviewOpcodeRange : OpcodeRange<0x4000, 0x4FFF>;
 
 //===----------------------------------------------------------------------===//
 // Supported Bytecode Versions.
@@ -56,6 +60,7 @@ def : SupportedVersion<13, 1>;
 def : SupportedVersion<13, 2>;
 def : SupportedVersion<13, 3>;
 def : SupportedVersion<13, 4>;
+def : SupportedVersion<13, 5>;
 
 // Testing versions - only available when TILE_IR_INCLUDE_TESTS is defined
 #ifdef TILE_IR_INCLUDE_TESTS
@@ -174,12 +179,31 @@ def : PublicOpcode<CudaTile_GdcLaunchDependentsTkoOp, 0x77>;
 def : PublicOpcode<CudaTile_GdcWaitTkoOp, 0x78>;
 def : PublicOpcode<CudaTile_FPowIOp, 0x79>;
 def : PublicOpcode<CudaTile_MemoryFenceAliasTkoOp, 0x7A>;
+def : PublicOpcode<CudaTile_MultimemLoadReduceViewTkoOp, 0x7B>;
+def : PublicOpcode<CudaTile_MultimemReduceViewTkoOp, 0x7C>;
+def : PublicOpcode<CudaTile_MultimemStoreViewTkoOp, 0x7D>;
 
 #ifdef TILE_IR_INCLUDE_TESTS
-// TESTING OPERATIONS (0x3000+) - Only available when TILE_IR_INCLUDE_TESTS is defined.
+// TESTING OPERATIONS (0x3000 - 0x3FFF) - Only available when
+// TILE_IR_INCLUDE_TESTS is defined.
 def : PublicOpcode<CudaTile_BytecodeTest_NewAttributeOp, 0x3000>;
 def : PublicOpcode<CudaTile_Test_FuncOp, 0x3001>;
 def : PublicOpcode<CudaTile_BytecodeTest_EvolutionOp, 0x3002>;
+def : PublicOpcode<CudaTile_BytecodeTest_PreviewTypeOp, 0x3003>;
+def : PublicOpcode<CudaTile_BytecodeTest_MemorySpaceAttrOp, 0x3004>;
 #endif // TILE_IR_INCLUDE_TESTS
+
+// PUBLIC-PREVIEW OPERATIONS (0x4000 - 0x4FFF) - Available in all builds, gated
+// at runtime by their named `--preview` feature. These are intentionally NOT
+// portable across bytecode versions; the reader only accepts them at the exact
+// current version. Append new preview opcodes here with strictly increasing
+// values.
+#ifdef TILE_IR_INCLUDE_TESTS
+def : PreviewOpcode<CudaTile_Preview_BytecodeTestOp, 0x4000>;
+def : PreviewOpcode<CudaTile_BytecodeTest_PreviewAttributeOp, 0x4001>;
+#endif // TILE_IR_INCLUDE_TESTS
+def : PreviewOpcode<CudaTile_CallOp, 0x4002>;
+def : PreviewOpcode<CudaTile_FuncOp, 0x4003>;
+def : PreviewOpcode<CudaTile_ExternImplOp, 0x4004>;
 
 #endif // CUDATILE_DIALECT_CUDATILE_IR_BYTECODE_OPCODES_TD

@@ -560,7 +560,68 @@ cuda_tile.module @test {
 // -----
 
 // ============================================================================
-// Group 8: Edge Cases
+// Group 8: Scan and Reduce Regions
+// ============================================================================
+
+// The scan depends on a loop-carried value and cannot be hoisted, but the
+// invariant constant in its non-isolated region can be hoisted and captured.
+// CHECK-LABEL: testing$func @test_hoist_from_scan_region
+// CHECK-NEXT:    %[[ZERO:.*]] = constant <i32: 0> : tile<i32>
+// CHECK-NEXT:    %{{.*}} = for
+// CHECK:           %{{.*}} = scan
+// CHECK-NEXT:      (%[[LHS:.*]]: tile<i32>, %[[RHS:.*]]: tile<i32>) {
+// CHECK-NEXT:        %[[LHS_WITH_ZERO:.*]] = addi %[[LHS]], %[[ZERO]] : tile<i32>
+// CHECK-NEXT:        %[[SUM:.*]] = addi %[[LHS_WITH_ZERO]], %[[RHS]] : tile<i32>
+// CHECK-NEXT:        yield %[[SUM]] : tile<i32>
+cuda_tile.module @test {
+  cuda_tile.testing$func @test_hoist_from_scan_region(%lb: tile<i32>, %ub: tile<i32>, %step: tile<i32>, %input: tile<8xi32>) -> tile<8xi32> {
+    %for = for %iv in (%lb to %ub, step %step) : tile<i32> iter_values(%acc = %input) -> (tile<8xi32>) {
+      %scan = scan %acc dim=0 reverse=false identities=[0 : i32] : tile<8xi32> -> tile<8xi32>
+      (%lhs: tile<i32>, %rhs: tile<i32>) {
+        %zero = constant <i32: 0> : tile<i32>
+        %lhs_with_zero = addi %lhs, %zero : tile<i32>
+        %sum = addi %lhs_with_zero, %rhs : tile<i32>
+        yield %sum : tile<i32>
+      }
+      continue %scan : tile<8xi32>
+    }
+    return %for : tile<8xi32>
+  }
+}
+
+// -----
+
+// The reduce depends on a loop-carried value and cannot be hoisted, but the
+// invariant constant in its non-isolated region can be hoisted and captured.
+// CHECK-LABEL: testing$func @test_hoist_from_reduce_region
+// CHECK-NEXT:    %[[ZERO:.*]] = constant <i32: 0> : tile<i32>
+// CHECK-NEXT:    %{{.*}} = for
+// CHECK:           %{{.*}} = reduce
+// CHECK-NEXT:      (%[[LHS:.*]]: tile<i32>, %[[RHS:.*]]: tile<i32>) {
+// CHECK-NEXT:        %[[LHS_WITH_ZERO:.*]] = addi %[[LHS]], %[[ZERO]] : tile<i32>
+// CHECK-NEXT:        %[[SUM:.*]] = addi %[[LHS_WITH_ZERO]], %[[RHS]] : tile<i32>
+// CHECK-NEXT:        yield %[[SUM]] : tile<i32>
+cuda_tile.module @test {
+  cuda_tile.testing$func @test_hoist_from_reduce_region(%lb: tile<i32>, %ub: tile<i32>, %step: tile<i32>, %input: tile<8xi32>) -> tile<i32> {
+    %for:2 = for %iv in (%lb to %ub, step %step) : tile<i32> iter_values(%tile_acc = %input, %scalar_acc = %lb) -> (tile<8xi32>, tile<i32>) {
+      %reduced = reduce %tile_acc dim=0 identities=[0 : i32] : tile<8xi32> -> tile<i32>
+      (%lhs: tile<i32>, %rhs: tile<i32>) {
+        %zero = constant <i32: 0> : tile<i32>
+        %lhs_with_zero = addi %lhs, %zero : tile<i32>
+        %sum = addi %lhs_with_zero, %rhs : tile<i32>
+        yield %sum : tile<i32>
+      }
+      %next = addi %scalar_acc, %reduced : tile<i32>
+      continue %tile_acc, %next : tile<8xi32>, tile<i32>
+    }
+    return %for#1 : tile<i32>
+  }
+}
+
+// -----
+
+// ============================================================================
+// Group 9: Edge Cases
 // ============================================================================
 
 // CHECK-LABEL: testing$func @test_empty_loop_body

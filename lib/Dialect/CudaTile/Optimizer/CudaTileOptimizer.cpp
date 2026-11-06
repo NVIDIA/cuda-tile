@@ -52,8 +52,8 @@ static LogicalResult parseTextInto(llvm::StringRef text, PassManager &pm) {
 
 /// Build optimization pipeline (default or with builder/text overrides)
 static LogicalResult
-buildCudaTileOptimizationPipeline(PassManager &pm,
-                                  const TileIROptimizerOptions &opts) {
+buildOptimizationPipelineWithOverrides(PassManager &pm,
+                                       const TileIROptimizerOptions &opts) {
 
   // Add additional passes before default pipeline
   if (failed(parseTextInto(opts.pipelinePreText, pm))) {
@@ -61,7 +61,7 @@ buildCudaTileOptimizationPipeline(PassManager &pm,
   }
 
   // Add default pipeline
-  buildCudaTilePipeline(pm, opts);
+  buildCudaTileOptimizationPipeline(pm, opts);
 
   // Add additional passes after default pipeline
   return parseTextInto(opts.pipelinePostText, pm);
@@ -71,10 +71,10 @@ buildCudaTileOptimizationPipeline(PassManager &pm,
 // CUDA Tile IR parsing
 //===----------------------------------------------------------------------===//
 
-/// Parses the given bytecode buffer into a CUDA Tile IR module. Returns null if
-/// the buffer is not valid bytecode.
-OwningOpRef<mlir::ModuleOp> parseTileIRBytecode(llvm::MemoryBufferRef bytecode,
-                                                MLIRContext &context) {
+/// Parses the given bytecode buffer into a CUDA Tile IR module. Returns null if the
+/// buffer is not valid bytecode.
+OwningOpRef<mlir::ModuleOp>
+parseTileIRBytecode(llvm::MemoryBufferRef bytecode, MLIRContext &context) {
   // Check if this is CUDA Tile IR bytecode.
   if (!isTileIRBytecode(bytecode))
     return {};
@@ -101,9 +101,10 @@ static LogicalResult writeBytecodeToBuffer(cuda_tile::ModuleOp module,
                                            std::string &out) {
   out.clear();
   llvm::raw_string_ostream os(out);
-  if (failed(cuda_tile::writeBytecode(os, module,
-                                      BytecodeVersion::kCurrentVersion)))
+  BytecodeWriterConfig writerConfig(BytecodeVersion::kCurrentVersion);
+  if (failed(cuda_tile::writeBytecode(os, module, writerConfig))) {
     return failure();
+  }
   os.flush();
   return success();
 }
@@ -206,8 +207,9 @@ static LogicalResult emitOutputs(TileIROptimizerConfig &cfg,
     // → Generate bytecode once to memory, then branch.
     std::string bc;
     if (failed(
-            writeBytecodeToBuffer(extractCudaTileModuleOp(*parentModule), bc)))
+            writeBytecodeToBuffer(extractCudaTileModuleOp(*parentModule), bc))) {
       return emitConfigError(context, "Bytecode generation failed");
+    }
 
     if ((cfg.output.mode & O::BytecodeFile) != O::None) {
       std::string err;
@@ -264,8 +266,8 @@ namespace mlir::cuda_tile {
 ///
 /// \param pm The pass manager to populate
 /// \param opts Optimization options controlling which passes to include
-void buildCudaTilePipeline(OpPassManager &pm,
-                           const TileIROptimizerOptions &opts) {
+void buildCudaTileOptimizationPipeline(OpPassManager &pm,
+                                       const TileIROptimizerOptions &opts) {
   // Pipeline is nested under cuda_tile::EntryOp.
   auto &nested = pm.nestAny();
 
@@ -306,7 +308,7 @@ LogicalResult optimizeTileIRModule(ModuleOp module,
   // Build a PassManager specialized for cuda_tile::ModuleOp.
   PassManager pm = PassManager::on<ModuleOp>(module->getContext());
 
-  if (failed(buildCudaTileOptimizationPipeline(pm, opts)))
+  if (failed(buildOptimizationPipelineWithOverrides(pm, opts)))
     return failure();
 
   if (verbose) {
@@ -333,6 +335,9 @@ LogicalResult optimizeTileIR(TileIROptimizerConfig &cfg) {
   MLIRContext context(registry, cfg.opt.enableMultithread
                                     ? MLIRContext::Threading::ENABLED
                                     : MLIRContext::Threading::DISABLED);
+
+  auto *cudaTileDialect = context.getOrLoadDialect<CudaTileDialect>();
+  cudaTileDialect->setEnabledPreviewFeatures(cfg.previewFeatures);
 
   // Enable printing of remarks if verbose mode is on
   if (cfg.verbose) {

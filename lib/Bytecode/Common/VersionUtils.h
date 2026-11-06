@@ -1,4 +1,4 @@
-//===- VersionUtils.h -------------------------------------------*- C++ -*-===//
+//===- VersionUtils.h - CUDA Tile Bytecode Version Utils --------*- C++ -*-===//
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
@@ -7,9 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Utilities for version checking during bytecode operations.
-// This is not part of the public API - only for bytecode
-// implementation.
+// Utilities for version checking bytecode operations.
 //
 //===----------------------------------------------------------------------===//
 
@@ -24,6 +22,9 @@ namespace mlir::cuda_tile::detail {
 /// Check if an opcode is available in the given bytecode version.
 bool isOpcodeAvailableInVersion(uint32_t opcode,
                                 const BytecodeVersion &version);
+
+/// Returns true if the opcode is in the public-preview range (0x4000 - 0x4FFF).
+bool isPreviewOpcode(uint32_t opcode);
 
 } // namespace mlir::cuda_tile::detail
 

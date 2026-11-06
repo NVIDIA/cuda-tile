@@ -10,11 +10,13 @@
 #ifndef CUDATILE_DIALECT_CUDATILE_IR_INTERFACES_H
 #define CUDATILE_DIALECT_CUDATILE_IR_INTERFACES_H
 
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LogicalResult.h"
 
+#include "cuda_tile/Dialect/CudaTile/IR/Attributes.h"
 #include "cuda_tile/Dialect/CudaTile/IR/TypeInterfaces.h.inc"
 
 #endif

@@ -1,4 +1,4 @@
-// Test 250.1 features: operands, results, and attributes.
+// Test 250.1 features: operands, results, attributes, and dependent types.
 
 // RUN: cuda-tile-translate -test-cudatile-roundtrip -no-implicit-module -bytecode-version=250.1 %s | FileCheck %s
 
@@ -34,33 +34,33 @@ cuda_tile.module @version_250_1_features {
   }
 
   // Test case 4: Type parameter with DefaultValuedParameter from 250.1.
-  entry @test_type_explicit_default(
-      %arg0: !cuda_tile.testing$bytecode_test_evolved<f32, f16>) {
-    // CHECK: testing$bytecode_test_evolved<f32, f16>
+  testing$func @test_type_explicit_default(
+      %arg0: !cuda_tile.testing$bytecode_test_evolved<f32, f32, f16>) {
+    // CHECK: testing$bytecode_test_evolved<f32, f32, f16>
     return
   }
-  
+
   // Test case 5: OptionalParameter<Attr> with value.
-  entry @test_optional_attr(%arg0: !cuda_tile.testing$bytecode_test_evolved<f64, i32, zero>) {
-    // CHECK: testing$bytecode_test_evolved<f64, zero>
+  testing$func @test_optional_attr(%arg0: !cuda_tile.testing$bytecode_test_evolved<f64, f64, i32, zero>) {
+    // CHECK: testing$bytecode_test_evolved<f64, f64, zero>
     return
   }
-  
+
   // Test case 6: OptionalParameter<Type> with value.
-  entry @test_optional_type_present(%arg0: !cuda_tile.testing$bytecode_test_evolved<f32, i32, zero, f16>) {
-    // CHECK: testing$bytecode_test_evolved<f32, zero, f16>
+  testing$func @test_optional_type_present(%arg0: !cuda_tile.testing$bytecode_test_evolved<f32, f32, i32, zero, f16>) {
+    // CHECK: testing$bytecode_test_evolved<f32, f32, zero, f16>
     return
   }
-  
+
   // Test case 7: OptionalParameter<Type> NULL.
-  entry @test_optional_type_null(%arg0: !cuda_tile.testing$bytecode_test_evolved<f64, i32>) {
-    // CHECK: testing$bytecode_test_evolved<f64>
+  testing$func @test_optional_type_null(%arg0: !cuda_tile.testing$bytecode_test_evolved<f64, f64, i32>) {
+    // CHECK: testing$bytecode_test_evolved<f64, f64>
     return
   }
-  
+
   // Test case 8: All defaults/nulls.
-  entry @test_all_defaults(%arg0: !cuda_tile.testing$bytecode_test_evolved<f32>) {
-    // CHECK: testing$bytecode_test_evolved<f32>
+  testing$func @test_all_defaults(%arg0: !cuda_tile.testing$bytecode_test_evolved<f32, f32>) {
+    // CHECK: testing$bytecode_test_evolved<f32, f32>
     return
   }
 
@@ -75,24 +75,30 @@ cuda_tile.module @version_250_1_features {
   // Test case 10: Evolved attr with base value only (no optional).
   entry @test_evolved_attr_base_only() {
     %input = constant <f32: [1.0]> : !cuda_tile.tile<1xf32>
-    %t = testing$bytecode_test_evolution (%input : !cuda_tile.tile<1xf32>) test_attr = #cuda_tile.bytecode_test_evolved_attr<123> -> !cuda_tile.token
-    // CHECK: bytecode_test_evolution{{.*}}test_attr = <123>
+    %t = testing$bytecode_test_evolution (%input : !cuda_tile.tile<1xf32>) test_attr = #cuda_tile.bytecode_test_evolved_attr<123, 123> -> !cuda_tile.token
+    // CHECK: bytecode_test_evolution{{.*}}test_attr = <123, 123>
     return
   }
 
   // Test case 11: Evolved attr with optional value (250.1 feature).
   entry @test_evolved_attr_with_optional() {
     %input = constant <f32: [1.0]> : !cuda_tile.tile<1xf32>
-    %t = testing$bytecode_test_evolution (%input : !cuda_tile.tile<1xf32>) test_attr = #cuda_tile.bytecode_test_evolved_attr<123, 456> -> !cuda_tile.token
-    // CHECK: bytecode_test_evolution{{.*}}test_attr = <123, 456>
+    %t = testing$bytecode_test_evolution (%input : !cuda_tile.tile<1xf32>) test_attr = #cuda_tile.bytecode_test_evolved_attr<123, 123, 456> -> !cuda_tile.token
+    // CHECK: bytecode_test_evolution{{.*}}test_attr = <123, 123, 456>
     return
   }
 
   // Test case 12: Evolved attr with enum and optional value.
   entry @test_evolved_attr_with_enum_and_optional() {
     %input = constant <f32: [1.0]> : !cuda_tile.tile<1xf32>
-    %t = testing$bytecode_test_evolution (%input : !cuda_tile.tile<1xf32>) priority = #cuda_tile.bytecode_test_priority<low> test_attr = #cuda_tile.bytecode_test_evolved_attr<789, 1000> -> !cuda_tile.token
-    // CHECK: bytecode_test_evolution{{.*}}priority = <low> test_attr = <789, 1000>
+    %t = testing$bytecode_test_evolution (%input : !cuda_tile.tile<1xf32>) priority = #cuda_tile.bytecode_test_priority<low> test_attr = #cuda_tile.bytecode_test_evolved_attr<789, 789, 1000> -> !cuda_tile.token
+    // CHECK: bytecode_test_evolution{{.*}}priority = <low> test_attr = <789, 789, 1000>
+    return
+  }
+
+  // Test case 13: Dependent type differs from fallback baseType.
+  testing$func @test_dependent_type_diff(%arg0: !cuda_tile.testing$bytecode_test_evolved<f32, i64>) {
+    // CHECK: testing$bytecode_test_evolved<f32, i64>
     return
   }
 }

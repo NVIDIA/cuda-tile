@@ -15,8 +15,10 @@
 #ifndef CUDA_TILE_TOOLS_TBLGEN_BYTECODEGEN_UTILITIES_H_
 #define CUDA_TILE_TOOLS_TBLGEN_BYTECODEGEN_UTILITIES_H_
 
+#include "mlir/TableGen/Format.h"
 #include "mlir/TableGen/Operator.h"
 
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/TableGen/Error.h"
 
@@ -64,8 +66,40 @@ std::optional<std::string> extractDefaultValue(const NamedAttribute &namedAttr);
 std::optional<std::string>
 extractSameOperandRankName(const NamedAttribute &namedAttr, const Operator &op);
 
+/// Return a C++ expression, in terms of an op value named `opExpr`, that is
+/// true when the attribute's value has to be encoded, i.e. when it differs from
+/// what a reader predating the attribute reconstructs on its own. Returns
+/// nullopt when there is no such fallback, so the value is always encoded.
+///
+/// The writer uses this to reject a lossy downgrade and the minimum-version
+/// analysis to decide whether the attribute constrains the module. Those two
+/// have to agree, so the predicate is derived here rather than in each backend.
+std::optional<std::string>
+getAttributeEncodingRequiredPredicate(const NamedAttribute &namedAttr,
+                                      const Operator &op,
+                                      StringRef opExpr = "op");
+
 /// Extract the version string from an operation's metadata.
 std::string extractVersionFromOperation(const Operator &op);
+
+/// Check if an operation is a public-preview operation (CudaTilePreviewOpDef).
+/// Preview ops ship in all builds, so this is available unconditionally.
+bool isPreviewOperation(const Operator &op);
+
+/// Return the C++ enum case owning the preview entity or parameter in
+/// `record`. The record's `previewFeature` field refers to a
+/// CudaTilePreviewFeature definition.
+StringRef getOwningPreviewFeatureName(const llvm::Record *record);
+
+/// Check if an operation carries no bytecode version information and must be
+/// serialized without version-conditional logic. This is true for public
+/// preview operations, and for additional build-gated operations that likewise
+/// carry no version metadata.
+bool isVersionlessOperation(const Operator &op);
+
+/// Returns whether an operation attribute is encoded outside the generated
+/// operation payload.
+bool isExternallyEncodedOpAttribute(StringRef attrName);
 
 /// Get version-ordered bit assignments for optional fields.
 /// Returns map from field name to bit position, and optionally the earliest
@@ -111,6 +145,21 @@ struct ResultVersionInfo {
     }
   }
 };
+
+/// A substitution mapping a parameter name to its C++ expression, used by
+/// replaceTableGenPlaceholders for $_param_<name> substitutions.
+struct ParamSubst {
+  SmallString<32> paramName;
+  SmallString<64> expr;
+
+  ParamSubst(StringRef paramName, StringRef expr)
+      : paramName(paramName), expr(expr) {}
+};
+
+/// Replace TableGen placeholders with C++ code.
+/// Supports $_ctxt and $_param_<name> substitutions.
+std::string replaceTableGenPlaceholders(StringRef code, StringRef ctxtVar,
+                                        ArrayRef<ParamSubst> paramSubsts);
 
 } // namespace tblgen
 } // namespace mlir

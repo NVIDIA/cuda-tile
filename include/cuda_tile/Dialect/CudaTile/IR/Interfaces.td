@@ -11,6 +11,7 @@
 #define CUDATILE_DIALECT_CUDATILE_IR_INTERFACES_TD
 
 include "mlir/IR/AttrTypeBase.td"
+include "mlir/IR/BuiltinTypeInterfaces.td"
 include "mlir/IR/OpBase.td"
 
 def CudaTile_AssumePredicateAttrInterface
@@ -27,6 +28,27 @@ def CudaTile_AssumePredicateAttrInterface
         and "failure" otherwise.
       }],
       "LogicalResult", "verifyWithAssumeOp", (ins "::mlir::Operation *":$op)>
+  ];
+}
+
+def CudaTile_SymbolicExprAttrInterface : AttrInterface<"SymbolicExprAttr"> {
+  let cppNamespace = "::mlir::cuda_tile";
+  let description = [{
+    Interface for symbolic expression attributes used in layout calculations.
+    Expressions can be instantiated with an evaluation context and simplified.
+  }];
+
+  let methods = [
+    InterfaceMethod<
+      "Instantiate expression with evaluation context",
+      "SymbolicExprAttr", "instantiate",
+      (ins "DictionaryAttr":$evalContext)
+    >,
+    InterfaceMethod<
+      "Simplify expression",
+      "SymbolicExprAttr", "simplify",
+      (ins)
+    >
   ];
 }
 

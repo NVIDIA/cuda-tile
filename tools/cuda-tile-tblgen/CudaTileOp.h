@@ -26,7 +26,6 @@
 #include "CudaTileAttr.h"
 #include "CudaTileType.h"
 #include "Emitter.h"
-
 #include <iostream>
 #include <string>
 #include <vector>

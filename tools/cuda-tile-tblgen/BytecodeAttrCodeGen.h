@@ -35,6 +35,15 @@ void generateAttrTagEnum(const BytecodeAttrStructure &structure,
 void generateAttrVersionCheck(const BytecodeAttrStructure &structure,
                               llvm::raw_ostream &os);
 
+/// Generate runtime classifiers for public-preview attribute tags and values.
+void generatePreviewAttrClassification(const BytecodeAttrStructure &structure,
+                                       llvm::raw_ostream &os);
+
+/// Generate runtime classification of public-preview attribute values without
+/// bytecode-tag helpers.
+void generatePreviewAttrValueClassification(
+    const BytecodeAttrStructure &structure, llvm::raw_ostream &os);
+
 /// Generate is_cuda_tile_enum type trait for BytecodeWriter.
 void generateEnumTypeTrait(const BytecodeAttrStructure &structure,
                            llvm::raw_ostream &os);

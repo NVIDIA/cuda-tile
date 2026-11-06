@@ -4,7 +4,7 @@
 // If MLIR ever changes how APFloat::bitcastToAPInt yields the bytes for
 // bf16, this fixture will diverge and the test fires.
 
-// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module %s -o %t.bc
+// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module -bytecode-version=13.4 %s -o %t.bc
 // RUN: cmp %t.bc %S/goldens/bf16_splat.golden.tileirbc
 
 cuda_tile.module @kernels {

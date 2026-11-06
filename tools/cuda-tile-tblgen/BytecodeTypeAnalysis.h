@@ -32,10 +32,13 @@ namespace mlir::tblgen {
 ///   cppType: Return type of getter.
 ///   cppStorageType: Storage type.
 ///   isOptional: True for OptionalParameter<...>
-///   enumTypeName: For OptionalEnum, underlying enum type.
+///   enumTypeName: For Enum and OptionalEnum, the underlying enum type.
 ///   kind: Classification for code generation.
 ///   sinceVersion: Version when parameter was introduced.
 ///   defaultValue: Default value for parameter.
+///   isPreviewExtension: True for a versionless, fallback-elided preview
+///     extension to a stable type.
+///   owningPreviewFeature: Owning feature for a preview extension.
 ///   usesOptionalTypeFlags: True for OptionalParameter with null default
 ///     (uses bitfield encoding; DefaultValuedParameter uses version checks).
 struct BytecodeTypeParameter {
@@ -50,7 +53,8 @@ struct BytecodeTypeParameter {
     Int32Array,
     DenseI32Array,
     OptionalEnum,
-    UInt32Scalar
+    UInt32Scalar,
+    Enum
   };
 
   BytecodeTypeParameter(const AttrOrTypeParameter &param);
@@ -69,6 +73,9 @@ public:
   Kind kind;
   std::string sinceVersion;
   std::string defaultValue;
+  std::string bytecodeFallbackValue;
+  bool isPreviewExtension = false;
+  std::string owningPreviewFeature;
   bool usesOptionalTypeFlags = false;
 };
 
@@ -91,12 +98,14 @@ inline bool isTypeParameter(BytecodeTypeParameter::Kind kind) {
 ///   parameters: Analyzed type parameters.
 ///   needsReverseOrder: True for TileType.
 ///   skipVersionCheck: True for types that skip version checks.
+///   isPreview: True for public-preview types.
+///   hasCheckedBuilder: True if ODS generates getChecked for this type.
 ///   hasOptionalTypeParams: True if type has optional Type parameters.
 ///   firstOptionalTypeParamVersion: Version when first optional Type param was
 ///   added.
 struct CudaTileType {
   CudaTileType(const AttrOrTypeDef &typeDef, unsigned tagValue,
-               StringRef version);
+               StringRef version, bool isPreview);
 
   std::string typeName;
   std::string qualifiedTypeName;
@@ -105,6 +114,9 @@ struct CudaTileType {
   SmallVector<BytecodeTypeParameter, 4> parameters;
   bool needsReverseOrder;
   bool skipVersionCheck = false;
+  bool isPreview = false;
+  std::string owningPreviewFeature;
+  bool hasCheckedBuilder = false;
   bool hasOptionalTypeParams = false;
   std::string firstOptionalTypeParamVersion = "";
 };
@@ -121,12 +133,20 @@ struct CudaTileType {
 ///   sinceVersion: Version string.
 ///   integerBitWidth: For integers (1,8,16,32,64); 0 for floats.
 ///   floatMlirTypeName: For floats ("Float16Type", etc.); empty for integers.
+///   singletonCppType: For nullary builtins (e.g. "::mlir::IndexType"),
+///     reconstructed via `<cppType>::get(ctx)`; empty otherwise.
+///   isPreview: True for public-preview builtins (versionless, current-version
+///     only).
+///   owningPreviewFeature: Owning feature for a public-preview builtin.
 struct BuiltinType {
   BuiltinType(StringRef name, StringRef qualifiedType, unsigned tag,
-              StringRef version, unsigned width = 0, StringRef floatType = "");
+              StringRef version, unsigned width = 0, StringRef floatType = "",
+              StringRef singleton = "", bool preview = false,
+              StringRef owningPreviewFeature = "");
 
   bool isInteger() const { return integerBitWidth > 0; }
   bool isFloat() const { return !floatMlirTypeName.empty(); }
+  bool isSingleton() const { return !singletonCppType.empty(); }
 
   std::string enumName;
   std::string qualifiedTypeName;
@@ -134,6 +154,9 @@ struct BuiltinType {
   std::string sinceVersion;
   unsigned integerBitWidth;
   std::string floatMlirTypeName;
+  std::string singletonCppType;
+  bool isPreview = false;
+  std::string owningPreviewFeature;
 };
 
 /// Complete analyzed bytecode type structure.

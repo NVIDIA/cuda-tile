@@ -2,6 +2,7 @@
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
+//
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
@@ -22,11 +23,15 @@
 //      produced by operations that will themselves be hoisted.
 //
 // The pass uses a single pre-order walk over the loop body (including nested
-// IfOp/ScanOp/ReduceOp regions) to collect hoistable ops. Pre-order ensures
-// that definitions are visited before uses, so a "willHoist" set can track
-// transitive invariance in one pass without a fixpoint loop. Nested
-// ForOp/LoopOp regions are skipped (WalkResult::skip) since they are processed
-// by their own LICM invocation.
+// non-isolated regions such as IfOp regions) to collect hoistable ops.
+// Pre-order ensures that definitions are visited before uses, so a
+// "willHoist" set can track transitive invariance in one pass without a
+// fixpoint loop. Operations with the IsolatedFromAbove trait are considered
+// for hoisting as a whole, but their regions are not traversed: moving an
+// operation out of an isolated region without moving the isolated parent
+// would create an illegal cross-region SSA use. Nested ForOp/LoopOp regions
+// are also skipped (WalkResult::skip) since they are processed by their own
+// LICM invocation.
 //
 // The outer driver uses a post-order walk over the function, processing inner
 // loops before outer loops. This allows invariants to cascade outward through
@@ -39,10 +44,11 @@
 //     which CudaTile loops cannot implement due to ContinueOp/BreakOp early
 //     exits through nested IfOp regions.
 //
-//   - Hoists from inside IfOp/ScanOp/ReduceOp regions (then/else), not only
-//   from the top-level
-//     loop body block. The standard MLIR LICM only inspects ops returned by
-//     getLoopRegions(), which are the immediate loop body blocks.
+//   - Hoists from inside non-isolated nested regions such as IfOp, ReduceOp
+//     and ScanOp regions, not only from the top-level loop body block.
+//     IsolatedFromAbove operations remain indivisible hoisting boundaries. The
+//     standard MLIR LICM only inspects ops returned by getLoopRegions(), which
+//     are the immediate loop body blocks.
 //
 //   - Uses a single pre-order walk with a "willHoist" set for transitive
 //     invariance, instead of the standard approach of iterating over top-level
@@ -100,9 +106,11 @@ static bool isHoistableOp(Operation *op, Region &loopRegion,
 
 /// Collect and hoist all loop-invariant ops from |loopOp|'s body region.
 /// Uses a pre-order walk to discover invariant ops in a single pass,
-/// descending into IfOp/ScanOp/ReduceOp regions but skipping nested
-/// ForOp/LoopOp (handled by the outer post-order driver). Returns true if any
-/// ops were hoisted.
+/// descending into non-isolated regions but skipping the regions of
+/// IsolatedFromAbove operations. The isolated operation itself is still
+/// considered for whole-operation hoisting. Nested ForOp/LoopOp operations
+/// are skipped entirely and handled by the outer post-order driver. Returns
+/// true if any ops were hoisted.
 static bool hoistFromLoop(Operation *loopOp) {
   Region &loopRegion = loopOp->getRegion(0);
   DenseSet<Operation *> willHoist;
@@ -116,6 +124,13 @@ static bool hoistFromLoop(Operation *loopOp) {
     if (isHoistableOp(op, loopRegion, willHoist)) {
       willHoist.insert(op);
       toHoist.push_back(op);
+    }
+
+    // An IsolatedFromAbove operation may be hoisted as a whole, but none of
+    // its nested operations may be moved across the isolation boundary on
+    // their own.
+    if (op->hasTrait<OpTrait::IsIsolatedFromAbove>()) {
+      return WalkResult::skip();
     }
     return WalkResult::advance();
   });

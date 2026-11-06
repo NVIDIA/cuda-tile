@@ -21,6 +21,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -42,36 +43,44 @@ using CategoryID = cuda_tile::remark::CategoryID;
 union Packed {
   std::uint32_t raw;
   struct {
-    std::uint32_t kind : 2;
+    std::uint32_t kind : 3;
     std::uint32_t cat : 4;
-    std::uint32_t num : 26;
+    std::uint32_t num : 25;
   } bits;
-  constexpr explicit Packed(RemarkID id)
-      : raw(static_cast<std::uint32_t>(id)) {}
+  /// Construct from any of RemarkID / ErrorID / WarningID (all I32 enums
+  /// that share the same bit layout).
+  template <typename IdT, typename = std::enable_if_t<std::is_enum_v<IdT>>>
+  constexpr explicit Packed(IdT id) : raw(static_cast<std::uint32_t>(id)) {}
 };
 
-static inline constexpr cuda_tile::remark::DiagnosticKind getKind(RemarkID id) {
+template <typename IdT>
+static inline constexpr cuda_tile::remark::DiagnosticKind getKind(IdT id) {
   return static_cast<cuda_tile::remark::DiagnosticKind>(Packed(id).bits.kind);
 }
 
-static inline constexpr CategoryID getCategory(RemarkID id) {
+template <typename IdT>
+static inline constexpr CategoryID getCategory(IdT id) {
   return static_cast<CategoryID>(Packed(id).bits.cat);
 }
 
 /// Get the category string for MLIR remark filtering.
 /// Must match the filter strings in tileirAs-cli.cpp.
-static StringRef getCategoryString(RemarkID id) {
-  CategoryID categoryID = getCategory(id);
-  return stringifyCategoryID(categoryID);
+template <typename IdT>
+static StringRef getCategoryString(IdT id) {
+  return stringifyCategoryID(getCategory(id));
 }
 
 /// Get the remark message from the TableGen-generated doc string.
-static StringRef getRemarkMessage(RemarkID id) {
-  return stringifyRemarkID(id).split('@').second;
+/// Works for RemarkID / ErrorID / WarningID via the overloaded
+/// stringifyEnum() TableGen emits for each I32EnumAttr.
+template <typename IdT>
+static StringRef getRemarkMessage(IdT id) {
+  return stringifyEnum(id).split('@').second;
 }
 
-static StringRef getRemarkName(RemarkID id) {
-  return stringifyRemarkID(id).split('@').first;
+template <typename IdT>
+static StringRef getRemarkName(IdT id) {
+  return stringifyEnum(id).split('@').first;
 }
 
 /// Function pointer type for remark emitters (passed, missed, failed,
@@ -89,7 +98,94 @@ static StringRef findParentFunctionName(Operation *op) {
   llvm_unreachable("no function op found");
 }
 
-/// Private helper to emit a remark with all options
+/// User-facing label prefixes for always-on diagnostics. Consumed by
+/// formatRemarkId to produce `RemarkId` strings like "E0000" / "W0000".
+static constexpr char kErrorPrefix = 'E';
+static constexpr char kWarningPrefix = 'W';
+
+/// Build the user-facing identifier ("E0000" / "W0000").
+/// The TableGen `Num` field for Error/Warning entries is the display number
+/// directly — `Num=0` renders as `E0000`, `Num=1` as `E0001`, etc.
+template <typename IdT>
+static std::string formatRemarkId(IdT id, char prefix) {
+  unsigned num = Packed(id).bits.num;
+  std::string out;
+  llvm::raw_string_ostream os(out);
+  os << prefix << llvm::format("%04u", num);
+  return out;
+}
+
+//===----------------------------------------------------------------------===//
+// Always-on emission (Error / Warning)
+//===----------------------------------------------------------------------===//
+//
+// Constructs a Remark manually and reports it via RemarkEngine::report()
+// directly, bypassing the per-category filter. The only gate is the
+// presence of an attached RemarkEngine; once an engine is attached, these
+// diagnostics always surface regardless of the `-remarks-filter` options.
+// Errors / Warnings don't flow through the InFlightRemark / finalizer path
+// — they're a flat emission point with no notes / reason / suggestion
+// streaming, just an extra message.
+
+template <typename IdT>
+static void emitAlwaysOn(Operation *op, IdT id, StringRef extraMsg,
+                         StringRef reason, StringRef suggestion) {
+  StringRef name = getRemarkName(id);
+  StringRef category = getCategoryString(id);
+  StringRef function = findParentFunctionName(op);
+  StringRef tmpl = getRemarkMessage(id);
+  std::string message = extraMsg.empty() ? std::string(tmpl)
+                                         : llvm::formatv(tmpl.data(), extraMsg);
+  cuda_tile::remark::DiagnosticKind kind = getKind(id);
+
+  auto *engine = op->getContext()->getRemarkEngine();
+  if (!engine) {
+    // Fallback to MLIR native diagnostics when no remark engine is attached.
+    if (kind == cuda_tile::remark::DiagnosticKind::Error)
+      op->emitError() << message;
+    else
+      op->emitWarning() << message;
+    return;
+  }
+
+  auto opts = mlir::remark::RemarkOpts::name(name).category(category).function(
+      function);
+
+  bool isError = kind == cuda_tile::remark::DiagnosticKind::Error;
+  auto rkind = isError ? mlir::remark::RemarkKind::RemarkFailure
+                       : mlir::remark::RemarkKind::RemarkMissed;
+  auto severity = isError ? mlir::DiagnosticSeverity::Error
+                          : mlir::DiagnosticSeverity::Warning;
+  char prefix = isError ? kErrorPrefix : kWarningPrefix;
+
+  mlir::remark::detail::Remark remark(rkind, severity, op->getLoc(), opts);
+  remark.insert(message);
+  remark.insert(mlir::remark::detail::Remark::Arg("RemarkId",
+                                                  formatRemarkId(id, prefix)));
+  // Explicit classification arg consumed by the TileIR streamer so it can
+  // route/format always-on diagnostics without sniffing the RemarkId prefix.
+  remark.insert(mlir::remark::detail::Remark::Arg(
+      "DiagClass", isError ? StringRef("Error") : StringRef("Warning")));
+  if (!reason.empty()) {
+    remark.insert(mlir::remark::detail::Remark::Arg("Reason", reason.str()));
+  }
+  if (!suggestion.empty()) {
+    remark.insert(
+        mlir::remark::detail::Remark::Arg("Suggestion", suggestion.str()));
+  }
+  engine->report(std::move(remark));
+}
+
+//===----------------------------------------------------------------------===//
+// emitRemarkImpl
+//===----------------------------------------------------------------------===//
+//
+// Filter-gated path for RemarkID-based (Pass / Miss / Fail / Analysis)
+// remarks. Called from the InFlightRemark defaultFinalizer with already-
+// materialized notes / reasons / suggestions. A TableGen-level assert
+// forbids TileIRRemark<> from being constructed with DK_Error /
+// DK_Warning, so this path should only ever see the four filter-gated
+// kinds.
 static void emitRemarkImpl(Operation *op, RemarkID id, StringRef extraMsg,
                            ArrayRef<std::pair<std::string, std::string>> notes,
                            ArrayRef<std::string> reasons,
@@ -105,6 +201,7 @@ static void emitRemarkImpl(Operation *op, RemarkID id, StringRef extraMsg,
   std::string message = extraMsg.empty()
                             ? std::string(messageTemplate)
                             : llvm::formatv(messageTemplate.data(), extraMsg);
+
   RemarkEmitFn emitFn;
   switch (diagnosticKind) {
   case cuda_tile::remark::DiagnosticKind::Pass:
@@ -120,13 +217,13 @@ static void emitRemarkImpl(Operation *op, RemarkID id, StringRef extraMsg,
     emitFn = mlir::remark::analysis;
     break;
   default:
-    llvm_unreachable("Invalid diagnostic kind");
+    llvm_unreachable("Invalid diagnostic kind for filter-gated remark path; "
+                     "Error/Warning must use reportError / reportWarning");
   }
   auto diag = emitFn(op->getLoc(), opts);
 
   diag << message;
 
-  // Add notes if provided
   for (const auto &[key, value] : notes) {
     diag << mlir::remark::metric(key, value);
   }
@@ -318,4 +415,19 @@ InFlightRemark mlir::cuda_tile::remark::reportRemark(
     rmk.addSuggestion() << suggestion;
   }
   return rmk;
+}
+
+void cuda_tile::remark::reportError(Operation *op, ErrorID id,
+                                    StringRef extraMsg, StringRef reason,
+                                    StringRef suggestion) {
+  // Emits through the engine bypassing the per-category filter; does NOT
+  // end compilation — caller must signalPassFailure() / return failure()
+  // to propagate.
+  emitAlwaysOn(op, id, extraMsg, reason, suggestion);
+}
+
+void cuda_tile::remark::reportWarning(Operation *op, WarningID id,
+                                      StringRef extraMsg, StringRef reason,
+                                      StringRef suggestion) {
+  emitAlwaysOn(op, id, extraMsg, reason, suggestion);
 }

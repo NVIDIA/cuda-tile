@@ -48,6 +48,15 @@ int64_t constexpr maxTileNumElements = 16777216;
 /// Return "true" if the given type is an pointer or a tensor of pointer.
 bool isPointerLike(Type t);
 
+/// Return true if the type is a TileType with a non-i1 integer element type.
+bool isIntTile(Type type);
+
+/// Return true if the type is a TileType with an i1 element type.
+bool isBoolTile(Type type);
+
+/// Return the integer element bit width of a TileType, or 0 if not applicable.
+unsigned getBitWidthFromType(Type type);
+
 /// Return a TileType with same shape as the argument, with i1 element type.
 TileType getI1SameShape(Type type);
 
@@ -77,8 +86,8 @@ void printCudaTileType(AsmPrinter &p, Operation *op, TypeRange types);
 void printCudaTileTypeSplat(AsmPrinter &p, Operation *op, TypeRange types,
                             ValueRange values);
 
-/// This class represents any cuda tile type.
-struct CudaTileType : public Type {
+/// This class represents any type defined by the cuda_tile dialect.
+struct CudaTileDialectType : public Type {
   using Type::Type;
 
   /// Classof support for casting functionality.

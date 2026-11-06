@@ -92,16 +92,15 @@ public:
   /// single bitfield. For versions < 13.3, OptionalEnum uses inline flags.
   static const BytecodeVersion kUnifiedBitfieldVersion;
 
-  /// The version starting from which bits 3 and 4 of the function-table entry
-  /// flag byte have a meaning.
-  ///
-  /// The reader gates its acceptance of those bits on this version:
-  ///   * For bytecode at version < kFunctionFlagsExtendedVersion, bits 3 and
-  ///     4 are treated as reserved.
-  ///   * For bytecode at version >= kFunctionFlagsExtendedVersion, every
-  ///     set bit must be one the build recognizes; unknown bits are a hard
-  ///     error.
+  /// The version starting from which unknown function-table flag bits above
+  /// Visibility/KindKernel/HasOptimizationHints are hard errors.
   static const BytecodeVersion kFunctionFlagsExtendedVersion;
+
+  /// The version that introduces the Form field in bits [3:2] and stops using
+  /// HasOptimizationHints. KindKernel entries always carry optimization_hints;
+  /// extern FuncOp is FormNormal with body length 0 and always-present
+  /// const_params.
+  static const BytecodeVersion kFunctionFlagsFormVersion;
 
   /// The minimum supported version of the bytecode format.
   static const BytecodeVersion kMinSupportedVersion;
@@ -109,6 +108,17 @@ public:
   /// The first version that uses the canonical bit-packed wire format for
   /// `i1` `DenseElementsAttr` payloads.
   static const BytecodeVersion kCanonicalI1Version;
+
+  /// The first version that encodes function arg attrs.
+  static const BytecodeVersion kMinArgAttrsVersion;
+
+  /// The first version that encodes the `flags` field of a `DISubprogramAttr`.
+  ///
+  ///   * Bytecode below this version carries no flags field; a subprogram read
+  ///     from it defaults to `DISubprogramFlags::None`.
+  ///   * At or above it, every set bit must be one the build recognizes;
+  ///     unknown bits are a hard error.
+  static const BytecodeVersion kMinDISubprogramFlagsVersion;
 
 private:
   /// Constructs a BytecodeVersion object with the given version components.

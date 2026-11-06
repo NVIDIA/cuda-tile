@@ -12,6 +12,7 @@ set(LIBS
   MLIRSupport
   MLIRTransforms
   MLIRIR
+  CudaTileBytecodeCommon
   CudaTileDialect
   CudaTileTransforms
 )

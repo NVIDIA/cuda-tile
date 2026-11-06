@@ -38,7 +38,8 @@ static LogicalResult roundTripModule(cuda_tile::ModuleOp op,
   auto dialect = cast<CudaTileDialect>(op->getDialect());
   dialect->setWarnUnsupportedHints(getWarnUnsupportedHints());
   dialect->setErrorOnHints(getErrorUnsupportedHints());
-  if (failed(writeBytecode(rvo, op, version)))
+  BytecodeWriterConfig writerConfig(version, isBytecodeVersionExplicitlySet());
+  if (failed(writeBytecode(rvo, op, writerConfig)))
     return failure();
 
   llvm::MemoryBufferRef bytecodeBufferRef(
@@ -71,5 +72,11 @@ void mlir::cuda_tile::registerTileIRTestTranslations() {
         return roundTripModule(op, output, getCurrentBytecodeVersion(),
                                useGenericForm);
       },
-      [](DialectRegistry &registry) { registry.insert<CudaTileDialect>(); });
+      [](DialectRegistry &registry) {
+        registry.insert<CudaTileDialect>();
+        registry.addExtension(+[](MLIRContext *, CudaTileDialect *dialect) {
+          dialect->setEnabledPreviewFeatures(
+              getPreviewFeaturesFromCommandLine());
+        });
+      });
 }

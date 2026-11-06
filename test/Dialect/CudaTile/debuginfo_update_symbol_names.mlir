@@ -6,15 +6,18 @@
   file = #file
 >
 
-// Ensure the linkage name was updated.
-// CHECK-DAG: #cuda_tile.di_subprogram<{{.*}}, name = "test_func", linkageName = "_fqZtest_func_f32"
+// Ensure the linkage name was updated, and that the rename (which rebuilds the
+// attribute through cloneWithNewLinkageName) carries every other field over --
+// `flags` is set here only so a dropped field would show up as a diff.
+// CHECK-DAG: #cuda_tile.di_subprogram<{{.*}}, name = "test_func", linkageName = "_fqZtest_func_f32"{{.*}}, scopeLine = 2, flags = declaration>
 #func = #cuda_tile.di_subprogram<
   file = #file,
   line = 1,
   name = "test_func",
   linkageName = "test_func",
   compileUnit = #compile_unit,
-  scopeLine = 2
+  scopeLine = 2,
+  flags = declaration
 >
 
 #block_func = #cuda_tile.di_lexical_block<

@@ -31,6 +31,15 @@ namespace tblgen {
 void generateTypeTagEnum(const BytecodeTypeStructure &structure,
                          llvm::raw_ostream &os);
 
+/// Generate runtime classifiers for public-preview type tags and values.
+void generatePreviewTypeClassification(const BytecodeTypeStructure &structure,
+                                       llvm::raw_ostream &os);
+
+/// Generate runtime classification of public-preview type values without
+/// bytecode-tag helpers.
+void generatePreviewTypeValueClassification(
+    const BytecodeTypeStructure &structure, llvm::raw_ostream &os);
+
 /// Generate type serialization functions.
 void generateTypeSerializers(const BytecodeTypeStructure &structure,
                              llvm::raw_ostream &os);

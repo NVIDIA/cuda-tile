@@ -14,6 +14,7 @@
 
 #include "cuda_tile/Bytecode/Writer/BytecodeWriter.h"
 
+#include "mlir/IR/AttrTypeSubElements.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Verifier.h"
 
@@ -27,6 +28,7 @@
 #include "cuda_tile/Bytecode/Common/BytecodeVerification.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Attributes.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Ops.h"
+#include "cuda_tile/Dialect/CudaTile/IR/PreviewFeatures.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Types.h"
 #include <type_traits>
 
@@ -168,12 +170,6 @@ private:
 };
 } // end anonymous namespace
 
-namespace {
-struct BytecodeWriterConfig {
-  BytecodeVersion bytecodeVersion;
-};
-} // end anonymous namespace
-
 //===----------------------------------------------------------------------===//
 // Header Writer
 //===----------------------------------------------------------------------===//
@@ -181,9 +177,9 @@ struct BytecodeWriterConfig {
 static LogicalResult writeHeader(raw_ostream &stream, Operation *op,
                                  const BytecodeWriterConfig &config) {
   // Validate the bytecode version.
-  if (config.bytecodeVersion < BytecodeVersion::kMinSupportedVersion) {
+  if (config.getBytecodeVersion() < BytecodeVersion::kMinSupportedVersion) {
     return op->emitError() << "unsupported version requested "
-                           << config.bytecodeVersion.toString()
+                           << config.getBytecodeVersion().toString()
                            << ", must be in range ["
                            << BytecodeVersion::kMinSupportedVersion.toString()
                            << ", "
@@ -194,9 +190,9 @@ static LogicalResult writeHeader(raw_ostream &stream, Operation *op,
   EncodingWriter writer(stream);
   const char magicNumber[8] = {0x7F, 'T', 'i', 'l', 'e', 'I', 'R', 0x00};
   writer.write(magicNumber, sizeof(magicNumber));
-  writer.writeLE(config.bytecodeVersion.getMajor());
-  writer.writeLE(config.bytecodeVersion.getMinor());
-  writer.writeLE(config.bytecodeVersion.getTag());
+  writer.writeLE(config.getBytecodeVersion().getMajor());
+  writer.writeLE(config.getBytecodeVersion().getMinor());
+  writer.writeLE(config.getBytecodeVersion().getTag());
 
   return success();
 }
@@ -340,6 +336,11 @@ private:
 namespace {
 struct ConstantManager;
 struct FunctionTableWriter;
+
+/// Runtime version check for enum values, used by the generated type writers
+/// below and by the generated attribute writers further down.
+#define GEN_ENUM_VALUE_VERSION_CHECK
+#include "AttrBytecode.inc"
 
 struct TypeManager {
 public:
@@ -596,7 +597,7 @@ struct ConstantManager {
       // reader.
       auto tileType = dyn_cast<cuda_tile::TileType>(denseAttr.getType());
       if (tileType && tileType.getElementType().isInteger(1)) {
-        if (config.bytecodeVersion <
+        if (config.getBytecodeVersion() <
                 cuda_tile::BytecodeVersion::kCanonicalI1Version &&
             denseAttr.isSplat()) {
           char b = denseAttr.getSplatValue<bool>() ? static_cast<char>(0xff)
@@ -619,7 +620,6 @@ struct ConstantManager {
         return success();
       }
       // Non-i1 path: ride MLIR's raw buffer contract.
-      // Get the raw data buffer in little-endian format.
       ArrayRef<char> rawData = denseAttr.getRawData();
       // Write the size of the raw buffer.
       writer.writeVarInt(rawData.size());
@@ -696,10 +696,6 @@ private:
   const BytecodeWriterConfig &config;
 };
 
-/// Runtime version check for enum values used by generated attrs.
-#define GEN_ENUM_VALUE_VERSION_CHECK
-#include "AttrBytecode.inc"
-
 //===----------------------------------------------------------------------===//
 // DebugInfo Section
 //===----------------------------------------------------------------------===//
@@ -707,7 +703,8 @@ private:
 /// This class manages writing debug info attributes to bytecode format.
 class DebugInfoWriter {
 public:
-  DebugInfoWriter(StringManager &strMgr) : strMgr(strMgr) {}
+  DebugInfoWriter(StringManager &strMgr, const BytecodeWriterConfig &config)
+      : strMgr(strMgr), config(config) {}
 
   /// This method gets or creates an index for an operation.
   uint64_t getOpIndex(Operation *op) {
@@ -995,6 +992,7 @@ private:
   //  linkageNameIndex[varint] - StringAttr
   //  diCompileUnitIndex[varint] - DICompileUnitAttr
   //  scopeLine[varint] - unsigned
+  //  flags[varint] - DISubprogramFlags, only present for 13.5 and newer
   LogicalResult serialize(DISubprogramAttr diSubprogram,
                           EncodingWriter &writer) {
     writer.writeVarInt(Bytecode::DebugTag::DISubprogram);
@@ -1004,6 +1002,23 @@ private:
     writer.writeVarInt(strMgr.getStringIndex(diSubprogram.getLinkageName()));
     writer.writeVarInt(getDebugInfoIndex(diSubprogram.getCompileUnit()));
     writer.writeVarInt(diSubprogram.getScopeLine());
+
+    // Older readers have no flags field to fall back on, so a non-default value
+    // cannot be represented and must not be silently dropped.
+    DISubprogramFlags flags = diSubprogram.getFlags();
+    if (config.getBytecodeVersion() >=
+        BytecodeVersion::kMinDISubprogramFlagsVersion) {
+      writer.writeVarInt(static_cast<uint32_t>(flags));
+    } else if (flags != DISubprogramFlags::None) {
+      return emitError(UnknownLoc::get(diSubprogram.getContext()))
+             << "debug info subprogram '"
+             << diSubprogram.getLinkageName().getValue() << "' has flags '"
+             << stringifyDISubprogramFlags(flags)
+             << "' which require bytecode version "
+             << BytecodeVersion::kMinDISubprogramFlagsVersion.toString()
+             << " or newer, but the requested version is "
+             << config.getBytecodeVersion().toString();
+    }
     return success();
   }
 
@@ -1039,6 +1054,7 @@ private:
   }
 
   StringManager &strMgr;
+  const BytecodeWriterConfig &config;
   SmallVector<Attribute> debuginfoList;
   SmallVector<SmallVector<uint64_t>> debuginfoIndices;
   llvm::MapVector<const void *, uint64_t> diIndexMap;
@@ -1057,13 +1073,15 @@ private:
 // function-entry =:
 //   nameIndex[varint]         // Index into string table
 //   signatureIndex[varint]    // Index into type table
-//   entryFlag[byte]          // Bit 0: Visibility(0=Public,1=Private),
-//                             // Bit 1: Kind(0=Entry,1=Kernel)
+//   entryFlag[byte]           // Bit 0: Visibility(0=Public,1=Private)
+//                             // Bit 1: Kind(0=Function,1=Kernel)
+//                             // Bits [3:2]: Form for version 13.5+
 //   functionLocIndex[varint]  // Index into location table for function
 //                             // definition
-//   instruction location
-//   bodyLength[varint]        // Length of the function body in bytes
-//   functionBody[bytes]       // Function body data
+//   entryPayload              // Kind/form-specific attributes
+//   bodyLength[varint]        // Zero selects an extern FuncOp for FormNormal
+//   functionBody[bytes]       // Present when bodyLength is non-zero
+//   externConstParams         // Present after a zero FormNormal body length
 //
 // function-body =:
 //   instruction*
@@ -1097,10 +1115,10 @@ struct FunctionTableWriter {
     // Version checking for public operations.
     uint32_t opcodeValue = static_cast<uint32_t>(*opcode);
     if (!mlir::cuda_tile::detail::isOpcodeAvailableInVersion(
-            opcodeValue, config.bytecodeVersion)) {
+            opcodeValue, config.getBytecodeVersion())) {
       return op->emitError() << "operation '" << op->getName().getStringRef()
                              << "' is not available in bytecode version "
-                             << config.bytecodeVersion.toString();
+                             << config.getBytecodeVersion().toString();
     }
 
     writer.writeVarInt(*opcode);
@@ -1366,12 +1384,12 @@ public:
     } else if constexpr (is_cuda_tile_enum<T>::value) {
       // Check per-value version requirements.
       if (!isEnumValueAvailableInVersion<T>(nativeValue,
-                                            config.bytecodeVersion)) {
+                                            config.getBytecodeVersion())) {
         return emitErr("")
                << "enum value for attribute '" << attrName
                << "' is not available in bytecode version "
-               << static_cast<int>(config.bytecodeVersion.getMajor()) << "."
-               << static_cast<int>(config.bytecodeVersion.getMinor());
+               << static_cast<int>(config.getBytecodeVersion().getMajor()) << "."
+               << static_cast<int>(config.getBytecodeVersion().getMinor());
       }
       writer.writeVarInt(static_cast<uint64_t>(nativeValue));
       return success();
@@ -1478,7 +1496,17 @@ public:
       }
 
       FunctionMetadata meta{nameIndex, signatureIndex, functionLocIndex,
-                            isEntry, hints};
+                            isEntry, hints, func.getArgAttrsAttr()};
+#ifdef TILE_IR_INCLUDE_TESTS
+      meta.isTestingFunc = isa<cuda_tile::Test_FuncOp>(op);
+#endif // TILE_IR_INCLUDE_TESTS
+      meta.isExternImpl = isa<cuda_tile::ExternImplOp>(op);
+      if (auto funcOp = dyn_cast<cuda_tile::FuncOp>(op)) {
+        meta.isExternFunc = funcOp.getIsExtern();
+        if (meta.isExternFunc) {
+          meta.externFuncConstParams = funcOp.getConstParams();
+        }
+      }
       functionsMap[op] = meta;
     }
     return success();
@@ -1505,30 +1533,125 @@ public:
       sectionWriter.writeVarInt(meta.signatureIndex);
       // Write entryFlag.
       uint8_t entryFlag = 0;
-      // Visibility (Bit 0) is set if the function is not public.
-      if (auto sym = dyn_cast<SymbolOpInterface>(op)) {
-        if (sym.getVisibility() != SymbolTable::Visibility::Public) {
-          entryFlag |=
-              static_cast<uint8_t>(Bytecode::FunctionFlags::VisibilityPrivate);
-        }
+      // Bit 0 only distinguishes public from private. `nested` has no encoding,
+      // so reject it instead of narrowing it to private.
+      auto sym = cast<SymbolOpInterface>(op);
+      switch (sym.getVisibility()) {
+      case SymbolTable::Visibility::Public:
+        break;
+      case SymbolTable::Visibility::Private:
+        entryFlag |=
+            static_cast<uint8_t>(Bytecode::FunctionFlags::VisibilityPrivate);
+        break;
+      case SymbolTable::Visibility::Nested:
+        return op->emitError()
+               << "symbol `" << sym.getName()
+               << "` uses nested symbol visibility, which cannot be encoded in "
+                  "bytecode";
       }
       if (meta.isEntry) {
         entryFlag |= static_cast<uint8_t>(Bytecode::FunctionFlags::KindKernel);
-        if (meta.hints) {
+        // Pre-13.5: presence bit. At 13.5+ hints are always written for
+        // entries.
+        if (meta.hints && config.getBytecodeVersion() <
+                              BytecodeVersion::kFunctionFlagsFormVersion) {
           entryFlag |= static_cast<uint8_t>(
               Bytecode::FunctionFlags::HasOptimizationHints);
         }
       }
+      bool requiresFormLayout = meta.isExternImpl || meta.isExternFunc;
+#ifdef TILE_IR_INCLUDE_TESTS
+      requiresFormLayout |= meta.isTestingFunc;
+#endif // TILE_IR_INCLUDE_TESTS
+      if (requiresFormLayout &&
+          config.getBytecodeVersion() <
+              BytecodeVersion::kFunctionFlagsFormVersion) {
+        return op->emitError()
+               << "function table entry requires bytecode version "
+               << BytecodeVersion::kFunctionFlagsFormVersion.toString();
+      }
+      if (config.getBytecodeVersion() >=
+          BytecodeVersion::kFunctionFlagsFormVersion) {
+        // Form layout. Extern FuncOp stays FormNormal; body length 0 selects
+        // the extern path.
+        if (meta.isExternImpl) {
+          entryFlag |=
+              static_cast<uint8_t>(Bytecode::FunctionFlags::FormExternImpl);
+        }
+#ifdef TILE_IR_INCLUDE_TESTS
+        else if (meta.isTestingFunc) {
+          entryFlag |=
+              static_cast<uint8_t>(Bytecode::FunctionFlags::FormTesting);
+        }
+#endif // TILE_IR_INCLUDE_TESTS
+      }
+
       sectionWriter.writeByte(entryFlag);
       // Continue writing other metadata.
       sectionWriter.writeVarInt(meta.functionLocIndex);
 
-      if (meta.isEntry && meta.hints) {
-        if (failed(writeSelfContainedAttribute(op, kOptimizationHints,
-                                               meta.hints, sectionWriter,
-                                               typeMgr, constMgr, strMgr))) {
+      if (meta.isEntry && (config.getBytecodeVersion() >=
+                               BytecodeVersion::kFunctionFlagsFormVersion ||
+                           meta.hints)) {
+        Attribute hints = meta.hints;
+        if (!hints) {
+          hints = cuda_tile::OptimizationHintsAttr::get(
+              op->getContext(), DictionaryAttr::get(op->getContext()));
+        }
+        if (failed(writeSelfContainedAttribute(op, kOptimizationHints, hints,
+                                               sectionWriter, typeMgr, constMgr,
+                                               strMgr))) {
           return failure();
         }
+      }
+
+      // Bodiless function-like ops emit their generated op payload followed by
+      // a zero body length.
+      if (meta.isExternImpl) {
+        if (failed(dispatchOpWriter(op, sectionWriter, typeMgr, constMgr,
+                                    strMgr, config))) {
+          return failure();
+        }
+        sectionWriter.writeVarInt(0);
+        continue;
+      }
+
+      // Below 13.5 the function table has no arg_attrs field, and the generated
+      // per-op gate never runs for function-like ops. Refuse rather than drop
+      // them silently. At 13.5+ the field is positional, so always write it.
+      if (config.getBytecodeVersion() < BytecodeVersion::kMinArgAttrsVersion) {
+        if (meta.argAttrs) {
+          return op->emitError()
+                 << "argument attributes require bytecode version "
+                 << BytecodeVersion::kMinArgAttrsVersion.toString()
+                 << ", targeting " << config.getBytecodeVersion().toString();
+        }
+      } else {
+        // If the attribute is null, replace it with an empty array.
+        auto argAttrs = meta.argAttrs;
+        if (!argAttrs) {
+          argAttrs = ArrayAttr::get(op->getContext(), {});
+        }
+        if (failed(writeSelfContainedAttribute(op, "arg_attrs", argAttrs,
+                                               sectionWriter, typeMgr, constMgr,
+                                               strMgr))) {
+          return failure();
+        }
+      }
+
+      if (meta.isExternFunc) {
+        // Form layout: body length 0, then always-present const_params.
+        sectionWriter.writeVarInt(0);
+        ArrayAttr constParams = meta.externFuncConstParams;
+        if (!constParams) {
+          constParams = ArrayAttr::get(op->getContext(), {});
+        }
+        if (failed(writeSelfContainedAttribute(op, "const_params", constParams,
+                                               sectionWriter, typeMgr, constMgr,
+                                               strMgr))) {
+          return failure();
+        }
+        continue;
       }
 
       SmallVector<char> functionBody;
@@ -1620,6 +1743,13 @@ private:
     uint64_t functionLocIndex;
     bool isEntry;
     Attribute hints;
+    ArrayAttr argAttrs;
+    bool isExternImpl = false;
+    bool isExternFunc = false;
+#ifdef TILE_IR_INCLUDE_TESTS
+    bool isTestingFunc = false;
+#endif // TILE_IR_INCLUDE_TESTS
+    ArrayAttr externFuncConstParams = {};
   };
   llvm::MapVector<Operation *, FunctionMetadata> functionsMap;
   TypeManager &typeMgr;
@@ -1666,20 +1796,20 @@ writeGlobalSection(raw_ostream &stream, cuda_tile::ModuleOp module,
   for (cuda_tile::GlobalOp globalOp : globals) {
     // Global symbol visibility and the `constant` flag exist only in bytecode
     // 13.3+. Refuse to emit older versions if we would silently lose semantics.
-    if (config.bytecodeVersion < kMinGlobalExtendedFields) {
+    if (config.getBytecodeVersion() < kMinGlobalExtendedFields) {
       if (globalOp.getSymbolVisibility() != SymbolVisibility::Public) {
         return globalOp.emitError() << "global `" << globalOp.getSymName()
                                     << "` uses non-public symbol visibility, "
                                        "which cannot be encoded "
                                        "in bytecode version "
-                                    << config.bytecodeVersion.toString()
+                                    << config.getBytecodeVersion().toString()
                                     << " (requires bytecode 13.3+)";
       }
       if (globalOp.getConstant()) {
         return globalOp.emitError()
                << "constant global `" << globalOp.getSymName()
                << "` cannot be encoded in bytecode version "
-               << config.bytecodeVersion.toString()
+               << config.getBytecodeVersion().toString()
                << " (the `constant` attribute requires bytecode 13.3+)";
       }
     }
@@ -1702,10 +1832,10 @@ writeGlobalSection(raw_ostream &stream, cuda_tile::ModuleOp module,
     // 4. Write alignment.
     sectionWriter.writeVarInt(globalOp.getAlignment());
 
-    // 5–6. Symbol visibility and constant flag (bytecode 13.3+ only). Must
+    // 5-6. Symbol visibility and constant flag (bytecode 13.3+ only). Must
     // match parseGlobalSection: older versions read exactly four varints per
     // global.
-    if (config.bytecodeVersion >= kMinGlobalExtendedFields) {
+    if (config.getBytecodeVersion() >= kMinGlobalExtendedFields) {
       sectionWriter.writeVarInt(
           static_cast<uint32_t>(globalOp.getSymbolVisibility()));
       sectionWriter.writeVarInt(static_cast<uint32_t>(globalOp.getConstant()));
@@ -1737,7 +1867,7 @@ static LogicalResult writeProducerSection(raw_ostream &stream,
   // Producer section is only available in version 13.3+.
   static const auto kMinProducerVersion =
       *BytecodeVersion::fromVersion(13, 3, 0);
-  if (config.bytecodeVersion < kMinProducerVersion) {
+  if (config.getBytecodeVersion() < kMinProducerVersion) {
     return success();
   }
 
@@ -1769,9 +1899,9 @@ static LogicalResult writeProducerSection(raw_ostream &stream,
 
 LogicalResult cuda_tile::writeBytecode(raw_ostream &os,
                                        cuda_tile::ModuleOp module,
-                                       BytecodeVersion targetVersion) {
+                                       const BytecodeWriterConfig &configIn) {
   // Verify the module (e.g. optimization hints when -Wunsupported-hints
-  // -Werr-hints are set). Caller must set dialect flags before calling.
+  // -Werr-hints are set).
   if (failed(verify(module.getOperation()))) {
     return failure();
   }
@@ -1782,8 +1912,40 @@ LogicalResult cuda_tile::writeBytecode(raw_ostream &os,
     return failure();
   }
 
+  BytecodeWriterConfig config = configIn;
+
+  // Public-preview content is intentionally non-portable across versions: when
+  // present, it can only be emitted with the explicit opt-in, is version-locked
+  // to the current version, and is flagged in the header's version tag so a
+  // reader can detect it up front.
+  PreviewFeatures requiredPreviewFeatures =
+      getRequiredPreviewFeatures(module.getOperation());
+  if (!requiredPreviewFeatures.empty()) {
+    // Preview content is only valid at the current version. If the caller
+    // explicitly asked for a different version, that is a conflict.
+    const BytecodeVersion &current = BytecodeVersion::kCurrentVersion;
+    if (config.isVersionExplicitlySet() &&
+        (config.getBytecodeVersion().getMajor() != current.getMajor() ||
+         config.getBytecodeVersion().getMinor() != current.getMinor())) {
+      return module->emitError()
+             << "module contains public-preview content, which is only "
+                "valid at the current bytecode version "
+             << current.toString() << ", but version "
+             << config.getBytecodeVersion().toString()
+             << " was explicitly requested";
+    }
+    std::optional<BytecodeVersion> previewVersion = BytecodeVersion::fromVersion(
+        current.getMajor(), current.getMinor(),
+        Bytecode::VersionTag::kContainsPreview);
+    assert(previewVersion && "current version must always be valid");
+    // Version-lock to the preview-tagged current version. Rebuild the config
+    // rather than mutating the version in place so the version/explicitness
+    // pair stays consistent.
+    config = BytecodeWriterConfig(*previewVersion,
+                                  config.isVersionExplicitlySet());
+  }
+
   // Write the header of the bytecode file.
-  BytecodeWriterConfig config{targetVersion};
   if (failed(writeHeader(os, module, config))) {
     return failure();
   }
@@ -1793,7 +1955,7 @@ LogicalResult cuda_tile::writeBytecode(raw_ostream &os,
   TypeManager typeMgr(config, stringMgr);
   ConstantManager constantMgr(config);
   typeMgr.setConstantManager(constantMgr);
-  DebugInfoWriter debuginfo(stringMgr);
+  DebugInfoWriter debuginfo(stringMgr, config);
 
   // Collect all function information to populate the type, string, and constant
   // tables

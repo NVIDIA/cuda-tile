@@ -9,8 +9,11 @@ add_mlir_library(CudaTileTransforms
 
   LINK_LIBS PUBLIC
   CudaTileDialect
+  MLIRAnalysis
+  MLIRPass
   MLIRTransforms
 
   LINK_COMPONENTS
+  Core
   Support
 )

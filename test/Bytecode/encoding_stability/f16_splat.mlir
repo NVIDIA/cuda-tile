@@ -2,7 +2,7 @@
 // Uses an asymmetric value so any single-bit shift in the raw layout flips
 // it to a clearly-wrong number.
 
-// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module %s -o %t.bc
+// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module -bytecode-version=13.4 %s -o %t.bc
 // RUN: cmp %t.bc %S/goldens/f16_splat.golden.tileirbc
 
 cuda_tile.module @kernels {

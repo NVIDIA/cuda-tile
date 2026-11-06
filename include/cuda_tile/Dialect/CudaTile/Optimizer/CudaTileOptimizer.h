@@ -18,6 +18,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 
 #include "cuda_tile/Dialect/CudaTile/IR/Ops.h"
+#include "cuda_tile/Dialect/CudaTile/IR/PreviewFeatures.h"
 #include <cstdint>
 #include <string>
 
@@ -75,8 +76,8 @@ void registerTileIROptPasses();
 /// \param pm The pass manager to populate
 ///           (expected OpPassManager on cuda_tile::ModuleOp)
 /// \param opts Optimization options controlling which passes to include
-void buildCudaTilePipeline(OpPassManager &pm,
-                           const TileIROptimizerOptions &opts);
+void buildCudaTileOptimizationPipeline(OpPassManager &pm,
+                                       const TileIROptimizerOptions &opts);
 
 LogicalResult optimizeTileIRModule(ModuleOp module,
                                    const TileIROptimizerOptions &opts,
@@ -130,6 +131,9 @@ struct TileIROptimizerConfig {
 
   // Optimization pipeline configuration.
   TileIROptimizerOptions opt;
+
+  // Independently enabled public-preview features.
+  PreviewFeatures previewFeatures;
 
   // Enable verbose output
   bool verbose = false;

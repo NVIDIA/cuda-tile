@@ -19,6 +19,13 @@
 using namespace mlir;
 using namespace mlir::cuda_tile;
 
+static void registerConfiguredCudaTileDialect(DialectRegistry &registry) {
+  registry.insert<CudaTileDialect>();
+  registry.addExtension(+[](MLIRContext *, CudaTileDialect *dialect) {
+    dialect->setEnabledPreviewFeatures(getPreviewFeaturesFromCommandLine());
+  });
+}
+
 //===----------------------------------------------------------------------===//
 // Deserialization registration
 //===----------------------------------------------------------------------===//
@@ -39,7 +46,9 @@ static void registerFromTileIRBytecodeTranslation() {
       [](llvm::StringRef bytecode, MLIRContext *context) {
         return deserializeModule(bytecode, context);
       },
-      [](DialectRegistry &registry) { registry.insert<CudaTileDialect>(); });
+      [](DialectRegistry &registry) {
+        registerConfiguredCudaTileDialect(registry);
+      });
 }
 
 //===----------------------------------------------------------------------===//
@@ -77,9 +86,13 @@ static void registerToTileIRBytecodeTranslation() {
             cast<CudaTileDialect>(moduleOp->getOperation()->getDialect());
         dialect->setWarnUnsupportedHints(getWarnUnsupportedHints());
         dialect->setErrorOnHints(getErrorUnsupportedHints());
-        return writeBytecode(output, *moduleOp, targetVersion);
+        BytecodeWriterConfig writerConfig(targetVersion,
+                                          isBytecodeVersionExplicitlySet());
+        return writeBytecode(output, *moduleOp, writerConfig);
       },
-      [](DialectRegistry &registry) { registry.insert<CudaTileDialect>(); });
+      [](DialectRegistry &registry) {
+        registerConfiguredCudaTileDialect(registry);
+      });
 }
 
 //===----------------------------------------------------------------------===//
@@ -105,7 +118,9 @@ static void registerMinVersionAnalysis() {
         output << minVersion->toString() << "\n";
         return success();
       },
-      [](DialectRegistry &registry) { registry.insert<CudaTileDialect>(); });
+      [](DialectRegistry &registry) {
+        registerConfiguredCudaTileDialect(registry);
+      });
 }
 
 void mlir::cuda_tile::registerTileIRTranslations() {

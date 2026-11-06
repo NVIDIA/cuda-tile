@@ -20,6 +20,8 @@
 
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
 
 #include "../BytecodeEnums.h"
@@ -27,12 +29,22 @@
 #include "cuda_tile/Bytecode/Common/BytecodeVerification.h"
 #include "cuda_tile/Bytecode/Common/Version.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Attributes.h"
+#include "cuda_tile/Dialect/CudaTile/IR/Dialect.h"
+#include "cuda_tile/Dialect/CudaTile/IR/PreviewFeatures.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Types.h"
 #include <optional>
 
 using namespace mlir;
 using namespace mlir::cuda_tile;
 using namespace mlir::cuda_tile::Bytecode;
+
+// Auto-generated public-preview attribute classifiers.
+#define GEN_PREVIEW_ATTR_CLASSIFICATION
+#include "../Writer/AttrBytecode.inc"
+
+// Auto-generated public-preview type classifiers.
+#define GEN_PREVIEW_TYPE_CLASSIFICATION
+#include "../Writer/TypeBytecode.inc"
 
 //===----------------------------------------------------------------------===//
 // Bytecode Header Utilities
@@ -349,6 +361,10 @@ static LogicalResult parseHeader(EncodingReader &reader, MLIRContext &context,
            << BytecodeVersion::kMinSupportedVersion.toString() << " - "
            << BytecodeVersion::kCurrentVersion.toString() << "]";
   }
+  if (uint16_t unknown = tag & ~Bytecode::VersionTag::kKnownVersionTagMask) {
+    return reader.emitError() << "header has unrecognized version tag bits (0x"
+                              << llvm::utohexstr(unknown) << ");";
+  }
   version = *versionInfo;
   return success();
 }
@@ -481,10 +497,18 @@ static LogicalResult parseStringSection(ArrayRef<uint8_t> payload,
 #define GEN_ENUM_ATTR_VERSION_CHECK
 #include "../Writer/AttrBytecode.inc"
 
-/// Generic helper to parse an enum attribute.
+// Auto-generated per-case version checking for enum values.
+#define GEN_ENUM_VALUE_VERSION_CHECK
+#include "../Writer/AttrBytecode.inc"
+
+/// Generic helper to parse an enum attribute. `fileVersion` is the version the
+/// buffer claims: a case introduced after it cannot legitimately appear, and
+/// accepting one anyway would make the meaning of a file depend on which reader
+/// opened it.
 template <typename AttrType>
 static LogicalResult parseGenericEnumAttr(EncodingReader &reader,
                                           MLIRContext &context,
+                                          const BytecodeVersion &fileVersion,
                                           AttrType &nativeValue) {
   uint64_t rawEnumValueU64;
   if (failed(reader.readVarInt(rawEnumValueU64))) {
@@ -499,6 +523,11 @@ static LogicalResult parseGenericEnumAttr(EncodingReader &reader,
   if (!enumOpt) {
     return reader.emitError()
            << "invalid integer value for enum type: " << rawEnumValue;
+  }
+  if (!isEnumValueAvailableInVersion<EnumType>(*enumOpt, fileVersion)) {
+    return reader.emitError() << "enum value " << rawEnumValue
+                              << " is not available in bytecode version "
+                              << fileVersion.toString();
   }
   nativeValue = AttrType::get(&context, enumOpt.value());
   return success();
@@ -578,6 +607,14 @@ public:
     uint64_t typeTag;
     if (failed(typeReader.readVarInt(typeTag))) {
       return nullptr;
+    }
+    if (mlir::cuda_tile::detail::isPreviewTypeTag(typeTag) &&
+        !(fileVersion.getTag() & Bytecode::VersionTag::kContainsPreview)) {
+      typeReader.emitError()
+          << "malformed bytecode: encountered public-preview type tag "
+          << typeTag
+          << " but the header does not advertise preview content";
+      return Type();
     }
     ArrayRef<uint8_t> payloadBytes;
     if (typeReader.remaining() > 0) {
@@ -958,17 +995,19 @@ parseConstantSection(ArrayRef<uint8_t> payload,
   return success();
 }
 
-namespace {
-
 //===----------------------------------------------------------------------===//
 // DebugInfo Section
 //===----------------------------------------------------------------------===//
 
+namespace {
+
 /// This class manages reading debug info attributes from bytecode format.
 class DebugInfoReader {
 public:
-  DebugInfoReader(MLIRContext &context, EncodingReader &masterReader)
-      : context(context), masterReader(masterReader) {}
+  DebugInfoReader(MLIRContext &context, EncodingReader &masterReader,
+                  const BytecodeVersion &bytecodeVersion)
+      : context(context), masterReader(masterReader),
+        bytecodeVersion(bytecodeVersion) {}
 
   class Iterator {
   public:
@@ -1230,6 +1269,7 @@ private:
   //  linkageNameIndex[varint] - StringAttr
   //  diCompileUnitIndex[varint] - DICompileUnitAttr
   //  scopeLine[varint] - unsigned
+  //  flags[varint] - DISubprogramFlags, only present for 13.5 and newer
   LogicalResult parseDISubprogram(EncodingReader &reader,
                                   Attribute &diSubprogram) {
     auto file = readAndGetDebugInfo<DIFileAttr>(reader);
@@ -1270,8 +1310,33 @@ private:
                                    "parsing DISubprogramAttr";
     }
 
-    diSubprogram = DISubprogramAttr::get(&context, file, line, name,
-                                         linkageName, compileUnit, scopeLine);
+    // Bytecode older than 13.5 carries no flags field; such a subprogram is
+    // never a declaration, which is what `None` encodes.
+    DISubprogramFlags flags = DISubprogramFlags::None;
+    if (bytecodeVersion >= BytecodeVersion::kMinDISubprogramFlagsVersion) {
+      uint64_t rawFlags;
+      if (failed(reader.readVarInt(rawFlags))) {
+        return reader.emitError()
+               << "failed to read flags when parsing DISubprogramAttr";
+      }
+      // symbolize rejects any bit this build does not declare, so the accepted
+      // set tracks AttrDefs.td instead of a mask that has to be updated by hand
+      // every time a flag is added.
+      std::optional<DISubprogramFlags> parsedFlags;
+      if (rawFlags <= std::numeric_limits<uint32_t>::max()) {
+        parsedFlags =
+            symbolizeDISubprogramFlags(static_cast<uint32_t>(rawFlags));
+      }
+      if (!parsedFlags) {
+        return reader.emitError()
+               << "unrecognized flag bits (0x" << llvm::utohexstr(rawFlags)
+               << ") when parsing DISubprogramAttr";
+      }
+      flags = *parsedFlags;
+    }
+
+    diSubprogram = DISubprogramAttr::get(
+        &context, file, line, name, linkageName, compileUnit, scopeLine, flags);
     return success();
   }
 
@@ -1332,6 +1397,7 @@ private:
   ArrayRef<uint32_t> diOffsets;
   std::vector<Attribute> diCache;
   EncodingReader &masterReader;
+  BytecodeVersion bytecodeVersion;
   DenseSet<uint64_t> currentlyParsing;
 };
 } // namespace
@@ -1346,32 +1412,32 @@ private:
 
 namespace {
 
+/// Decoded operation data that can either be materialized immediately or
+/// retained by a higher-level section reader.
+struct ParsedOperation {
+  OperationState state;
+  std::optional<size_t> numResultsForValueIndex;
+};
+
 class InstructionParser {
   //===----------------------------------------------------------------------===//
   // Helper for Operation Creation and Result Handling
   //===----------------------------------------------------------------------===//
-  /// Creates an operation using OperationState and pushes its results to the
-  /// valueIndexList. The numResultsForValueIndex parameter controls how many
-  /// results are added to valueIndexList.
+  /// Creates an operation and pushes its results to the valueIndexList. The
+  /// numResultsForValueIndex parameter controls how many results are added to
+  /// valueIndexList.
   static LogicalResult createOperationGeneric(
-      OpBuilder &builder, Location loc, StringRef opNameStr,
-      ArrayRef<Type> resultTypes, ArrayRef<Value> operands,
-      ArrayRef<NamedAttribute> attributes, std::vector<Value> &valueIndexList,
-      SmallVectorImpl<std::unique_ptr<Region>> &parsedRegions,
+      OpBuilder &builder, const OperationState &state,
+      std::vector<Value> &valueIndexList,
       std::optional<size_t> numResultsForValueIndex = std::nullopt) {
-    OperationState state(loc, opNameStr, operands, resultTypes, attributes);
+    Operation *op = builder.insert(Operation::create(state));
 
-    // Add parsed regions to the operation state.
-    for (auto &region_ptr : parsedRegions) {
-      state.addRegion(std::move(region_ptr));
-    }
-
-    Operation *op = builder.create(state);
-    // Operation creation using OperationState can fail if verification fails.
+    // Operation creation can fail if verification fails.
     // Emit an error noting the failure.
     if (!op) {
-      return ::emitError(loc) << "failed to create operation '" << opNameStr
-                              << "'due to verification error.";
+      return ::emitError(state.location)
+             << "failed to create operation '" << state.name.getStringRef()
+             << "'due to verification error.";
     }
     // Add results to the value index list. Only add numResultsForValueIndex
     // results if specified (for backward compat with older bytecode that
@@ -1384,6 +1450,19 @@ class InstructionParser {
     return success();
   }
 
+public:
+  /// Materializes a generated operation parser's result and records its
+  /// serialized results for subsequent operand decoding.
+  static LogicalResult
+  materializeParsedOperation(OpBuilder &builder,
+                             ParsedOperation &&parsedOperation,
+                             std::vector<Value> &valueIndexList) {
+    return createOperationGeneric(builder, parsedOperation.state,
+                                  valueIndexList,
+                                  parsedOperation.numResultsForValueIndex);
+  }
+
+private:
   /// Parses operand indices and returns the corresponding Values from the
   /// valueIndexList. If numOperandsToRead is std::nullopt, it first reads the
   /// number of operands as a VarInt. Otherwise, it uses the provided count.
@@ -1876,7 +1955,8 @@ class InstructionParser {
                << "enum attribute type is not available in bytecode version "
                << types.getFileVersion().toString();
       }
-      return parseGenericEnumAttr(reader, context, nativeValue);
+      return parseGenericEnumAttr(reader, context, types.getFileVersion(),
+                                  nativeValue);
     } else if constexpr (std::is_base_of_v<DenseElementsAttr, T> ||
                          std::is_same_v<T, DenseElementsAttr>) {
       if (!expectedType) {
@@ -2041,6 +2121,16 @@ public:
              << "failed to read AttributeTag for self-contained attribute.";
     }
 
+    if (mlir::cuda_tile::detail::isPreviewAttributeTag(attributeTag) &&
+        !(types.getFileVersion().getTag() &
+          Bytecode::VersionTag::kContainsPreview)) {
+      return reader.emitError()
+             << "malformed bytecode: encountered public-preview attribute "
+                "tag "
+             << attributeTag
+             << " but the header does not advertise preview content";
+    }
+
     auto parseAttr = [&](auto &attr) {
       if (failed(parseOpAttribute(reader, context, types, constants, constCache,
                                   attr, nullptr))) {
@@ -2123,6 +2213,18 @@ public:
              << bytecodeVersion.toString();
     }
 
+    // Preview opcodes require the header's preview version tag (the writer
+    // always sets it). Per-feature opt-in is checked after decoding, when the
+    // owning feature is known.
+    if (mlir::cuda_tile::detail::isPreviewOpcode(opcodeValue) &&
+        !(bytecodeVersion.getTag() &
+          Bytecode::VersionTag::kContainsPreview)) {
+      return reader.emitError()
+             << "malformed bytecode: encountered public-preview opcode "
+             << opcodeValue
+             << " but the header does not advertise preview content";
+    }
+
     // Get the location for this operation.
     auto loc = diIterator.next<LocationAttr>();
     if (!loc) {
@@ -2134,7 +2236,7 @@ public:
 #define GEN_OP_READER_DISPATCH
 #include "BytecodeReader.inc"
 
-    return success();
+    llvm_unreachable("opcode dispatch always returns");
   }
 };
 
@@ -2315,6 +2417,9 @@ static LogicalResult parseDebugSection(ArrayRef<uint8_t> payload,
 // function-body =:
 //   instruction*
 //
+// Bodiless extern implementation entries inline their op payload after the
+// entry header. They are decoded into OperationState during table parsing and
+// materialized later, in function-table order.
 //
 namespace {
 struct FunctionInfo {
@@ -2325,6 +2430,14 @@ struct FunctionInfo {
   uint64_t lengthOfFunction;
   StringRef functionBody;
   Attribute optimizationHints;
+  ArrayAttr argAttrs;
+  bool isExternFunc = false;
+  ArrayAttr constParams;
+#ifdef TILE_IR_INCLUDE_TESTS
+  bool isTestingFunc = false;
+#endif // TILE_IR_INCLUDE_TESTS
+  bool isExternImpl = false;
+  std::optional<ParsedOperation> deferredOperation;
 };
 } // end anonymous namespace
 
@@ -2380,9 +2493,12 @@ static LogicalResult parseFunctionTableSection(
     }
     // Reject bytecode that sets flag bits this build does not recognize.
     {
-      uint8_t allowedMask = Bytecode::kPublicFunctionFlagsMask;
-      if (bytecodeVersion < BytecodeVersion::kFunctionFlagsExtendedVersion) {
-        allowedMask = 0xFF;
+      uint8_t allowedMask = 0xFF;
+      if (bytecodeVersion >= BytecodeVersion::kFunctionFlagsFormVersion) {
+        allowedMask = Bytecode::kFunctionFlagsFormLayoutMask;
+      } else if (bytecodeVersion >=
+                 BytecodeVersion::kFunctionFlagsExtendedVersion) {
+        allowedMask = Bytecode::kFunctionFlagsPreFormMask;
       }
       if (uint8_t unknown = funcInfo.entryFlag & ~allowedMask) {
         return sectionReader.emitError()
@@ -2391,18 +2507,106 @@ static LogicalResult parseFunctionTableSection(
       }
     }
 
-    // Read optimization hints if the flag is set for EntryOp.
     bool isEntry =
         (funcInfo.entryFlag &
          static_cast<uint8_t>(Bytecode::FunctionFlags::KindKernel)) != 0;
+    bool isExternImpl = false;
+
+    if (bytecodeVersion >= BytecodeVersion::kFunctionFlagsFormVersion) {
+      uint8_t form = funcInfo.entryFlag &
+                     static_cast<uint8_t>(Bytecode::FunctionFlags::FormMask);
+      if (form == static_cast<uint8_t>(Bytecode::FunctionFlags::FormReserved)) {
+        return sectionReader.emitError()
+               << "function entry has reserved form value";
+      }
+      isExternImpl =
+          form == static_cast<uint8_t>(Bytecode::FunctionFlags::FormExternImpl);
+#ifdef TILE_IR_INCLUDE_TESTS
+      funcInfo.isTestingFunc =
+          form == static_cast<uint8_t>(Bytecode::FunctionFlags::FormTesting);
+      if (funcInfo.isTestingFunc && isEntry) {
+        return sectionReader.emitError()
+               << "function cannot be both testing func and kernel entry";
+      }
+      if (funcInfo.isTestingFunc && isExternImpl) {
+        return sectionReader.emitError()
+               << "function cannot be both testing func and extern impl";
+      }
+#else
+      if (form == static_cast<uint8_t>(Bytecode::FunctionFlags::FormTesting)) {
+        return sectionReader.emitError()
+               << "function entry has testing form in non-test build";
+      }
+#endif // TILE_IR_INCLUDE_TESTS
+      if (isExternImpl && isEntry) {
+        return sectionReader.emitError()
+               << "function entry cannot be both kernel and extern impl";
+      }
+    }
+
+    if (isExternImpl) {
+      auto diIterator = debuginfo.getIterator(funcInfo.functionLocIndex);
+      LocationAttr externImplLoc = diIterator.next<LocationAttr>();
+      if (!externImplLoc) {
+        return sectionReader.emitError()
+               << "failed to read extern implementation location (locIndex="
+               << funcInfo.functionLocIndex << ")";
+      }
+      // Generated parser signature requires a value-index list, but
+      // extern implementations are bodiless so it stays empty.
+      std::vector<Value> dummyValueIndexList;
+
+      FailureOr<ParsedOperation> parsedOperation =
+          InstructionParser::parseExternImplOp(
+              sectionReader, moduleBuilder, externImplLoc, dummyValueIndexList,
+              constants, types, constCache, diIterator, context,
+              bytecodeVersion);
+      if (failed(parsedOperation)) {
+        return sectionReader.emitError()
+               << "failed to parse extern implementation in function table";
+      }
+
+      // Extern implementations are bodiless; the writer emits body length 0.
+      // Reject any non-zero length as malformed bytecode.
+      if (failed(sectionReader.readVarInt(funcInfo.lengthOfFunction))) {
+        return failure();
+      }
+      if (funcInfo.lengthOfFunction != 0) {
+        return sectionReader.emitError()
+               << "extern implementation entry has non-zero body length ("
+               << funcInfo.lengthOfFunction
+               << "); bodiless extern implementations must have body length 0";
+      }
+      funcInfo.isExternImpl = true;
+      funcInfo.deferredOperation.emplace(std::move(*parsedOperation));
+      functionInfoList.emplace_back(std::move(funcInfo));
+      continue;
+    }
+
+    // Optimization hints: always present for KindKernel at 13.5+; before that
+    // gated by HasOptimizationHints.
     bool hasOptHints =
         (funcInfo.entryFlag &
          static_cast<uint8_t>(Bytecode::FunctionFlags::HasOptimizationHints)) !=
         0;
-    if (isEntry && hasOptHints) {
+    bool readOptHints =
+        isEntry &&
+        (bytecodeVersion >= BytecodeVersion::kFunctionFlagsFormVersion ||
+         hasOptHints);
+    if (readOptHints) {
       if (failed(InstructionParser::parseSelfContainedOpAttribute(
               sectionReader, context, types, constants, constCache,
               funcInfo.optimizationHints))) {
+        return failure();
+      }
+    }
+
+    // Read the arg attrs if the bytecode version is new enough. This is written
+    // just after the loc index.
+    if (bytecodeVersion >= BytecodeVersion::kMinArgAttrsVersion) {
+      if (failed(InstructionParser::parseSelfContainedOpAttribute(
+              sectionReader, context, types, constants, constCache,
+              funcInfo.argAttrs))) {
         return failure();
       }
     }
@@ -2428,6 +2632,30 @@ static LogicalResult parseFunctionTableSection(
              << sectionReader.remaining() << " bytes)";
     }
 
+    // 13.5+ Form layout: a Normal (non-kernel, non-testing) entry with body
+    // length 0 is an extern FuncOp; const_params always follow.
+    bool isTestingFunc = false;
+#ifdef TILE_IR_INCLUDE_TESTS
+    isTestingFunc = funcInfo.isTestingFunc;
+#endif // TILE_IR_INCLUDE_TESTS
+    if (bytecodeVersion >= BytecodeVersion::kFunctionFlagsFormVersion &&
+        !isEntry && !isTestingFunc && funcInfo.lengthOfFunction == 0) {
+      funcInfo.isExternFunc = true;
+      Attribute constParamsAttr;
+      if (failed(InstructionParser::parseSelfContainedOpAttribute(
+              sectionReader, context, types, constants, constCache,
+              constParamsAttr))) {
+        return failure();
+      }
+      funcInfo.constParams = dyn_cast<ArrayAttr>(constParamsAttr);
+      if (!funcInfo.constParams) {
+        return sectionReader.emitError()
+               << "extern function const params payload is not an ArrayAttr";
+      }
+      functionInfoList.emplace_back(std::move(funcInfo));
+      continue;
+    }
+
     // Read the function body as raw bytes.
     ArrayRef<uint8_t> bodyBytes;
     if (failed(sectionReader.readBytes(funcInfo.lengthOfFunction, bodyBytes))) {
@@ -2444,7 +2672,7 @@ static LogicalResult parseFunctionTableSection(
         StringRef(reinterpret_cast<const char *>(bodyBytes.data()),
                   funcInfo.lengthOfFunction);
 
-    functionInfoList.emplace_back(funcInfo);
+    functionInfoList.emplace_back(std::move(funcInfo));
   }
   return success();
 }
@@ -2520,21 +2748,22 @@ static LogicalResult createFunction(
       (funcInfo.entryFlag &
        static_cast<uint8_t>(Bytecode::FunctionFlags::KindKernel)) != 0;
 
-  SmallVector<Attribute, 4> argAttrs;
-  argAttrs.reserve(funcType.getNumInputs());
-  for (size_t i = 0; i < funcType.getNumInputs(); ++i) {
-    argAttrs.emplace_back(builder.getDictionaryAttr({}));
+  // Match the textual parser: an all-empty payload becomes no attribute, so a
+  // round-trip preserves the IR shape and presence still implies 13.5.
+  ArrayAttr funcArgAttrs;
+  if (funcInfo.argAttrs) {
+    funcArgAttrs = cuda_tile::buildNormalizedArgAttrs(
+        builder, funcInfo.argAttrs.getValue());
   }
   SmallVector<Attribute, 4> retAttrs;
   retAttrs.reserve(funcType.getNumResults());
-  ArrayAttr funcArgAttrs = builder.getArrayAttr(argAttrs);
   for (size_t i = 0; i < funcType.getNumResults(); ++i) {
     retAttrs.emplace_back(builder.getDictionaryAttr({}));
   }
   ArrayAttr funcRetAttrs = builder.getArrayAttr(retAttrs);
 
   // Create the appropriate operation type
-  mlir::FunctionOpInterface funcOpIFace;
+  FunctionOpInterface funcOpIFace;
   if (isEntry) {
     // Use optimization hints from bytecode if present. We do not
     // inject a default empty `OptimizationHintsAttr` when the
@@ -2560,14 +2789,33 @@ static LogicalResult createFunction(
     }
 
     funcOpIFace = cuda_tile::EntryOp::create(
-        funcBuilder, funcLoc, funcName, TypeAttr::get(funcType), funcArgAttrs,
-        funcRetAttrs, funcOptHintAttr);
-  } else {
-    return reader.emitError()
-           << "un-expected non-entry function '" << funcNameStr << "'";
+        funcBuilder, funcLoc, funcName, TypeAttr::get(funcType),
+        /*sym_visibility=*/{}, funcArgAttrs, funcRetAttrs, funcOptHintAttr);
+  }
+#ifdef TILE_IR_INCLUDE_TESTS
+  else if (funcInfo.isTestingFunc) {
+    funcOpIFace = cuda_tile::Test_FuncOp::create(
+        funcBuilder, funcLoc, funcName, TypeAttr::get(funcType),
+        /*sym_visibility=*/{}, funcArgAttrs, funcRetAttrs);
+  }
+#endif // TILE_IR_INCLUDE_TESTS
+  else {
+    UnitAttr isExternAttr;
+    ArrayAttr constParams = builder.getArrayAttr({});
+    if (funcInfo.isExternFunc) {
+      isExternAttr = UnitAttr::get(&context);
+      if (funcInfo.constParams) {
+        constParams = funcInfo.constParams;
+      }
+    }
+    funcOpIFace = cuda_tile::FuncOp::create(
+        funcBuilder, funcLoc, funcName, isExternAttr, TypeAttr::get(funcType),
+        /*sym_visibility=*/{}, funcArgAttrs, funcRetAttrs, constParams);
   }
 
   applyFunctionVisibility(funcOpIFace, funcInfo.entryFlag);
+  if (funcInfo.isExternFunc)
+    return success();
   auto &entryBlock = *funcOpIFace.addEntryBlock();
   OpBuilder innerBuilder(&entryBlock, entryBlock.begin());
   valueIndexList.clear();
@@ -2852,16 +3100,44 @@ std::optional<size_t> cuda_tile::getBytecodeSize(const char *bytecodeBuffer) {
 OwningOpRef<cuda_tile::ModuleOp>
 cuda_tile::readBytecode(llvm::MemoryBufferRef bytecodeBuffer,
                         MLIRContext &context) {
+  auto *dialect = context.getOrLoadDialect<CudaTileDialect>();
+
   ArrayRef<uint8_t> bytecodeData(
       reinterpret_cast<const uint8_t *>(bytecodeBuffer.getBufferStart()),
       bytecodeBuffer.getBufferSize());
 
   EncodingReader reader(bytecodeData, context);
-  DebugInfoReader debuginfo(context, reader);
 
   BytecodeVersion bytecodeVersion;
   if (failed(parseHeader(reader, context, bytecodeVersion))) {
     return reader.emitError() << "failed to parse bytecode header", nullptr;
+  }
+
+  // Constructed after the header so that version-gated debug info fields can be
+  // decoded against the version the buffer actually claims.
+  DebugInfoReader debuginfo(context, reader, bytecodeVersion);
+
+  // Preserve the existing preview-version policy. Per-feature enablement is
+  // checked after decoding, when the owning feature of every entity is known.
+  if (bytecodeVersion.getTag() & Bytecode::VersionTag::kContainsPreview) {
+    if (bytecodeVersion.getMajor() !=
+            BytecodeVersion::kCurrentVersion.getMajor() ||
+        bytecodeVersion.getMinor() !=
+            BytecodeVersion::kCurrentVersion.getMinor()) {
+      return reader.emitError()
+                 << "public-preview bytecode at version "
+                 << bytecodeVersion.toString()
+                 << " is not readable; preview content is only valid at the "
+                    "current version "
+                 << BytecodeVersion::kCurrentVersion.toString(),
+             nullptr;
+    }
+    if (dialect->getEnabledPreviewFeatures().empty()) {
+      return reader.emitError()
+                 << "public-preview bytecode requires at least one enabled "
+                    "preview feature",
+             nullptr;
+    }
   }
 
   // Store section payloads to allow parsing in a specific order later.
@@ -3021,7 +3297,28 @@ cuda_tile::readBytecode(llvm::MemoryBufferRef bytecodeBuffer,
   } else {
     return reader.emitError() << "function section is mandatory", nullptr;
   }
-  for (const auto &funcInfo : functionInfoList) {
+  for (auto &funcInfo : functionInfoList) {
+    // Extern implementations were decoded during table parsing. Materialize
+    // them here, alongside ordinary functions, to preserve table order.
+    if (funcInfo.isExternImpl) {
+      if(!funcInfo.deferredOperation) {
+        return reader.emitError()
+       << "extern implementation function-table entry is missing its "
+          "parsed operation",
+       nullptr;
+      }
+      std::vector<Value> dummyValueIndexList;
+      if (failed(InstructionParser::materializeParsedOperation(
+              builder, std::move(*funcInfo.deferredOperation),
+              dummyValueIndexList))) {
+        return reader.emitError()
+                   << "failed to materialize deferred function-table operation",
+               nullptr;
+      }
+      applyFunctionVisibility(&builder.getInsertionBlock()->back(),
+                              funcInfo.entryFlag);
+      continue;
+    }
     if (failed(createFunction(funcInfo, builder, funcBuilder, reader, types,
                               debuginfo, constants, globalConstCache,
                               valueIndexList, context, bytecodeVersion))) {

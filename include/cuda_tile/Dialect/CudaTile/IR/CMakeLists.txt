@@ -31,6 +31,10 @@ set(LLVM_TARGET_DEFINITIONS Ops.td)
 mlir_tablegen(Ops.h.inc -gen-op-decls)
 mlir_tablegen(Ops.cpp.inc -gen-op-defs)
 
+# Preview feature metadata and runtime IR classification.
+set(LLVM_TARGET_DEFINITIONS PreviewFeatureGen.td)
+tablegen_internal(CUDA_TILE PreviewFeatures.inc -gen-cuda-tile-preview-features)
+
 # Attribute code generation (from cuda-tile-tblgen).
 set(LLVM_TARGET_DEFINITIONS AttrDefs.td)
 tablegen_internal(CUDA_TILE CudaTileEnumAttrs.inc -gen-enum-attr-list)
@@ -92,8 +96,20 @@ add_custom_command(
         > ${GEN_SPEC_DIR}/ops.rst
         DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/ops.rst)
 
+# Generate the type specification from Types.td.
+set(LLVM_TARGET_DEFINITIONS Types.td)
+tablegen_internal(CUDA_TILE types.rst -gen-type-spec)
+
+add_custom_command(
+        OUTPUT ${GEN_SPEC_DIR}/types.rst
+        COMMAND ${CMAKE_COMMAND} -E cat
+        ${CMAKE_CURRENT_BINARY_DIR}/types.rst
+        > ${GEN_SPEC_DIR}/types.rst
+        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/types.rst)
+
 # Targets for the specification.
-add_custom_target(CudaTileSpecGen DEPENDS ${GEN_SPEC_DIR}/ops.rst)
+add_custom_target(CudaTileSpecGen
+        DEPENDS ${GEN_SPEC_DIR}/ops.rst ${GEN_SPEC_DIR}/types.rst)
 
 # Declare custom targets for the MLIR Markdown.
 add_custom_target(CudaTileDocGen DEPENDS ${GEN_DOC_DIR}/CudaTile.md)

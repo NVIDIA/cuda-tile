@@ -10,7 +10,10 @@
 #ifndef CUDA_TILE_DIALECT_CUDATILE_IR_TRAITS_H
 #define CUDA_TILE_DIALECT_CUDATILE_IR_TRAITS_H
 
+#include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/IR/Types.h"
+#include "mlir/Support/LogicalResult.h"
 
 namespace mlir {
 
@@ -30,6 +33,7 @@ bool verifyLoadStoreMask(Type dstType, Type maskType);
 bool verifyLoadPadding(Type dstType, Type paddingType);
 
 } // namespace impl
+
 } // namespace cuda_tile
 } // namespace OpTrait
 } // namespace mlir

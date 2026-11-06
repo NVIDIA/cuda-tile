@@ -33,7 +33,7 @@ using namespace mlir::tblgen;
 /// function.
 /// {0}: The C++ class name of the operation.
 static const char *const functionSignatureTemplate = R"(
-  static LogicalResult parse{0}(EncodingReader &reader,
+  static FailureOr<ParsedOperation> parse{0}(EncodingReader &reader,
                                      OpBuilder &innerBuilder,
                                      Location loc,
                                      std::vector<Value> &valueIndexList,
@@ -160,24 +160,29 @@ static const char *const resultTypeDeserializationTemplate = R"(
   }
 )";
 
-/// The template for generating the final operation creation code.
+/// The template for generating the final operation parsing code.
 /// {0}: The MLIR operation name (e.g. "cuda_tile.addf").
 /// {1}: The number of results to add to valueIndexList.
 static const char *const operationDeserializationTemplate = R"(
-  // --- Create Operation ---
-  if (failed(createOperationGeneric(innerBuilder, loc, "{0}",
-                                  resultTypes, parsedOperands, attributes,
-                                  valueIndexList, parsedRegions, {1})))
-    return failure();
+  // --- Return Parsed Operation ---
+  return ParsedOperation{
+      OperationState(loc, "{0}", parsedOperands, resultTypes, attributes,
+                     BlockRange(), parsedRegions),
+      {1}};
 )";
 
 /// The template for generating a case in the opcode dispatch switch statement.
 /// {0}: The C++ class name of the operation (e.g., CudaTile_AddIOp).
 static const char *const dispatchCaseTemplate = R"(
-  case Opcode::{0}:
-    if (failed(parse{0}(reader, innerBuilder, loc, valueIndexList, constants, types, constCache, diIterator, context, bytecodeVersion)))
+  case Opcode::{0}: {
+    FailureOr<ParsedOperation> parsedOperation =
+        parse{0}(reader, innerBuilder, loc, valueIndexList, constants, types,
+                 constCache, diIterator, context, bytecodeVersion);
+    if (failed(parsedOperation))
       return failure();
-    break;
+    return materializeParsedOperation(innerBuilder, std::move(*parsedOperation),
+                                      valueIndexList);
+  }
 )";
 
 /// The template for generating region deserialization code.
@@ -286,7 +291,12 @@ generateOperandDeserialization(const Operator &opDef, raw_ostream &os,
 
       if (isOptional) {
         size_t operandBitIndex = bitAssignments.lookup(odsOperandName);
-       // Public operations: check operand version compatibility.
+        if (isVersionlessOperation(opDef)) {
+          // Versionless op: read flag directly.
+          os << llvm::formatv(optionalOdsOperandSegmentTemplate, odsOperandName,
+                              opName, i, operandBitIndex);
+        } else {
+          // Public operations: check operand version compatibility.
           auto [majorStr, minorStr] = extractVersionFromOperand(i, opDef);
           std::string version = (Twine(majorStr) + "." + minorStr).str();
           std::string opVersion = extractVersionFromOperation(opDef);
@@ -319,6 +329,7 @@ generateOperandDeserialization(const Operator &opDef, raw_ostream &os,
                                 odsOperandName, majorStr, minorStr,
                                 templateCode, operandBitIndex, version, i);
           }
+        }
       } else if (isVariadic) {
         // Read variadic operand size from stream.
         os << llvm::formatv(variadicOdsOperandSegmentTemplate, odsOperandName,
@@ -365,6 +376,9 @@ generateAttributeDeserialization(const Operator &op, raw_ostream &os,
 
   for (const NamedAttribute &namedAttr : op.getAttributes()) {
     std::string attrName = namedAttr.name.str();
+    if (isExternallyEncodedOpAttribute(attrName)) {
+      continue;
+    }
     std::string varName = "parsed_" + attrName;
     StringRef baseCppTypeStr = namedAttr.attr.getStorageType();
     bool isOptional = namedAttr.attr.isOptional();
@@ -404,6 +418,16 @@ generateAttributeDeserialization(const Operator &op, raw_ostream &os,
     // Emit the expected type declaration if needed.
     os << expectedTypeDeclaration;
 
+    if (isVersionlessOperation(op)) {
+      os << "  // Versionless operations: parse directly without version "
+            "checks\n";
+      // Generate direct parsing for versionless operations.
+      int bitPos =
+          isOptional ? static_cast<int>(bitAssignments.lookup(attrName)) : -1;
+      generateAttributeParsingLogic(os, varName, expectedTypeArg, attrName,
+                                    baseCppTypeStr, isOptional, isUnitAttr,
+                                    bitPos);
+    } else {
       os << "  // Public operations: use version checking\n";
       // For public operations, add version checking.
       auto [majorStr, minorStr] = extractVersionFromAttribute(namedAttr, op);
@@ -486,6 +510,8 @@ generateAttributeDeserialization(const Operator &op, raw_ostream &os,
         // defaults.
       }
       os << "  }\n";
+    }
+
     // Generate attribute addition to the attributes vector.
     os << formatv(R"(  if ({0}) {{
     attributes.emplace_back(innerBuilder.getStringAttr("{1}"), {2});})",
@@ -638,6 +664,9 @@ static void generateVersionAwareResultDeserialization(const Operator &op,
 /// Generates C++ code to deserialize the result types of the operation.
 static void generateResultTypeDeserialization(const Operator &op,
                                               raw_ostream &os) {
+  // Versionless ops deserialize result types without version conditioning.
+  if (isVersionlessOperation(op))
+    return generateSimpleResultDeserialization(op, os);
   generateVersionAwareResultDeserialization(op, os);
 }
 
@@ -715,6 +744,14 @@ generateSameOperandRankFixups(const Operator &op, raw_ostream &os,
                           "rank");
     }
 
+    // The fixup only fills the nullptr that the version-conditioned reader
+    // leaves when a file predates the attribute. A versionless op is always read
+    // through the direct path, so there is nothing to fill. Checked here rather
+    // than on entry so the validation above still rejects a misapplied
+    // decorator on a versionless op.
+    if (isVersionlessOperation(op))
+      continue;
+
     auto [majorStr, minorStr] = extractVersionFromAttribute(namedAttr, op);
     std::string varName = "parsed_" + attrName.str();
     // Synthesize the fixup when reading older bytecode that lacks the
@@ -772,8 +809,7 @@ static void generateOpReader(const Operator &op, raw_ostream &os) {
   generateSameOperandRankFixups(op, os, bitAssignments);
   generateRegionDeserialization(op, os);
   generateOperationDeserialization(op, os);
-  os << "  return success();\n"
-     << "}\n\n";
+  os << "}\n\n";
 }
 
 /// Generates the implementations of the individual op reader functions.

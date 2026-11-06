@@ -9,7 +9,7 @@
 //     *byte* order is also exercised; bit 0 must land in byte 0 and
 //     bit 15 in byte 1, not the other way around.
 
-// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module %s -o %t.bc
+// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module -bytecode-version=13.4 %s -o %t.bc
 // RUN: cmp %t.bc %S/goldens/i1_non_splat.golden.tileirbc
 
 cuda_tile.module @kernels {

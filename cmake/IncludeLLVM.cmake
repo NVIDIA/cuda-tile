@@ -1,6 +1,6 @@
 find_package(Python3 REQUIRED)
 
-set(LLVM_TOOLS_TO_INSTALL FileCheck;not)
+set(LLVM_TOOLS_TO_INSTALL FileCheck;not;split-file)
 
 macro(print_llvm_config)
   message(STATUS "Summary of the LLVM/MLIR CMake environment:")

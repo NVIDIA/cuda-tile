@@ -4,7 +4,7 @@
 // is MLIR-defined. If MLIR changes how the padding bits are placed, this
 // fixture diverges.
 
-// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module %s -o %t.bc
+// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module -bytecode-version=13.4 %s -o %t.bc
 // RUN: cmp %t.bc %S/goldens/tf32_splat.golden.tileirbc
 
 cuda_tile.module @kernels {

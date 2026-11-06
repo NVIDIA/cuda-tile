@@ -55,6 +55,7 @@ struct BytecodeAttrParameter {
     DenseArray,
     EnumValue,
     TypeAttr,
+    Type,
     NestedAttr,
     PolymorphicNestedAttr,
     AttributeArray,
@@ -79,6 +80,7 @@ public:
   Kind kind;
   std::string sinceVersion;
   std::string defaultValue;
+  std::string bytecodeFallbackValue;
 };
 
 //===----------------------------------------------------------------------===//
@@ -95,12 +97,15 @@ public:
 ///   sinceVersion: Version string.
 ///   parameters: Analyzed attribute parameters.
 ///   skipVersionCheck: True when version-gating is suppressed for this attr.
+///   isPreview: True for public-preview attributes.
+///   owningPreviewFeature: Named feature owning a preview attribute.
 ///   hasOptionalParams: True if attr has optional parameters.
 ///   requiredParamsFirst: True if required params come before flags
 ///   hasVerifier: True if attr has genVerifyDecl.
 struct CudaTileSerializableAttr {
   CudaTileSerializableAttr(const AttrOrTypeDef &attrDef, unsigned tagValue,
-                           StringRef version, bool skipVersionCheck);
+                           StringRef version, bool skipVersionCheck,
+                           bool isPreview);
 
   std::string attrName;
   std::string tagName;
@@ -109,6 +114,8 @@ struct CudaTileSerializableAttr {
   std::string sinceVersion;
   SmallVector<BytecodeAttrParameter, 4> parameters;
   bool skipVersionCheck = false;
+  bool isPreview = false;
+  std::string owningPreviewFeature;
   bool hasOptionalParams = false;
   bool requiredParamsFirst = false;
   bool hasVerifier = false;
@@ -126,6 +133,8 @@ struct BytecodeAttr {
   unsigned tagValue;
   std::string sinceVersion;
   bool skipsVersionCheck = false;
+  bool isPreview = false;
+  std::string owningPreviewFeature;
 };
 
 /// Represents a single enum case with its version info.

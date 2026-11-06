@@ -99,9 +99,23 @@ def CudaTile_PointerType : CudaTileTypeDef<"Pointer", "ptr", "pointerType", "13.
     global device memory. Pointer types are typed, i.e., they carry the
     type they point to. Any numeric type can be used as pointee type.
 
-    An optional :code:`#cuda_tile.ptr_attr<...>` suffix records the pointer
-    classification; :code:`#cuda_tile.ptr_attr<none>` denotes an ordinary local
-    pointer.
+    The optional :code:`#cuda_tile.ptr_attr<...>` attribute can be
+    :code:`#cuda_tile.ptr_attr<none>`, indicating local memory access. When
+    absent, the pointer is local.
+
+    An :code:`f4E2M1FN` pointer addresses the byte containing a pair of packed
+    f4 elements. It is used as the scalar base pointer of a tensor view. Direct
+    pointer-tile loads and stores do not support :code:`f4E2M1FN`.
+  }]
+  # [{
+
+    Unicast and multicast pointers are also supported:
+    :code:`#cuda_tile.ptr_attr<unicast>` and
+    :code:`#cuda_tile.ptr_attr<multicast>`, indicating unicast and multicast
+    memory access. Unicast memory access requires an NVLink fabric and
+    multicast memory access requires an NVLink fabric with an NVLink
+    SHARP-supported NVSwitch. Using either without a supported fabric results
+    in undefined behavior.
   }]
   ;
 
@@ -123,12 +137,315 @@ def CudaTile_PointerType : CudaTileTypeDef<"Pointer", "ptr", "pointerType", "13.
 }
 
 //===----------------------------------------------------------------------===//
+// Fragment Type (public-preview slice at the SIMT-interop ABI boundary)
+//===----------------------------------------------------------------------===//
+
+def CudaTile_FragmentType
+    : CudaTilePreviewTypeDef<"Fragment", "fragment", "fragment",
+                             CudaTile_SIMTPreviewFeature> {
+  let summary = "Fragment type: one invocation's view of a tile at the ABI boundary";
+
+  let description = [{
+    A public-preview `fragment` describes the slice of a tile that a single
+    external-function invocation sees, together with where that slice lives and
+    how it is laid out in its buffer.
+
+    `!cuda_tile.tile` describes a whole tile and has value semantics. I.e., a
+    tile cannot be modified in-place. `!cuda_tile.preview$fragment` describes the
+    per-invocation buffer that the external function receives. It has buffer
+    semantics. I.e., it has a memory space and can be modified in-place.
+
+    A fragment carries:
+
+    - a fragment shape (e.g. `1` for a scalar, `8x8` for an 8x8 fragment).
+    - an element type (e.g. `f32`).
+    - a memory space, indicating where the fragment buffer lives, either
+      `local` or `smem`.
+    - `mem_layout`: the in-buffer element order within one fragment, expressed
+      as a `#cuda_tile.preview$layout`. This layout must be a permutation of
+      `[0, element count)`: its domain size and its storage span must both
+      equal the fragment's element count, and its modes must use regularly
+      tiled strides. Padding, overlap, and broadcast (stride-zero) modes are
+      rejected. For an `smem` fragment the span must not exceed the signed
+      32-bit integer range.
+    - `fragmap`: the fragment map, expressed as a `#cuda_tile.preview$layout`:
+      `(invocation, participant, footprint) -> tile element`. May contain
+      symbolic expressions.
+    - `alignment`: the alignment in number of elements, which must be a power
+      of two. Defaults to 1.
+
+    `mem_layout`, `fragmap`, and `alignment` may contain symbolic expressions.
+
+    Reading a `fragmap` (a three-mode `#cuda_tile.preview$layout`):
+    ```
+    #cuda_tile.preview$layout<(N, 1, 1) : (1, 0, 0)>
+                       │  │  │     │  │  │
+                       │  │  │     │  │  └─ footprint stride
+                       │  │  │     │  └──── participant stride
+                       │  │  │     └─────── invocation stride
+                       │  │  └──────────── footprint = per-invocation buffer size
+                       │  └─────────────── physical threads per invocation
+                       │                   (for both local and smem)
+                       └────────────────── invocation count
+    ```
+
+    Participation describes the data mapping and does not imply a
+    synchronization level. The implementation's explicit synchronization
+    property independently states whether the call uses no cooperative
+    synchronization or may synchronize at warp, warpgroup, or CTA scope. For
+    an `smem` fragment, participants normally have stride zero because they
+    share one CTA-local buffer.
+
+    In the visualizations below each tile element is labelled with the
+    invocation `i` that owns it.
+
+    Example 1 — scalar fragment: one tile element per invocation.
+    ```
+    Tile:     !cuda_tile.tile<1024xf32>
+    Fragment: !cuda_tile.preview$fragment<1xf32, local,
+                  mem_layout = #cuda_tile.preview$layout<(1):(1)>,
+                  fragmap = #cuda_tile.preview$layout<(1024, 1, 1):(1, 0, 0)>>
+
+    I = 1024 invocations, P = 1, footprint F = 1.
+    map: (i, p, f) -> i*1 = i, so invocation i owns tile element i.
+
+      tile element:  │ 0 │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ …
+      invocation:    │ 0 │ 1 │ 2 │ 3 │ 4 │ 5 │ 6 │ 7 │ …
+    ```
+
+    Example 2 — footprint 2, contiguous (each invocation owns an adjacent pair).
+    ```
+    Tile:     !cuda_tile.tile<1024xf32>
+    Fragment: !cuda_tile.preview$fragment<2xf32, local,
+                  mem_layout = #cuda_tile.preview$layout<(2):(1)>,
+                  fragmap = #cuda_tile.preview$layout<(512, 1, 2):(2, 0, 1)>>
+
+      tile element:  │ 0   1 │ 2   3 │ 4   5 │ 6   7 │ …
+      invocation:    │   0   │   1   │   2   │   3   │ …
+    ```
+
+    Example 3 — footprint 2, strided (same shape as Example 2, different stride).
+    ```
+    Tile:     !cuda_tile.tile<1024xf32>
+    Fragment: !cuda_tile.preview$fragment<2xf32, local,
+                  mem_layout = #cuda_tile.preview$layout<(2):(1)>,
+                  fragmap = #cuda_tile.preview$layout<(512, 1, 2):(1, 0, 512)>>
+
+      tile element:  │ 0 │ 1 │ … │ 511 │ 512 │ 513 │ … │ 1023 │
+      invocation:    │ 0 │ 1 │ … │ 511 │  0  │  1  │ … │  511 │
+    ```
+
+    The memory space must be `local` or `smem`. The parser rejects any other
+    memory space.
+
+    Example 4 — parametric footprint: symbolic dimension `F`. Symbolic shape
+    dims are written in brackets within the `NxMx` list, e.g. `[F]xf32`.
+    ```
+    Fragment: !cuda_tile.preview$fragment<[F]xf32, local,
+                  mem_layout = #cuda_tile.preview$layout<(F):(1)>,
+                  fragmap = #cuda_tile.preview$layout<(N, 1, F):(F, 0, 1)>>
+    ```
+  }];
+
+  let parameters = (ins
+    // Authoritative symbolic shape: a SymbolicTupleAttr whose elements are
+    // SymbolicExprIntAttr (concrete) or SymbolicExprVarAttr (parametric).
+    CudaTileAttrInterfaceParam<
+      "::mlir::cuda_tile::SymbolicExprAttr", "",
+      "symbolic shape of the fragment",
+      "::mlir::cuda_tile::FragmentType::getSymbolicShape($_param_concreteShapeCache, $_ctxt)">:$symbolicShapeAttr,
+    // Concrete shape cache: kDynamic for symbolic dims, the integer value for
+    // concrete dims. Access via getShape().
+    CudaTilePreviewTypeParam<ArrayRefParameter<"int64_t", "concrete shape cache">>:$concreteShapeCache,
+    CudaTilePreviewTypeParam<TypeParameter<"::mlir::Type", "element type">>:$element_type,
+    CudaTilePreviewEnumParam<CudaTile_MemorySpace>:$memory_space,
+    CudaTilePreviewTypeParam<TypeParameter<"::mlir::cuda_tile::LayoutAttr", "in-buffer layout">>:$mem_layout,
+    CudaTilePreviewTypeParam<TypeParameter<"::mlir::cuda_tile::LayoutAttr", "fragment map">>:$fragmap,
+    // Alignment in elements. Absent alignment defaults to a concrete 1.
+    CudaTileAttrInterfaceParam<
+      "::mlir::cuda_tile::SymbolicExprAttr", "",
+      "alignment in elements",
+      "::mlir::cuda_tile::SymbolicExprIntAttr::get($_ctxt, 1)">:$alignment
+  );
+
+  // Requires a custom C++ assembly implementation to handle the symbolic
+  // dimensions and the optional (elided-when-1) alignment.
+  let hasCustomAssemblyFormat = 1;
+
+  let builders = [
+    // Build from a concrete (fully static) shape.
+    TypeBuilderWithInferredContext<(ins
+        "::llvm::ArrayRef<int64_t>":$shape,
+        "::mlir::Type":$elementType,
+        "::mlir::cuda_tile::MemorySpace":$memorySpace,
+        "::mlir::cuda_tile::LayoutAttr":$memLayout,
+        "::mlir::cuda_tile::LayoutAttr":$fragmap,
+        CArg<"::mlir::cuda_tile::SymbolicExprAttr", "{}">:$alignment), [{
+      auto *ctx = elementType.getContext();
+      ::mlir::cuda_tile::SymbolicExprAttr effectiveAlignment =
+          alignment ? alignment : SymbolicExprIntAttr::get(ctx, 1);
+      return $_get(ctx, getSymbolicShape(shape, ctx), shape, elementType,
+                   memorySpace, memLayout, fragmap, effectiveAlignment);
+    }]>,
+    // Build from a symbolic shape (may contain symbolic dims).
+    TypeBuilderWithInferredContext<(ins
+        "::mlir::cuda_tile::SymbolicExprAttr":$symbolicShape,
+        "::mlir::Type":$elementType,
+        "::mlir::cuda_tile::MemorySpace":$memorySpace,
+        "::mlir::cuda_tile::LayoutAttr":$memLayout,
+        "::mlir::cuda_tile::LayoutAttr":$fragmap,
+        CArg<"::mlir::cuda_tile::SymbolicExprAttr", "{}">:$alignment), [{
+      auto *ctx = elementType.getContext();
+      ::mlir::cuda_tile::SymbolicExprAttr effectiveAlignment =
+          alignment ? alignment : SymbolicExprIntAttr::get(ctx, 1);
+      ::llvm::SmallVector<int64_t> shapeCache;
+      if (auto tuple = ::llvm::dyn_cast<SymbolicTupleAttr>(symbolicShape)) {
+        shapeCache.reserve(tuple.getValues().size());
+        for (SymbolicExprAttr dim : tuple.getValues()) {
+          if (auto intDim = ::llvm::dyn_cast<SymbolicExprIntAttr>(dim))
+            shapeCache.push_back(intDim.getValue());
+          else
+            shapeCache.push_back(::mlir::ShapedType::kDynamic);
+        }
+      }
+      return $_get(ctx, symbolicShape, shapeCache, elementType, memorySpace,
+                   memLayout, fragmap, effectiveAlignment);
+    }]>
+  ];
+
+  let genVerifyDecl = 1;
+
+  let extraClassDeclaration = [{
+    /// Return a symbolic tuple representing a concrete (all-integer) fragment
+    /// shape. Used by the builder and the bytecode fallback.
+    static SymbolicTupleAttr getSymbolicShape(::llvm::ArrayRef<int64_t> shape,
+                                              ::mlir::MLIRContext *context) {
+      ::llvm::SmallVector<SymbolicExprAttr> dims;
+      dims.reserve(shape.size());
+      for (int64_t dim : shape)
+        dims.push_back(SymbolicExprIntAttr::get(context, dim));
+      return SymbolicTupleAttr::get(context, dims);
+    }
+
+    /// Return the concrete shape (kDynamic for symbolic dims).
+    ::llvm::ArrayRef<int64_t> getShape() const;
+
+    /// Return the total number of elements (product of concrete dims). Only
+    /// valid when `isConcrete()` is true.
+    int64_t getNumElements() const {
+      assert(isConcrete());
+      int64_t n = 1;
+      for (int64_t d : getShape())
+        n *= d;
+      return n;
+    }
+
+    /// Return true when all shape dims are concrete (no kDynamic) and the
+    /// layouts and alignment contain no symbolic variables.
+    bool isConcrete() const;
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// Symbolic Type
+//===----------------------------------------------------------------------===//
+
+def CudaTile_SymbolicType
+    : CudaTilePreviewTypeDef<"Symbolic", "sym_t", "symbolicType",
+                             CudaTile_SIMTPreviewFeature> {
+  let summary =
+      "A not-yet-resolved (parametric) dtype usable as an element type";
+  let description = [{
+    Represents a symbolic dtype parameter (e.g. `T`) as a proper MLIR type so
+    it can stand in the element-type position of a tile, alongside concrete
+    element types such as `f32` or `!cuda_tile.ptr<i8>`. The expression is
+    resolved to a concrete type at instantiation time.
+
+    The expression carries the parameter identifier and is printed bare
+    (without quotes) for the currently supported SymbolicExprVarAttr case,
+    mirroring how dtype parameters are spelled at use sites.
+
+    Example:
+      !cuda_tile.preview$sym_t<T>
+  }];
+
+  let parameters = (ins
+    CudaTileAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr", "">:$expr
+  );
+  let hasCustomAssemblyFormat = 1;
+  let genVerifyDecl = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// DType Parameter Placeholder Type
+//===----------------------------------------------------------------------===//
+//
+// A simple marker type used as the `type` field in ConstParamAttr to declare
+// a DType parameter:
+//   `#cuda_tile.preview$const_param<name = "T", type = !cuda_tile.preview$Datatype>`
+//
+// In TileType, dtype parameters are represented by SymbolicType, not by
+// DTypeParamType. This parallels how SymbolicExprVarAttr("M") is used for
+// symbolic shape dimensions.
+def CudaTile_DTypeParamType
+    : CudaTilePreviewTypeDef<"DTypeParam", "Datatype", "Datatype",
+                             CudaTile_SIMTPreviewFeature> {
+  let summary = "Placeholder for a compile-time dtype parameter";
+  let description = [{
+    Marker type used in ConstParamAttr to declare that a const_param is a
+    DType parameter. Has no parameters — analogous to ShapeParamType.
+
+    Example: `#cuda_tile.preview$const_param<name = "T", type = !cuda_tile.preview$Datatype>`
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// Shape Parameter Placeholder Type
+//===----------------------------------------------------------------------===//
+
+def CudaTile_ShapeParamType
+    : CudaTilePreviewTypeDef<"ShapeParam", "shape", "Shape",
+                             CudaTile_SIMTPreviewFeature> {
+  let summary = "Placeholder for a compile-time shape parameter";
+  let description = [{
+    Marker type used in `ConstParamAttr` to declare a compile-time shape
+    parameter. The type itself has no rank or dimensions. At instantiation, its
+    value is supplied as a tuple of integer dimensions, such as `(128, 64)`.
+
+    This type only describes the kind of a constant parameter; it is not a tile
+    shape and cannot be used as a tile dimension. Symbolic tile dimensions are
+    represented by `SymbolicExprVarAttr` instead. The placeholder must be
+    resolved before lowering.
+
+    Example: `#cuda_tile.preview$const_param<name = "S", type = !cuda_tile.preview$shape>`
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// String Parameter Placeholder Type
+//===----------------------------------------------------------------------===//
+
+def CudaTile_StringParamType
+    : CudaTilePreviewTypeDef<"StringParam", "string", "String",
+                             CudaTile_SIMTPreviewFeature> {
+  let summary = "Placeholder for a compile-time string parameter";
+  let description = [{
+    Marker type used in ConstParamAttr to declare a string parameter. Concrete
+    string arguments use SymbolicExprConstStrAttr; SymbolicExprVarAttr remains
+    available for forwarding an in-scope string parameter.
+
+    Example: `#cuda_tile.const_param<name = "mode", type = !cuda_tile.preview$string>`
+  }];
+}
+
+//===----------------------------------------------------------------------===//
 // Tile Type
 //===----------------------------------------------------------------------===//
 
 def CudaTile_TileElementType : AnyTypeOf<[CudaTile_NumberType,
                                           CudaTile_PointerType,
-                                          CudaTile_Int4
+                                          CudaTile_Int4,
+                                          CudaTile_SymbolicType
                                          ]> {
   string cppType = "::mlir::Type";
 }
@@ -145,6 +462,12 @@ def CudaTile_TileType : CudaTileTypeDef<"Tile", "tile", "tileType", "13.1",
 
     Only power-of-two shape dimensions are supported.
 
+    A tile whose element type is :code:`ptr<f4E2M1FN>` must have rank 0. This
+    scalar pointer form is used to construct tensor views. Executing
+    :code:`cuda_tile.offset` on it with an odd f4 element offset is undefined
+    behavior. General ranked f4 pointer tiles are not supported; use an f4 tile
+    view for memory accesses.
+
     Examples:
     ```
     !cuda_tile.tile<8x4xf32>
@@ -154,7 +477,12 @@ def CudaTile_TileType : CudaTileTypeDef<"Tile", "tile", "tileType", "13.1",
   }];
 
   let parameters = (ins
-    CudaTileTypeParam<ArrayRefParameter<"int64_t", "shape of the tile">, "13.1">:$shape,
+    CudaTilePreviewTypeExtensionParam<
+      "::mlir::cuda_tile::SymbolicExprAttr",
+      "symbolic shape of the tile",
+      CudaTile_SIMTPreviewFeature,
+      "::mlir::cuda_tile::TileType::getSymbolicShape($_param_concreteShapeCache, $_ctxt)">:$symbolicShapeAttr,
+    CudaTileTypeParam<ArrayRefParameter<"int64_t", "concrete shape cache">, "13.1">:$concreteShapeCache,
     CudaTileConstrainedTypeParam<CudaTile_TileElementType, "13.1">:$elementType
   );
   let hasCustomAssemblyFormat = 1;
@@ -162,24 +490,67 @@ def CudaTile_TileType : CudaTileTypeDef<"Tile", "tile", "tileType", "13.1",
 
   let builders = [
     TypeBuilderWithInferredContext<(ins
-      "ArrayRef<int64_t>":$shape, "Type":$elementType)>
+      "ArrayRef<int64_t>":$shape, "Type":$elementType), [{
+        return $_get(elementType.getContext(),
+                     getSymbolicShape(shape, elementType.getContext()), shape,
+                     elementType);
+      }]>,
+    TypeBuilderWithInferredContext<(ins
+      "::mlir::cuda_tile::SymbolicExprAttr":$symbolicShape,
+      "Type":$elementType), [{
+        SmallVector<int64_t> shapeCache;
+        if (auto tuple = ::llvm::dyn_cast<SymbolicTupleAttr>(symbolicShape)) {
+          shapeCache.reserve(tuple.getValues().size());
+          for (SymbolicExprAttr dim : tuple.getValues()) {
+            if (auto intDim = ::llvm::dyn_cast<SymbolicExprIntAttr>(dim))
+              shapeCache.push_back(intDim.getValue());
+            else
+              shapeCache.push_back(::mlir::ShapedType::kDynamic);
+          }
+        }
+        return $_get(elementType.getContext(), symbolicShape, shapeCache,
+                     elementType);
+      }]>
   ];
 
   let extraClassDeclaration = [{
     // All interface methods of ShapedTypeInterface must be implemented.
 
+    /// Return a symbolic tuple representing a concrete tile shape.
+    static SymbolicTupleAttr getSymbolicShape(ArrayRef<int64_t> shape,
+                                              MLIRContext *context) {
+      SmallVector<SymbolicExprAttr> shapeAttrs;
+      shapeAttrs.reserve(shape.size());
+      for (int64_t dim : shape)
+        shapeAttrs.push_back(SymbolicExprIntAttr::get(context, dim));
+      return SymbolicTupleAttr::get(context, shapeAttrs);
+    }
+
     /// Return "true" if the type has a rank.
     bool hasRank() const { return true; }
+
+    /// Return the shape cache. Symbolic dimensions are represented as
+    /// ShapedType::kDynamic.
+    ArrayRef<int64_t> getShape() const;
 
     /// Return a new type with the given shape and element type.
     TileType cloneWith(std::optional<ArrayRef<int64_t>> shape,
                          Type elementType) const;
+
+    /// Return true if this tile has no symbolic dimensions or element type.
+    bool isConcreteTile() const {
+      return !llvm::isa<SymbolicType>(getElementType()) &&
+             llvm::none_of(getConcreteShapeCache(), [](int64_t dim) {
+               return ShapedType::isDynamic(dim);
+             });
+    }
   }];
 }
 
-// Checks if a type is an instance of cuda_tile::TileType
+// Checks if a type is an instance of concrete cuda_tile::TileType
 def CudaTile_IsTileTypePred
-  : CPred<"::llvm::isa<::mlir::cuda_tile::TileType>($_self)">;
+  : CPred<"::llvm::isa<::mlir::cuda_tile::TileType>($_self) && "
+          "::llvm::cast<::mlir::cuda_tile::TileType>($_self).isConcreteTile()">;
 
 class CudaTile_TileOf<
     list<Type> allowedTypes,
@@ -229,6 +600,12 @@ def CudaTile_TensorViewType : CudaTileTypeDef<
       dimension. The stride is the number of elements to offset in memory when
       increasing the corresponding index by one. Strides must be strictly
       positive.
+    * :code:`ptr_attr`: an optional attribute inferred from the
+      :code:`base` pointer. The attribute can be
+      :code:`#cuda_tile.ptr_attr<none>`,
+      :code:`#cuda_tile.ptr_attr<unicast>`, or
+      :code:`#cuda_tile.ptr_attr<multicast>`. It indicates whether the view
+      access is local, unicast, or multicast.
 
     The shape and the stride can be dynamic on a per-dimension basis. In those
     cases, their values are printed as :code:`?`.
@@ -239,15 +616,40 @@ def CudaTile_TensorViewType : CudaTileTypeDef<
 
     .. note::
 
-      4-bit element types are packed densely in global memory. Tensor views with
-      4-bit element types must have at least one dimension with a unit stride
-      and such dimensions must have an even number of elements to ensure
-      byte-alignment.
+      For an :code:`f4E2M1FN` view access, or a multicast view access with an
+      :code:`f16` or :code:`bf16` element type, elements must be densely packed
+      in global memory. The tensor view must have exactly one statically encoded
+      element stride equal to 1. That stride identifies the **packing
+      dimension**. A dynamic stride does not identify a packing dimension, and
+      multiple static unit strides are ambiguous; accesses in either case
+      cannot be compiled.
 
-      Elements :code:`i` and :code:`i+1` (where :code:`i` is a multiple of 2)
-      are packed into a byte as follows: element :code:`i` is stored in bits
-      :code:`3...0` and element :code:`i+1` is stored in bits :code:`7...4`.
-      This corresponds to a little-endian nibble order.
+      For such an access, every non-packing element stride must be even. An
+      even non-packing stride ensures that stepping in another dimension
+      preserves the required alignment of the packing-dimension origin. For an
+      f16/bf16 multicast access, the tensor-view extent in the packing dimension
+      must also be even. For an :code:`f4E2M1FN` access, that extent may be
+      odd. The tile extent in the packing dimension must still be even. If the
+      tensor-view extent in that dimension is odd, its final element has no
+      in-bounds partner. Any access whose tile includes that element has
+      undefined behavior. Values required to be even may be statically encoded
+      in the tensor-view type or supplied at runtime; the compiler does not
+      require proof that they are even. Violating any of these preconditions
+      when the access executes is undefined behavior. The tensor-view extent is
+      distinct from the statically encoded
+      :code:`tile_shape` of a concrete tile-view type. Individual tile-view
+      types impose the additional evenness preconditions documented on those
+      types.
+
+      Executing an f16/bf16 multicast memory access through a tensor view
+      constructed from a multicast base requires the base address to be at
+      least 4-byte aligned; otherwise, the access has undefined behavior.
+
+      For :code:`f4E2M1FN`, elements :code:`i` and :code:`i+1` (where
+      :code:`i` is a multiple of 2) are packed into a byte as follows: element
+      :code:`i` is stored in bits :code:`3...0` and element :code:`i+1` is
+      stored in bits :code:`7...4`. This corresponds to a little-endian nibble
+      order.
 
       Example: A :code:`tensor_view<2xf4E2M1FN, strides=[1]>` with values
       :code:`[0.5, 1.5]` is stored as:
@@ -312,6 +714,11 @@ def CudaTile_TensorViewType : CudaTileTypeDef<
     size_t dynamicShapeAmount();
     /// Return how many stride dimensions are dynamic.
     size_t dynamicStrideAmount();
+
+    /// Return the unique statically encoded unit-stride dimension for an f4
+    /// tensor view. Return std::nullopt for a non-f4 view or when the packing
+    /// dimension is missing or ambiguous.
+    std::optional<unsigned> getF4PackingDimension() const;
   }];
 
   let hasCustomAssemblyFormat = 1;
@@ -456,6 +863,16 @@ def CudaTile_PartitionViewType : CudaTileTypeDef<
       unspecified values.
     * **Store operations**: Out-of-bounds tile elements are masked during stores.
 
+    .. note::
+
+      For an :code:`f4E2M1FN` view access, and for a multicast view access with
+      an :code:`f16` or :code:`bf16` element type, the statically encoded tile
+      extent mapped to the underlying tensor view's packing dimension must be
+      even. Violating this precondition is undefined behavior.
+
+      For :code:`f4E2M1FN`, this requirement also ensures that every tile origin
+      is byte-aligned, because partition traversal equals the tile extent.
+
     Example:
 
     ```
@@ -475,7 +892,7 @@ def CudaTile_PartitionViewType : CudaTileTypeDef<
     !pv_2d_padded = !cuda_tile.partition_view<
       tile=(1x4),
       padding_value = nan,
-      tensor_view<8x2xf32, strides=[2,1]>,
+      tensor_view<8x2xf32, strides=[2,1]>
     >
     ```
   }];
@@ -486,6 +903,15 @@ def CudaTile_PartitionViewType : CudaTileTypeDef<
     CudaTileTypeParam<ArrayRefParameter<"int32_t", "dimension mapping">, "13.1">:$dim_map,
     CudaTileTypeParam<OptionalParameter<"::mlir::cuda_tile::PaddingValueAttr", "padding value">, "13.1">:$padding_value
   );
+
+  let extraClassDeclaration = [{
+    /// Returns the distance (in elements) between the start of successive tiles
+    /// along each dimension. On PartitionView, this is an alias for
+    /// getTileShape.
+    ::mlir::DenseI32ArrayAttr getTraversalStrides() {
+      return getTileShape();
+    }
+  }];
 
   let hasCustomAssemblyFormat = 1;
   let genVerifyDecl = 1;
@@ -582,10 +1008,10 @@ def CudaTile_StridedViewType : CudaTileTypeDef<
     // traversal stride of 1. This time, tiles are overlapping, and the
     // same element will be present in multiple tiles. For example,
     // element 1 of the tensor view is present both as the second element of
-    // tile 0, and as the first element tile 1. Tile 7 is partially out of bounds.
+    // tile 0, and as the first element of tile 1. Tile 7 is partially out of bounds.
     // (Note the space is still 1-dimensional; the second row indicates overlap,
     // not a second dimension.)
-    // 
+    //
     //               8
     // ←─────────────────────────────→
     // (0) (0) (2) (2) (4) (4) (6) (6)
@@ -618,7 +1044,7 @@ def CudaTile_StridedViewType : CudaTileTypeDef<
     //
     !sv_2d = !cuda_tile.strided_view<
       tile=(4x2),
-      traversal_strides=[4,3]
+      traversal_strides=[4,3],
       tensor_view<64x16xf32, strides=[16, 1]>
     >
 
@@ -690,6 +1116,13 @@ def CudaTile_StridedViewType : CudaTileTypeDef<
       unspecified values.
     * **Store operations**: Out-of-bounds tile elements are masked during stores.
 
+    .. note::
+
+      For an :code:`f4E2M1FN` view access, both the statically encoded tile
+      extent and traversal stride mapped to the underlying tensor view's
+      packing dimension must be even. Violating either precondition is
+      undefined behavior.
+
     Example:
 
     ```
@@ -710,7 +1143,7 @@ def CudaTile_StridedViewType : CudaTileTypeDef<
       tile=(1x4),
       traversal_strides=[1,4],
       padding_value = nan,
-      tensor_view<8x2xf32, strides=[2,1]>,
+      tensor_view<8x2xf32, strides=[2,1]>
     >
     ```
   }];
@@ -770,6 +1203,14 @@ def CudaTile_GatherScatterViewType : CudaTileTypeDef<
     .. note::
 
       Only power-of-two tile dimensions are supported.
+
+    .. note::
+
+      An :code:`f4E2M1FN` gather/scatter view access is rejected if the
+      underlying tensor view's packing dimension is the sparse dimension. The
+      statically encoded tile extent in the packing dimension and the scalar
+      index value selecting its origin must both be even. Executing an access
+      with either value odd is undefined behavior.
 
     When loading or storing via a gather_scatter_view, the index at position
     :code:`sparse_dim` must be a **1D tile** whose size equals
@@ -930,7 +1371,60 @@ def CudaTile_TokenType : CudaTileTypeDef<"Token", "token", "token", "13.1"> {
   let summary = "cuda tile token type";
   let description = [{
     Tokens are not runtime values. Their purpose is to explicitly represent
-    ordering constraints between token-ordered operations executed within a tile.
+    ordering constraints between token-ordered operations executed within a
+    tile block.
+
+    Within a tile block, if two operations :code:`A -> B` are connected by a
+    token chain, the compiler makes sure that it is as-if all effects of
+    :code:`A` are visible to :code:`B`. If two operations are not connected
+    by a token chain, the compiler may arbitrarily reorder them as long as
+    SSA dominance is not violated.
+
+    Example:
+
+    ```
+    %val = ... : tile<64xf32>
+    %tok0 = store_ptr_tko weak %ptr, %val -> token
+    %data, %tok1 = load_ptr_tko weak %ptr -> tile<64xf32>, token
+    ```
+
+    The above example has a race condition. The store and load operations
+    operate on the same memory location and the absence of a token dependency
+    means that the effects of the store operation may or may not be visible to
+    the load operation. (Or they may be partly visible.) To remove the race
+    condition, the store and load operation could be connected by a token.
+
+    If two operations :code:`A -> B` are connected by a token chain, but you
+    can prove that the effects of :code:`A` are independent from the effects of
+    :code:`B`, then you can remove the apparent token chain because it will
+    still be as-if the effects of :code:`A` are visible before the effects of
+    :code:`B`.
+
+    Example:
+
+    ```
+    // Assume that %ptr0 and %ptr1 are non-aliasing (non-overlapping) pointers.
+    %val = ... : tile<64xf32>
+    %tok1 = store_ptr_tko weak %ptr0, %val token=%tok0 -> token
+    %data, %tok2 = load_ptr_tko weak %ptr1 token=%tok1 -> tile<64xf32>, token
+    use(%tok2)
+    ```
+
+    In the above example, :code:`%ptr0` and :code:`%ptr1` are non-aliasing.
+    Therefore, the effect of the store operation is irrelevant to the load
+    operation. Rewriting the IR as follows preserves the semantics:
+
+    ```
+    %val = ... : tile<64xf32>
+    %tok1 = store_ptr_tko weak %ptr0, %val token=%tok0 -> token
+    %data, %tok2 = load_ptr_tko weak %ptr1 token=%tok0 -> tile<64xf32>, token
+    %tok3 = join_tokens %tok1, %tok2 : token
+    use(%tok3)
+    ```
+
+    Note: This is only possible because of the non-overlapping pointers, and
+    because the memory operations are both :code:`weak`, so no external thread
+    could observe the reordering either.
   }];
 }
 
@@ -940,7 +1434,7 @@ def CudaTile_TokenType : CudaTileTypeDef<"Token", "token", "token", "13.1"> {
 
 def CudaTile_AnyType : AnyTypeOf<[
   CudaTile_NumberType,
-  Type<CPred<"::llvm::isa<::mlir::cuda_tile::CudaTileType>($_self)">>
+  Type<CPred<"::llvm::isa<::mlir::cuda_tile::CudaTileDialectType>($_self)">>
 ]>;
 
 //===----------------------------------------------------------------------===//

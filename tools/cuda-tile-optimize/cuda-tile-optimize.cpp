@@ -21,6 +21,7 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
 
+#include "cuda_tile/Bytecode/Common/CommandLineOptions.h"
 #include "cuda_tile/Dialect/CudaTile/Optimizer/CudaTileOptimizer.h"
 
 using namespace mlir;
@@ -138,6 +139,15 @@ struct Options {
       llvm::cl::init(false),
       llvm::cl::cat(optCategory),
   };
+  llvm::cl::list<PreviewFeature, /*StorageClass=*/bool, PreviewFeatureCLParser>
+      previewFeatures{
+          "preview",
+          llvm::cl::desc("Enable one or more named preview features"),
+          llvm::cl::value_desc("feature[,feature...]"),
+          llvm::cl::CommaSeparated,
+          llvm::cl::ValueRequired,
+          llvm::cl::cat(optCategory),
+      };
 };
 
 } // namespace
@@ -186,6 +196,7 @@ Built on {1}
   TileIROptimizerConfig cfg;
   cfg.verbose = options.verbose;
   cfg.input = TileIROptInput::fromFile(options.inputFile);
+  cfg.previewFeatures = makePreviewFeatures(options.previewFeatures);
 
   // Pipeline toggles (positive logic now)
   cfg.opt.enableFuseFMA = options.fuseFMA;

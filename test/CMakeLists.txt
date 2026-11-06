@@ -33,6 +33,7 @@ add_subdirectory(lib)
 set(MLIR_TEST_DEPENDS
   FileCheck
   not
+  split-file
   cuda-tile-opt
   cuda-tile-optimize
   cuda-tile-translate

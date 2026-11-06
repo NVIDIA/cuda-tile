@@ -14,6 +14,8 @@
 
 #include "llvm/Support/CommandLine.h"
 
+#include "cuda_tile/Bytecode/Common/CommandLineOptions.h"
+#include "cuda_tile/Dialect/CudaTile/IR/Dialect.h"
 #include "cuda_tile/Dialect/CudaTile/Transforms/Passes.h"
 
 #ifdef CUDA_TILE_ENABLE_TESTING
@@ -35,6 +37,8 @@ int main(int argc, char **argv) {
       llvm::cl::desc("Treat unsupported/invalid optimization hints as errors"),
       llvm::cl::init(false));
 
+  mlir::cuda_tile::registerTileIRPreviewOption();
+
   mlir::DialectRegistry registry;
   registry.insert<mlir::cuda_tile::CudaTileDialect>();
   // Add an extension to configure the dialect when it's loaded
@@ -43,6 +47,8 @@ int main(int argc, char **argv) {
         // Configure hint diagnostics based on command-line options
         dialect->setWarnUnsupportedHints(warnUnsupportedHints);
         dialect->setErrorOnHints(errorOnHints);
+        dialect->setEnabledPreviewFeatures(
+            mlir::cuda_tile::getPreviewFeaturesFromCommandLine());
       });
 
   mlir::registerCanonicalizerPass();

@@ -41,7 +41,7 @@ def main():
     try:
         # Step 1: Convert MLIR to CUDA Tile BC
         tilebc_file = f"{output_base}.out.tilebc"
-        cmd1 = f"cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module {input_file} -o {tilebc_file}"
+        cmd1 = f"cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module {input_file} -o {tilebc_file} {extra_flags_str}".strip()
         run_command(cmd1)
 
         # Step 2: Convert CUDA Tile BC back to MLIR

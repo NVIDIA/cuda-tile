@@ -32,17 +32,17 @@ cuda_tile.module @forward_compatibility_tests {
 
   // Test case 4: Backward compatibility for DefaultValuedParameter.
   // The newType parameter (added in 250.1) equals its default (i32).
-  // This allows serialization to 250.0 which doesn't have this parameter.
-  entry @test_explicit_default_equals(%arg0: !cuda_tile.testing$bytecode_test_evolved<f32, i32>) {
-    // CHECK-250-0: @test_explicit_default_equals(%{{.*}}: testing$bytecode_test_evolved<f32>)
-    // CHECK-250-1: @test_explicit_default_equals(%{{.*}}: testing$bytecode_test_evolved<f32>)
+  // This allows serialization to 250.0 which doesn't have these parameters.
+  testing$func @test_explicit_default_equals(%arg0: !cuda_tile.testing$bytecode_test_evolved<f32, f32, i32>) {
+    // CHECK-250-0: @test_explicit_default_equals(%{{.*}}: testing$bytecode_test_evolved<f32, f32>)
+    // CHECK-250-1: @test_explicit_default_equals(%{{.*}}: testing$bytecode_test_evolved<f32, f32>)
     return
   }
 
   // Test case 5: Type parameter without specifying optional params (all implicit defaults).
-  entry @test_all_implicit_defaults(%arg0: !cuda_tile.testing$bytecode_test_evolved<f32>) {
-    // CHECK-250-0: @test_all_implicit_defaults(%{{.*}}: testing$bytecode_test_evolved<f32>)
-    // CHECK-250-1: @test_all_implicit_defaults(%{{.*}}: testing$bytecode_test_evolved<f32>)
+  testing$func @test_all_implicit_defaults(%arg0: !cuda_tile.testing$bytecode_test_evolved<f32, f32>) {
+    // CHECK-250-0: @test_all_implicit_defaults(%{{.*}}: testing$bytecode_test_evolved<f32, f32>)
+    // CHECK-250-1: @test_all_implicit_defaults(%{{.*}}: testing$bytecode_test_evolved<f32, f32>)
     return
   }
 
@@ -58,9 +58,10 @@ cuda_tile.module @forward_compatibility_tests {
   // Test case 7: Evolved attr with base value only works at both versions.
   entry @test_evolved_attr_base_only() {
     %input = constant <f32: [1.0]> : !cuda_tile.tile<1xf32>
-    %t = testing$bytecode_test_evolution (%input : !cuda_tile.tile<1xf32>) test_attr = #cuda_tile.bytecode_test_evolved_attr<42> -> !cuda_tile.token
-    // CHECK-250-0: bytecode_test_evolution{{.*}}test_attr = <42>
-    // CHECK-250-1: bytecode_test_evolution{{.*}}test_attr = <42>
+    %t = testing$bytecode_test_evolution (%input : !cuda_tile.tile<1xf32>) test_attr = #cuda_tile.bytecode_test_evolved_attr<42, 42> -> !cuda_tile.token
+    // CHECK-250-0: bytecode_test_evolution{{.*}}test_attr = <42, 42>
+    // CHECK-250-1: bytecode_test_evolution{{.*}}test_attr = <42, 42>
     return
   }
+
 }

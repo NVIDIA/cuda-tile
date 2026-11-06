@@ -20,6 +20,7 @@ int main(int argc, char **argv) {
   mlir::cuda_tile::registerTileIRBytecodeVersionOption();
   mlir::cuda_tile::registerTileIROptimizationHintsOptions();
   mlir::cuda_tile::registerListVersionsOption();
+  mlir::cuda_tile::registerTileIRPreviewOption();
   mlir::cuda_tile::registerTileIRTranslations();
   mlir::cuda_tile::registerTileIRTestTranslations();
 

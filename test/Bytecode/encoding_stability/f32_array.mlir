@@ -1,7 +1,7 @@
 // Encoding-stability guard for multi-element `tile<Nxf32>` constants.
 // Catches endianness shifts and non-splat dense-float layout changes.
 
-// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module %s -o %t.bc
+// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module -bytecode-version=13.4 %s -o %t.bc
 // RUN: cmp %t.bc %S/goldens/f32_array.golden.tileirbc
 
 cuda_tile.module @kernels {

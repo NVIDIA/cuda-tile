@@ -18,6 +18,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/TableGen/Error.h"
 
+#include "BytecodeGenUtilities.h"
 using namespace llvm;
 using namespace mlir;
 using namespace mlir::tblgen;
@@ -58,6 +59,10 @@ BytecodeAttrParameter::classifyParameter(const AttrOrTypeParameter &param) {
         paramRecord->isSubClassOf("CudaTileI64EnumAttr") ||
         paramRecord->isSubClassOf("I32EnumAttr") ||
         paramRecord->isSubClassOf("I64EnumAttr") ||
+        // MLIR's EnumAttr backs its single `$value` parameter with an
+        // EnumParameter (derived from AttrParameter, not *EnumAttr), so match
+        // it here to let a tagged EnumAttr serialize its value as a varint.
+        paramRecord->isSubClassOf("EnumParameter") ||
         paramRecord->isSubClassOf("EnumAttr")) {
       return Kind::EnumValue;
     }
@@ -122,6 +127,17 @@ BytecodeAttrParameter::classifyParameter(const AttrOrTypeParameter &param) {
     return Kind::APInt;
   }
 
+  // Raw `::mlir::Type` (or a concrete subclass such as `ShapedType`) is
+  // serialized through the type table, mirroring the type-side
+  // GenericType/SpecificType handling. This is what backs an attribute's self
+  // type (MLIR's AttributeSelfTypeParameter, used to implement
+  // TypedAttrInterface), but also covers any bare Type-valued parameter. The
+  // earlier, more specific checks (TypeAttr, *Attr, etc.) have already run, so
+  // a remaining "Type" spelling is an actual type parameter.
+  if (cppType.contains("Type") || cppStorageType.contains("Type")) {
+    return Kind::Type;
+  }
+
   // Unsupported parameter type.
   PrintFatalError("Unsupported attribute parameter type for bytecode: " +
                   cppType.str() + " (storage: " + cppStorageType.str() + ")");
@@ -140,12 +156,18 @@ BytecodeAttrParameter::BytecodeAttrParameter(const AttrOrTypeParameter &param)
   isSigned = (typeRef.contains("int") && !typeRef.contains("uint")) ||
              (storageRef.contains("int") && !storageRef.contains("uint"));
 
-  // Extract version from wrapped parameters.
+  // Extract version and bytecode fallback from wrapped parameters.
+  // CudaTileAttrParam adds sinceVersion and optionally bytecodeFallbackValue.
   if (const auto *defInit = dyn_cast_if_present<DefInit>(param.getDef())) {
     const Record *paramRecord = defInit->getDef();
     if (paramRecord->getValue("sinceVersion") &&
         !paramRecord->isValueUnset("sinceVersion")) {
       sinceVersion = paramRecord->getValueAsString("sinceVersion").str();
+    }
+    if (paramRecord->getValue("bytecodeFallbackValue") &&
+        !paramRecord->isValueUnset("bytecodeFallbackValue")) {
+      bytecodeFallbackValue =
+          paramRecord->getValueAsString("bytecodeFallbackValue").str();
     }
   }
 
@@ -162,12 +184,16 @@ BytecodeAttrParameter::BytecodeAttrParameter(const AttrOrTypeParameter &param)
 CudaTileSerializableAttr::CudaTileSerializableAttr(const AttrOrTypeDef &attrDef,
                                                    unsigned tag,
                                                    StringRef version,
-                                                   bool skipVersionCheck)
+                                                   bool skipVersionCheck,
+                                                   bool isPreview)
     : attrName(attrDef.getCppClassName().str()),
       qualifiedCppName(attrDef.getDialect().getCppNamespace().str() +
                        "::" + attrDef.getCppClassName().str()),
       tagValue(tag), sinceVersion(version.str()),
-      skipVersionCheck(skipVersionCheck) {
+      skipVersionCheck(skipVersionCheck), isPreview(isPreview) {
+  if (isPreview) {
+    owningPreviewFeature = getOwningPreviewFeatureName(attrDef.getDef()).str();
+  }
   // Derive tag name by stripping "Attr" suffix from C++ class name.
   StringRef tagNameRef(attrName);
   tagNameRef.consume_back("Attr");
@@ -210,13 +236,16 @@ CudaTileSerializableAttr::CudaTileSerializableAttr(const AttrOrTypeDef &attrDef,
             "attribute serialization. Use OptionalParameter instead.");
       }
 
-      // Evolved parameters must be optional.
-      if (param.sinceVersion != sinceVersion && !param.isOptional) {
+      // Evolved non-optional parameters need a fallback (either ODS
+      // defaultValue or bytecodeFallbackValue).
+      if (param.sinceVersion != sinceVersion && !param.isOptional &&
+          param.defaultValue.empty() && param.bytecodeFallbackValue.empty()) {
         PrintFatalError(
             "Parameter '" + param.name + "' in attribute '" + attrName +
             "' was introduced in version " + param.sinceVersion +
             " after the attribute (version " + sinceVersion +
-            "). Evolved attr parameters must use OptionalParameter.");
+            "). It must have either an explicit bytecode fallback expression "
+            "or an ODS default value for backward compatibility.");
       }
     }
 
@@ -256,11 +285,14 @@ mlir::tblgen::analyzeBytecodeAttrs(const RecordKeeper &records) {
     const Record *record;
     StringRef sinceVersion;
     bool skipsVersionCheck;
+    bool isPreview;
+    StringRef owningPreviewFeature;
   };
   StringMap<AttrDefInfo> attrDefs;
   for (const Record *record :
        records.getAllDerivedDefinitions("CudaTileAttrDef")) {
-    bool skips = false;
+    bool isPreview = record->isSubClassOf("CudaTilePreviewAttrDef");
+    bool skips = isPreview;
     StringRef version;
     if (record->getValue("sinceVersion") &&
         !record->isValueUnset("sinceVersion")) {
@@ -272,7 +304,44 @@ mlir::tblgen::analyzeBytecodeAttrs(const RecordKeeper &records) {
                       "CudaTileAttrDef '" + record->getName().str() +
                           "' is missing or has empty 'sinceVersion'");
 
-    attrDefs[extractAttrTagName(record->getName())] = {record, version, skips};
+    StringRef owningPreviewFeature =
+        isPreview ? getOwningPreviewFeatureName(record) : StringRef();
+    attrDefs[extractAttrTagName(record->getName())] = {
+        record, version, skips, isPreview, owningPreviewFeature};
+  }
+
+  // Add CudaTileEnumAttr to the attrDefs map, keyed by tag name. An MLIR
+  // `EnumAttr` (e.g. one created via `CudaTileEnumAttr`) is an `AttrDef` with a
+  // single `$value` EnumParameter, but it is *not* a `CudaTileAttrDef`, so the
+  // scan above does not see it. A `BytecodeAttrTag` may still name one: once
+  // tagged, it flows through the same serializable-attr machinery, serializing
+  // its value as a single varint.
+  for (const Record *record :
+       records.getAllDerivedDefinitions("CudaTileEnumAttr")) {
+    // Get the version from the EnumInfo, which must be a subclass of one of the
+    // CudaTile*EnumAttr.
+    const auto *enumInfo = record->getValueAsDef("enum");
+    if (!enumInfo->isSubClassOf("CudaTileIntEnumAttr")) {
+      PrintFatalError(record->getLoc(), "CudaTileEnumAttr has an unknown enum "
+                                        "info, expected CudaTileIntEnumAttr");
+    }
+
+    StringRef version;
+    if (enumInfo->getValue("sinceVersion") &&
+        !enumInfo->isValueUnset("sinceVersion")) {
+      version = enumInfo->getValueAsString("sinceVersion");
+    }
+
+    bool skips = false;
+    if (!skips && version.empty()) {
+      PrintFatalError(record->getLoc(),
+                      "CudaTile '" + record->getName().str() +
+                          "' is missing or has empty 'sinceVersion'");
+    }
+
+    attrDefs[extractAttrTagName(record->getName())] = {
+        record, version, skips, /*isPreview=*/false,
+        /*owningPreviewFeature=*/{}};
   }
 
   // Process BytecodeAttrTag records in a single pass: build bytecodeAttrs
@@ -281,6 +350,16 @@ mlir::tblgen::analyzeBytecodeAttrs(const RecordKeeper &records) {
        records.getAllDerivedDefinitions("BytecodeAttrTag")) {
     StringRef attrName = record->getValueAsString("cppAttrName");
     unsigned tagValue = record->getValueAsInt("attrTagValue");
+    bool isPreviewTag = record->isSubClassOf("PreviewBytecodeAttrTag");
+
+    if (isPreviewTag && (tagValue < 0xD0 || tagValue > 0xEF))
+      PrintFatalError(record->getLoc(),
+                      "PreviewBytecodeAttrTag value must be in the reserved "
+                      "range [0xD0, 0xEF]");
+    if (!isPreviewTag && tagValue >= 0xD0 && tagValue <= 0xEF)
+      PrintFatalError(record->getLoc(),
+                      "attribute tags in the reserved range [0xD0, 0xEF] "
+                      "must use PreviewBytecodeAttrTag");
 
     // Build BytecodeAttr for tag enum and version checking.
     BytecodeAttr attr;
@@ -292,6 +371,12 @@ mlir::tblgen::analyzeBytecodeAttrs(const RecordKeeper &records) {
     } else if (auto it = attrDefs.find(attrName); it != attrDefs.end()) {
       attr.sinceVersion = it->second.sinceVersion.str();
       attr.skipsVersionCheck = it->second.skipsVersionCheck;
+      attr.isPreview = it->second.isPreview;
+      attr.owningPreviewFeature = it->second.owningPreviewFeature.str();
+      if (attr.isPreview != isPreviewTag)
+        PrintFatalError(record->getLoc(),
+                        "preview attribute/tag classification mismatch for '" +
+                            attrName.str() + "'");
     } else {
       PrintFatalError(record->getLoc(),
                       "BytecodeAttrTag '" + attrName.str() +
@@ -313,7 +398,8 @@ mlir::tblgen::analyzeBytecodeAttrs(const RecordKeeper &records) {
 
     structure.serializableAttrs.emplace_back(attrDef, tagValue,
                                              it->second.sinceVersion,
-                                             it->second.skipsVersionCheck);
+                                             it->second.skipsVersionCheck,
+                                             it->second.isPreview);
 
     // Catch nested-attr params whose declared C++ type names an
     // AttrInterface that wasn't wrapped with `CudaTileAttrInterfaceParam`.
@@ -338,8 +424,23 @@ mlir::tblgen::analyzeBytecodeAttrs(const RecordKeeper &records) {
   }
 
   // Process enum attributes.
-  auto processEnumDefs = [&](StringRef baseClass) {
+  auto processEnumDefs = [&](StringRef baseClass, bool isPreviewEnum) {
     for (const Record *record : records.getAllDerivedDefinitions(baseClass)) {
+      // A preview enum must keep genSpecializedAttr = 0. MLIR's auto-generated
+      // attribute lives outside the CudaTilePreviewAttrDef machinery, so it
+      // would carry neither preview bytecode metadata nor owning-feature
+      // classification and would bypass the named preview gate. Expose preview
+      // enums as attributes via CudaTilePreviewEnumAttr instead.
+      if (isPreviewEnum) {
+        if (const auto *gsa = record->getValue("genSpecializedAttr");
+            gsa && record->getValueAsBit("genSpecializedAttr"))
+          PrintFatalError(
+              record->getLoc(),
+              "preview enum '" + record->getName().str() +
+                  "' sets genSpecializedAttr = 1; the auto-generated attribute "
+                  "bypasses the preview gate. Set genSpecializedAttr = 0 and "
+                  "expose it with CudaTilePreviewEnumAttr.");
+      }
       // Skip utility enums that are not MLIR attributes (e.g.,
       // GpuArchitecture, HintKey).  These use specialized case classes
       // that indicate they are not meant for bytecode serialization.
@@ -390,8 +491,9 @@ mlir::tblgen::analyzeBytecodeAttrs(const RecordKeeper &records) {
     }
   };
 
-  processEnumDefs("CudaTileI32EnumAttr");
-  processEnumDefs("CudaTileI64EnumAttr");
+  processEnumDefs("CudaTileI32EnumAttr", /*isPreviewEnum=*/false);
+  processEnumDefs("CudaTileI64EnumAttr", /*isPreviewEnum=*/false);
+  processEnumDefs("CudaTilePreviewI32EnumInfo", /*isPreviewEnum=*/true);
 
   // Sort by tag value for deterministic enum generation.
   llvm::sort(structure.bytecodeAttrs, [](const auto &a, const auto &b) {

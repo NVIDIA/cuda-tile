@@ -165,6 +165,24 @@ cuda_tile.module @module {
 // -----
 
 cuda_tile.module @module {
+  cuda_tile.testing$func @make_tensor_view_unused_static_index_type(%base: !cuda_tile.tile<!cuda_tile.ptr<f32>>) {
+    // expected-error @below{{unexpected index type for static shape and strides}}
+    cuda_tile.make_tensor_view %base, shape = [2, 2], strides = [2, 1] : tile<ptr<f32>>, tile<i32> -> tensor_view<2x2xf32, strides=[2, 1]>
+  }
+}
+
+// -----
+
+cuda_tile.module @module {
+  cuda_tile.testing$func @make_tensor_view_missing_dynamic_index_type(%base: !cuda_tile.tile<!cuda_tile.ptr<f32>>, %size: !cuda_tile.tile<i32>) {
+    // expected-error @below{{expected index type for dynamic shape or stride operands}}
+    cuda_tile.make_tensor_view %base, shape = [%size, 2], strides = [2, 1] : tensor_view<?x2xf32, strides=[2, 1]>
+  }
+}
+
+// -----
+
+cuda_tile.module @module {
   cuda_tile.testing$func @make_tensor_view_garbage_in(%base: !cuda_tile.tile<!cuda_tile.ptr<f64>>, %ci64: !cuda_tile.tile<i64>) {
     // expected-error @below{{expected either integer or SSA value}}
     cuda_tile.make_tensor_view %base, shape = [32, sdfsdffds], strides = [] : tensor_view<f32>
@@ -419,6 +437,47 @@ cuda_tile.module @module {
 // -----
 
 // ****************** cuda_tile.load_view_tko ******************
+
+cuda_tile.module @module {
+  cuda_tile.testing$func @f4_load_missing_packing_dimension(
+      %view: !cuda_tile.partition_view<tile=(4), !cuda_tile.tensor_view<8xf4E2M1FN, strides=[2]>>) {
+    %c0 = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
+    // expected-error @below{{an f4 view access requires exactly one statically encoded unit stride to identify the packing dimension; got 0}}
+    %tile, %token = cuda_tile.load_view_tko weak %view[%c0]
+      : partition_view<tile=(4), tensor_view<8xf4E2M1FN, strides=[2]>>, tile<i32>
+        -> tile<4xf4E2M1FN>, token
+  }
+}
+
+// -----
+
+cuda_tile.module @module {
+  cuda_tile.testing$func @f4_load_ambiguous_packing_dimension(
+      %view: !cuda_tile.partition_view<tile=(4x4), !cuda_tile.tensor_view<8x8xf4E2M1FN, strides=[1,1]>>) {
+    %c0 = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
+    // expected-error @below{{an f4 view access requires exactly one statically encoded unit stride to identify the packing dimension; got 2}}
+    %tile, %token = cuda_tile.load_view_tko weak %view[%c0, %c0]
+      : partition_view<tile=(4x4), tensor_view<8x8xf4E2M1FN, strides=[1,1]>>, tile<i32>
+        -> tile<4x4xf4E2M1FN>, token
+  }
+}
+
+// -----
+
+cuda_tile.module @module {
+  cuda_tile.testing$func @f4_gather_cannot_be_sparse_in_packing_dimension(
+      %view: !cuda_tile.gather_scatter_view<tile=(4x4), !cuda_tile.tensor_view<8x8xf4E2M1FN, strides=[1,8]>, sparse_dim=0>) {
+    %indices = cuda_tile.iota : !cuda_tile.tile<4xi32>
+    %c0 = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>
+    // expected-error @below{{an f4 gather/scatter view cannot use packing dimension 0 as its sparse dimension}}
+    %tile, %token = cuda_tile.load_view_tko weak %view[%indices, %c0]
+      : gather_scatter_view<tile=(4x4), tensor_view<8x8xf4E2M1FN, strides=[1,8]>, sparse_dim=0>, tile<4xi32>, tile<i32>
+        -> tile<4x4xf4E2M1FN>, token
+  }
+}
+
+// -----
+
 cuda_tile.module @module {
   cuda_tile.testing$func @tile_partition_wrong_load_type(%view: !cuda_tile.partition_view<tile=(1024x1024), !cuda_tile.tensor_view<4096x4096xf32, strides=[4096,1]>>) {
     %c0 = cuda_tile.constant <i32: 0> : !cuda_tile.tile<i32>

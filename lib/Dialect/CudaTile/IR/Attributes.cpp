@@ -89,23 +89,20 @@ static std::optional<RetT>
 getHintValue(DictionaryAttr value, StringRef sm, HintKey key,
              ValidationResult<ValidateRetT> (*validate)(Attribute, StringRef),
              Operation *op = nullptr) {
-  if (value.empty()) {
+  if (value.empty())
     return std::nullopt;
-  }
   Attribute attr;
   bool usedDefault = false;
-  if (auto smEntry = value.getAs<DictionaryAttr>(sm)) {
+  if (auto smEntry = value.getAs<DictionaryAttr>(sm))
     attr = smEntry.get(stringifyHintKey(key));
-  }
   if (!attr) {
     if (auto defEntry = value.getAs<DictionaryAttr>("default")) {
       attr = defEntry.get(stringifyHintKey(key));
       usedDefault = (attr != nullptr);
     }
   }
-  if (!attr) {
+  if (!attr)
     return std::nullopt;
-  }
   auto result = validate(attr, sm);
   if (op != nullptr) {
     if (result.value) {
@@ -281,9 +278,8 @@ Attribute OptimizationHintsAttr::parse(AsmParser &parser, Type odsType) {
     return success();
   };
   if (parser.parseCommaSeparatedList(AsmParser::Delimiter::None,
-                                     parseOneEntry)) {
+                                     parseOneEntry))
     return {};
-  }
   if (parser.parseGreater())
     return {};
 

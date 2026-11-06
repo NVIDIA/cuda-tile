@@ -19,7 +19,6 @@
 namespace nb = nanobind;
 using namespace mlir::python::nanobind_adaptors;
 
-
 NB_MODULE(_cuda_tile, m) {
   //===--------------------------------------------------------------------===//
   // CudaTile dialect/pass registration
@@ -36,6 +35,19 @@ NB_MODULE(_cuda_tile, m) {
       nb::arg("context") = nb::none(), nb::arg("load") = true);
 
   m.def("register_passes", []() { mlirCudaTileRegisterPasses(); });
+
+  m.def(
+      "setPreviewFeatures",
+      [](MlirContext context, const std::string &previewFeatures) {
+        MlirStringRef previewFeaturesRef = mlirStringRefCreate(
+            previewFeatures.data(), previewFeatures.size());
+        return mlirCudaTileContextSetPreviewFeatures(context,
+                                                     previewFeaturesRef);
+      },
+      nb::arg("context"), nb::arg("preview_features") = "",
+      "Configure comma-separated CUDA Tile preview features for an MLIR "
+      "context; an empty string disables all features. Call this before "
+      "parsing, reading, verifying, or writing preview IR.");
 
   // Create a simple struct to avoid C++ symbol binding issues with
   // EMBED_CAPI_LINK_LIBS
@@ -108,7 +120,8 @@ NB_MODULE(_cuda_tile, m) {
         return true;
       },
       nb::arg("file"), nb::arg("module"),
-      "Write cuda_tile module to bytecode file object using CAPI wrapper");
+      "Write a cuda_tile module to a bytecode file object. Preview features "
+      "must already be enabled on the module's context.");
 
   // TODO: Implement CudaTile C API wrappers using tablegen.
   // For now we implemented C-API wrappers manually.
@@ -175,6 +188,48 @@ NB_MODULE(_cuda_tile, m) {
                              })
       .def_property_readonly("element_type", [](MlirType type) -> MlirType {
         return mlirCudaTileTileTypeGetElementType(type);
+      });
+
+  mlir_type_subclass(m, "FragmentType", [](MlirType type) -> bool {
+    return mlirCudaTileTypeIsAFragmentType(type);
+  })
+      .def_classmethod(
+          "get",
+          [](const nb::object &cls, const std::vector<int64_t> &shape,
+             MlirType elementType, const std::string &memorySpace,
+             MlirAttribute memLayout, MlirAttribute fragmap,
+             MlirContext context) -> nb::object {
+            MlirStringRef space =
+                mlirStringRefCreateFromCString(memorySpace.c_str());
+            MlirType type = mlirCudaTileFragmentTypeGetChecked(
+                context, shape.size(), shape.data(), elementType, space,
+                memLayout, fragmap);
+            if (mlirTypeIsNull(type))
+              throw nb::value_error("invalid fragment type parameters");
+            return cls(type);
+          },
+          nb::arg("cls"), nb::arg("shape"), nb::arg("element_type"),
+          nb::arg("memory_space"), nb::arg("mem_layout"), nb::arg("fragmap"),
+          nb::arg("context") = nb::none())
+      .def_property_readonly("shape", [](MlirType type) {
+        intptr_t rank = mlirCudaTileFragmentTypeGetRank(type);
+        std::vector<int64_t> shape(rank);
+        for (intptr_t i = 0; i < rank; ++i)
+          shape[i] = mlirCudaTileFragmentTypeGetDimSize(type, i);
+        return shape;
+      })
+      .def_property_readonly("element_type", [](MlirType type) -> MlirType {
+        return mlirCudaTileFragmentTypeGetElementType(type);
+      })
+      .def_property_readonly("memory_space", [](MlirType type) {
+        MlirStringRef value = mlirCudaTileFragmentTypeGetMemorySpace(type);
+        return std::string(value.data, value.length);
+      })
+      .def_property_readonly("mem_layout", [](MlirType type) -> MlirAttribute {
+        return mlirCudaTileFragmentTypeGetMemLayout(type);
+      })
+      .def_property_readonly("fragmap", [](MlirType type) -> MlirAttribute {
+        return mlirCudaTileFragmentTypeGetFragmap(type);
       });
 
   mlir_type_subclass(
@@ -270,7 +325,7 @@ NB_MODULE(_cuda_tile, m) {
              const nb::object &paddingValue,
              MlirContext context) -> nb::object {
             if (!mlirCudaTileTypeIsATensorViewType(wrappedTensorViewType)) {
-              throw nb::type_error("expected tensor_view type");
+              throw std::invalid_argument("expected tensor_view type");
             }
 
             std::vector<int32_t> dimMapInPlace;
@@ -328,10 +383,9 @@ NB_MODULE(_cuda_tile, m) {
           [](MlirType type) -> std::vector<int32_t> {
             intptr_t rank = mlirCudaTilePartitionViewTypeGetDimMapRank(type);
             std::vector<int32_t> result(rank);
-            for (intptr_t i = 0; i < rank; ++i) {
+            for (intptr_t i = 0; i < rank; ++i)
               result[i] =
                   mlirCudaTilePartitionViewTypeGetDimMapElement(type, i);
-            }
             return result;
           })
       .def_property_readonly(
@@ -361,7 +415,7 @@ NB_MODULE(_cuda_tile, m) {
              const nb::object &paddingValue,
              MlirContext context) -> nb::object {
             if (!mlirCudaTileTypeIsATensorViewType(wrappedTensorViewType)) {
-              throw nb::type_error("expected tensor_view type");
+              throw std::invalid_argument("expected tensor_view type");
             }
 
             std::vector<int32_t> dimMapInPlace;
@@ -456,6 +510,78 @@ NB_MODULE(_cuda_tile, m) {
           })
       .def_property_readonly("view_index_rank", [](MlirType type) -> size_t {
         return mlirCudaTileStridedViewTypeGetViewIndexRank(type);
+      });
+
+  mlir_type_subclass(m, "GatherScatterViewType",
+                     [](MlirType type) -> bool {
+                       return mlirCudaTileTypeIsAGatherScatterViewType(type);
+                     })
+      .def_classmethod(
+          "get",
+          [](const nb::object &cls, const std::vector<int32_t> &tileShape,
+             MlirType wrappedTensorViewType, uint32_t sparseDim,
+             const nb::object &paddingValue, MlirContext context) -> nb::object {
+            if (!mlirCudaTileTypeIsATensorViewType(wrappedTensorViewType)) {
+              throw std::invalid_argument("expected tensor_view type");
+            }
+
+            MlirAttribute paddingValueAttr = {nullptr};
+            if (!paddingValue.is_none()) {
+              paddingValueAttr = nb::cast<MlirAttribute>(paddingValue);
+            }
+
+            MlirAttribute tileShapeAttr = mlirCudaTileDenseI32ArrayAttrGet(
+                context, tileShape.size(), tileShape.data());
+
+            MlirType type = mlirCudaTileGatherScatterViewTypeGetChecked(
+                context, tileShapeAttr, wrappedTensorViewType, sparseDim,
+                paddingValueAttr);
+            if (mlirTypeIsNull(type))
+              return nb::none();
+            return cls(type);
+          },
+          nb::arg("cls"), nb::arg("tile_shape"),
+          nb::arg("tensor_view_type"), nb::arg("sparse_dim"),
+          nb::arg("padding_value") = nb::none(),
+          nb::arg("context") = nb::none())
+      .def_property_readonly(
+          "tile_shape",
+          [](MlirType type) -> std::vector<int32_t> {
+            MlirAttribute shapeAttr =
+                mlirCudaTileGatherScatterViewTypeGetTileShape(type);
+            intptr_t numElements =
+                mlirCudaTileDenseI32ArrayAttrGetNumElements(shapeAttr);
+            std::vector<int32_t> result(numElements);
+            for (intptr_t i = 0; i < numElements; ++i) {
+              result[i] = mlirCudaTileDenseI32ArrayAttrGetElement(shapeAttr, i);
+            }
+            return result;
+          })
+      .def_property_readonly(
+          "tensor_view",
+          [](MlirType type) -> MlirType {
+            return mlirCudaTileGatherScatterViewTypeGetTensorView(type);
+          })
+      .def_property_readonly(
+          "tensor_view_type",
+          [](MlirType type) -> MlirType {
+            return mlirCudaTileGatherScatterViewTypeGetTensorView(type);
+          })
+      .def_property_readonly("sparse_dim", [](MlirType type) -> uint32_t {
+        return mlirCudaTileGatherScatterViewTypeGetSparseDim(type);
+      })
+      .def_property_readonly(
+          "padding_value",
+          [](MlirType type) -> MlirAttribute {
+            return mlirCudaTileGatherScatterViewTypeGetPaddingValue(type);
+          })
+      .def_property_readonly(
+          "view_tile_type",
+          [](MlirType type) -> MlirType {
+            return mlirCudaTileGatherScatterViewTypeGetViewTileType(type);
+          })
+      .def_property_readonly("view_index_rank", [](MlirType type) -> size_t {
+        return mlirCudaTileGatherScatterViewTypeGetViewIndexRank(type);
       });
 
   mlir_attribute_subclass(m, "RoundingModeAttr",

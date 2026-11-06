@@ -32,12 +32,13 @@ include "cuda_tile/Dialect/CudaTile/IR/TestingAttrs.td"
 
 def CudaTile_Test_FuncOp : CudaTileTestingOpDef<"func", "250.0", [
   IsolatedFromAbove, FunctionOpInterface, SingleBlock, OpAsmOpInterface,
-  SingleBlockImplicitTerminator<"ReturnOp">, SymbolName
+  SingleBlockImplicitTerminator<"ReturnOp">, SymbolName, SymbolVisibility
 ]> {
 
   let arguments = (ins 
     CudaTileArg<SymbolNameAttr, "The name of the function.", "250.0">:$sym_name,
     CudaTileArg<TypeAttrOf<FunctionType>, "The type of the function.", "250.0">:$function_type,
+    CudaTileArg<OptionalAttr<StrAttr>, "The visibility of the function.", "250.0">:$sym_visibility,
     CudaTileUnusedArg<OptionalAttr<DictArrayAttr>, "The argument attributes of the function.", "250.0">:$arg_attrs,
     CudaTileUnusedArg<OptionalAttr<DictArrayAttr>, "The result attributes of the function.", "250.0">:$res_attrs);
   
@@ -56,11 +57,6 @@ def CudaTile_Test_FuncOp : CudaTileTestingOpDef<"func", "250.0", [
 
     /// Returns the result types of this function.
     ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
-
-    ::mlir::SymbolTable::Visibility getVisibility() {
-      return ::mlir::SymbolTable::Visibility::Public;
-    }
-    void setVisibility(::mlir::SymbolTable::Visibility) {}
   }];
 }
 
@@ -77,13 +73,43 @@ def CudaTile_BytecodeTest_NewAttributeOp : CudaTileTestingOpDef<"bytecode_test_n
 
   let arguments = (ins
     CudaTileArg<UnitAttr, "New UnitAttr flag added in version 250.1 for testing.", "250.1">:$new_flag,
-    CudaTileArg<DefaultValuedAttr<I32Attr, "42">, "New parameter with default value added in version 250.1.", "250.1">:$new_param);
+    CudaTileArg<DefaultValuedAttr<I32Attr, "42">, "New parameter with default value added in version 250.1.", "250.1">:$new_param,
+    CudaTileArg<OptionalAttr<CudaTile_BytecodeTestSelfTypeAttr>,
+                "Self-type attr for exercising raw Type parameter bytecode.", "250.0">:$self_type_attr,
+    CudaTileArg<OptionalAttr<CudaTile_BytecodeTestOptionalTypeAttr>,
+                "Optional-Type attr for exercising optional raw Type parameter bytecode.", "250.0">:$opt_type_attr);
 
   let assemblyFormat = [{
     (`new_flag` $new_flag^)?
     (`new_param` `=` $new_param^)?
+    (`self_type` `=` $self_type_attr^)?
+    (`opt_type` `=` $opt_type_attr^)?
     attr-dict
   }];
+}
+
+//===----------------------------------------------------------------------===//
+// BytecodeTest_PreviewTypeOp
+//===----------------------------------------------------------------------===//
+
+// This is intentionally a stable testing operation: it verifies that direct
+// and nested preview types independently trigger named preview policy.
+def CudaTile_BytecodeTest_PreviewTypeOp
+    : CudaTileTestingOpDef<"bytecode_test_preview_type", "13.5"> {
+  let summary = "Testing operation carrying public-preview types";
+  let results = (outs
+    CudaTileArg<AnyType, "The type being exercised.", "13.5">:$result);
+  let assemblyFormat = "attr-dict `:` type($result)";
+}
+
+// This intentionally stable operation verifies that an explicit preview enum
+// attribute independently triggers named preview policy.
+def CudaTile_BytecodeTest_MemorySpaceAttrOp
+    : CudaTileTestingOpDef<"bytecode_test_memory_space_attr", "13.5"> {
+  let summary = "Testing operation carrying a preview memory-space attribute";
+  let arguments = (ins
+    CudaTileArg<CudaTile_MemorySpaceAttr, "Preview memory space.",
+                "13.5">:$memory_space);
 }
 
 //===----------------------------------------------------------------------===//
@@ -108,7 +134,11 @@ def CudaTile_BytecodeTest_EvolutionOp :
       CudaTileArg<OptionalAttr<CudaTile_BytecodeTestPriorityAttr>,
                   "Priority enum attr added in 250.0.", "250.0">:$priority,
       CudaTileArg<OptionalAttr<CudaTile_BytecodeTestEvolvedAttr>,
-                  "Evolved standalone attr available from 250.0.", "250.0">:$test_attr);
+                  "Evolved standalone attr available from 250.0.", "250.0">:$test_attr,
+      CudaTileArg<OptionalAttr<CudaTile_BytecodeTestSandwichedOptionalAttr>,
+                  "Sandwiched optional attr available from 250.0.", "250.0">:$sandwich_attr,
+      CudaTileArg<OptionalAttr<CudaTile_BytecodeTestEvolvedArrayRefAttr>,
+                  "Evolved ArrayRef attr available from 250.0.", "250.0">:$arrayref_attr);
 
   let results = (outs
       CudaTileArg<CudaTile_TokenType, "New token result added in version 250.1.", "250.1">:$result_token);
@@ -119,6 +149,8 @@ def CudaTile_BytecodeTest_EvolutionOp :
     (`token` `=` $optional_token^ `:` custom<CudaTileType>(type($optional_token)))?
     (`priority` `=` $priority^)?
     (`test_attr` `=` $test_attr^)?
+    (`sandwich` `=` $sandwich_attr^)?
+    (`arrayref` `=` $arrayref_attr^)?
     `->` custom<CudaTileType>(type($result_token))
     attr-dict
   }];

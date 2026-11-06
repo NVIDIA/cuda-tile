@@ -43,9 +43,8 @@ CudaTileElementType elementTypeFromString(StringRef name) {
     return kF8E4M3FN;
   if (name == "CudaTile_Float8E5M2")
     return kF8E5M2;
-  if (name == "CudaTile_Float8E8M0FNU") {
+  if (name == "CudaTile_Float8E8M0FNU")
     return kF8E8M0FNU;
-  }
   if (name == "CudaTile_Float4E2M1FN")
     return kF4E2M1FN;
   if (name == "CudaTile_Float8E5M3FNU") {
@@ -57,9 +56,8 @@ CudaTileElementType elementTypeFromString(StringRef name) {
     return kBF16;
   if (name == "CudaTile_Float32")
     return kF32;
-  if (name == "CudaTile_TFloat32") {
+  if (name == "CudaTile_TFloat32")
     return kTF32;
-  }
   if (name == "CudaTile_Float64")
     return kF64;
   return kUnknown;
@@ -387,7 +385,8 @@ TileIRType convertAttributeDef(const std::string &opName,
              attrDef.isSubClassOf("ConfinedAttr")) {
     auto baseAttr = attrDef.getValueAsDef("baseAttr");
     return convertAttributeDef(opName, *baseAttr);
-  } else if (attrDef.isSubClassOf("DefaultValuedAttr")) {
+  } else if (attrDef.isSubClassOf("DefaultValuedAttr") ||
+             attrDef.isSubClassOf("DefaultValuedOptionalAttr")) {
     // TODO: Add a new case for defaulted valued attributes.
     auto baseAttr = attrDef.getValueAsDef("baseAttr");
     return convertAttributeDef(opName, *baseAttr);
@@ -436,6 +435,8 @@ TileIRType convertAttributeDef(const std::string &opName,
     return TileIRType::builtin("DenseConstant");
   } else if (attrName == "DenseBoolArrayAttr") {
     return TileIRType::builtin("DenseBoolArray");
+  } else if (attrName == "CudaTile_MultimemReductionKindAttr") {
+    return TileIRType::attribute(opName, "MultimemReductionKind");
   } else if (StringRef(attrName).starts_with("CudaTile_") &&
              (attrDef.isSubClassOf("CudaTileAttrDef") ||
               attrDef.isSubClassOf("EnumAttrInfo"))) {

@@ -32,6 +32,16 @@
 //     - DK_Fail     : Optimization attempted but failed
 //     - DK_Analysis : Informational analysis (no pass/fail)
 //
+// (b2) Special always-on diagnostics (not subject to remark filtering):
+//     - TileIRError<>   + reportError()
+//     - TileIRWarning<> + reportWarning()
+//
+//     These do not take a category and always route through the MLIR remark
+//     engine via RemarkEngine::report(), bypassing the per-kind filters so
+//     the diagnostic is always visible whenever a remark engine is attached
+//     to the context. Each one carries a `RemarkId` argument such as
+//     `E0000` / `W0000` (see the ID note below).
+//
 // (c) Define the remark:
 //
 //     def RemarkMyOptimization
@@ -75,11 +85,44 @@
 //   - DK_Fail     -> _Failed
 //   - DK_Analysis -> _Analysis
 //
+// Error / Warning entries live in their own enums (ErrorID / WarningID)
+// so call sites state intent directly. The enum name has no kind suffix,
+// because each entry is a single symbol in its category:
+//
+//   remark::reportError(op, remark::ErrorID::GenericError, "what happened");
+//   remark::reportWarning(op, remark::WarningID::GenericWarning, "what");
+//
+// reportError is a diagnostic emitter — it does NOT end compilation.
+// Callers that need the pass / op to fail must propagate failure
+// themselves, e.g.:
+//
+//   remark::reportError(op, remark::ErrorID::GenericError, "...");
+//   signalPassFailure();            // inside a Pass
+//   return failure();               // or inside an op verifier / helper
+//
+// User-facing IDs come straight from the TableGen `Num` field: `Num=N`
+// becomes the `RemarkId` argument `E####` / `W####` where `####` is `N`
+// zero-padded to four digits (so `Num=0` is `E0000`, `Num=7` is `E0007`):
+//
+//   TableGen:  def GenericError
+//                : TileIRError<"GenericError", 0,
+//                              "Internal compiler error: {0}">;
+//   RemarkId:  E0000
+//
+//   TableGen:  def GenericWarning : TileIRWarning<"GenericWarning", 0, "...">;
+//   RemarkId:  W0000
+//
+// When adding a new Error/Warning, pick the next unused `Num` and append
+// it to the ErrorID / WarningID enum list in Errors.td / Warnings.td.
+// `Num` is the public identifier — do not reuse or renumber existing
+// entries.
+//
 //===----------------------------------------------------------------------===//
 
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/SymbolTable.h" // For SymbolOpInterface
+#include "mlir/Support/LogicalResult.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -136,6 +179,8 @@ private:
 };
 
 using RemarkID = cuda_tile::remark::RemarkID;
+using ErrorID = cuda_tile::remark::ErrorID;
+using WarningID = cuda_tile::remark::WarningID;
 
 /// This class provides an in-flight remark that's still being built. The remark
 /// takes a configurable finalizer that is called when the remark is destroyed,
@@ -286,6 +331,19 @@ InFlightRemark reportRemark(Operation *op, RemarkID id,
 InFlightRemark reportRemark(Operation *op, RemarkID id, StringRef message,
                             StringRef reason = {}, StringRef suggestion = {},
                             InFlightRemark::Finalizer finalizer = {});
+
+/// Report an error. Always emitted (bypasses remark filtering).
+///
+/// Does NOT end compilation. reportError is a diagnostic emitter; the
+/// caller is responsible for propagating failure — e.g. by calling
+/// signalPassFailure() inside a pass, or returning failure() from the
+/// operation that detected the error.
+void reportError(Operation *op, ErrorID id, StringRef extraMsg = {},
+                 StringRef reason = {}, StringRef suggestion = {});
+
+/// Report a warning. Always emitted (bypasses remark filtering).
+void reportWarning(Operation *op, WarningID id, StringRef extraMsg = {},
+                   StringRef reason = {}, StringRef suggestion = {});
 
 } // namespace mlir::cuda_tile::remark
 

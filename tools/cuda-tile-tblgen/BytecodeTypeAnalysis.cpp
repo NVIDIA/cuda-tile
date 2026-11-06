@@ -13,6 +13,7 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/TableGen/Error.h"
 
+#include "BytecodeGenUtilities.h"
 using namespace llvm;
 using namespace mlir;
 using namespace mlir::tblgen;
@@ -72,6 +73,16 @@ BytecodeTypeParameter::classifyParameter(const AttrOrTypeParameter &param) {
     if (defInit->getDef()->isSubClassOf("CudaTileAttrInterfaceParam")) {
       return Kind::PolymorphicNestedAttr;
     }
+    if (defInit->getDef()->isSubClassOf(
+            "CudaTilePreviewTypeExtensionParam")) {
+      return Kind::PolymorphicNestedAttr;
+    }
+    // A required (non-optional) enum parameter declared via `EnumParameter<>`
+    // carries the raw enum class as its C++ type. It is serialized as its
+    // underlying integer value (see codegen).
+    if (defInit->getDef()->isSubClassOf("EnumParameter")) {
+      return Kind::Enum;
+    }
   }
   if (cppType.contains("Attribute") || cppStorageType.contains("Attribute") ||
       cppType.ends_with("Attr") || cppStorageType.ends_with("Attr") ||
@@ -111,15 +122,37 @@ BytecodeTypeParameter::BytecodeTypeParameter(const AttrOrTypeParameter &param)
       cppStorageType(param.getCppStorageType().str()),
       isOptional(param.isOptional()), kind(classifyParameter(param)) {
 
-  // Extract version from wrapped parameters (CudaTileTypeParam adds
-  // sinceVersion). Use getValue() to check if field exists before accessing -
-  // raw parameters like ArrayRefParameter don't have this field in their class
-  // hierarchy.
+  // Extract version and bytecode fallback from wrapped parameters.
+  // CudaTileTypeParam adds sinceVersion and optionally bytecodeFallbackValue.
+  // Use getValue() to check if field exists before accessing - raw parameters
+  // like ArrayRefParameter don't have these fields.
   if (const auto *defInit = dyn_cast_if_present<DefInit>(param.getDef())) {
     const Record *paramRecord = defInit->getDef();
     if (paramRecord->getValue("sinceVersion") &&
         !paramRecord->isValueUnset("sinceVersion")) {
       sinceVersion = paramRecord->getValueAsString("sinceVersion").str();
+    }
+    if (paramRecord->getValue("bytecodeFallbackValue") &&
+        !paramRecord->isValueUnset("bytecodeFallbackValue")) {
+      bytecodeFallbackValue =
+          paramRecord->getValueAsString("bytecodeFallbackValue").str();
+    }
+    if (paramRecord->getValue("bytecodePreviewExtension") &&
+        !paramRecord->isValueUnset("bytecodePreviewExtension")) {
+      isPreviewExtension =
+          paramRecord->getValueAsBit("bytecodePreviewExtension");
+    }
+    if (paramRecord->getValue("previewFeature") &&
+        !paramRecord->isValueUnset("previewFeature")) {
+      owningPreviewFeature = getOwningPreviewFeatureName(paramRecord).str();
+    }
+    // The name is interpolated straight into a `PreviewFeature::` enumerator in
+    // the generated classifier, so an empty one only fails when the generated
+    // header is compiled.
+    if (isPreviewExtension && owningPreviewFeature.empty()) {
+      PrintFatalError(paramRecord->getLoc(),
+                      "bytecode preview extension parameter '" + name +
+                          "' is missing 'previewFeature'");
     }
   }
 
@@ -128,8 +161,11 @@ BytecodeTypeParameter::BytecodeTypeParameter(const AttrOrTypeParameter &param)
     defaultValue = defValue->str();
   }
 
-  // Extract enum type name for OptionalEnum kind.
-  if (kind == Kind::OptionalEnum) {
+  // Extract enum type name for the enum kinds. A required enum parameter is
+  // spelled as the enum itself; an optional one is wrapped in its attribute.
+  if (kind == Kind::Enum) {
+    enumTypeName = cppType;
+  } else if (kind == Kind::OptionalEnum) {
     auto split = StringRef(cppType).rsplit("::");
     if (split.second.empty() || !split.second.ends_with("Attr")) {
       PrintFatalError("OptionalEnum parameter type must end with 'Attr': " +
@@ -147,27 +183,34 @@ BytecodeTypeParameter::BytecodeTypeParameter(const AttrOrTypeParameter &param)
 //===----------------------------------------------------------------------===//
 
 CudaTileType::CudaTileType(const AttrOrTypeDef &typeDef, unsigned tagValue,
-                           StringRef version)
+                           StringRef version, bool isPreview)
     : typeName(typeDef.getCppClassName().str()),
       qualifiedTypeName(typeDef.getDialect().getCppNamespace().str() +
                         "::" + typeDef.getCppClassName().str()),
       typeTagValue(tagValue), sinceVersion(version.str()),
-      needsReverseOrder(typeDef.getCppClassName() == "TileType") {
+      needsReverseOrder(typeDef.getCppClassName() == "TileType"),
+      skipVersionCheck(isPreview), isPreview(isPreview) {
   const Record *typeRecord = typeDef.getDef();
+  if (isPreview) {
+    owningPreviewFeature = getOwningPreviewFeatureName(typeRecord).str();
+  }
+  hasCheckedBuilder = typeDef.genVerifyDecl() || typeDef.genVerifyInvariantsImpl();
 
   // Analyze and validate all parameters.
   for (const auto &attrParam : typeDef.getParameters()) {
     BytecodeTypeParameter param(attrParam);
 
     // Validate: All parameters must have version information.
-    if (!skipVersionCheck && param.sinceVersion.empty()) {
+    if (!skipVersionCheck && !param.isPreviewExtension &&
+        param.sinceVersion.empty()) {
       PrintFatalError(
           "Parameter '" + param.name + "' in type '" + typeName +
           "' must be wrapped with CudaTileTypeParam or "
           "CudaTileConstrainedTypeParam to have version information.");
     }
 
-    // Detect optional Type parameters with null defaults for flag-based.
+    // Detect optional Type parameters with null defaults for flag-based
+    // encoding.
     if (param.usesOptionalTypeFlags) {
       hasOptionalTypeParams = true;
       if (!skipVersionCheck &&
@@ -177,20 +220,50 @@ CudaTileType::CudaTileType(const AttrOrTypeDef &typeDef, unsigned tagValue,
       }
     }
 
-    // Validate: Non-optional parameters introduced after type need defaults.
-    if (!skipVersionCheck && !param.isOptional &&
+    // Validate: Non-optional parameters introduced after type need a default
+    // (either ODS defaultValue or bytecodeFallbackValue).
+    if (!skipVersionCheck && !param.isPreviewExtension && !param.isOptional &&
         param.sinceVersion != sinceVersion) {
-      if (param.defaultValue.empty()) {
+      if (param.defaultValue.empty() && param.bytecodeFallbackValue.empty()) {
         PrintFatalError(
             "Parameter '" + param.name + "' in type '" + typeName +
             "' was introduced in version " + param.sinceVersion +
             " after the type (version " + sinceVersion +
-            "). It must have a default value for backward compatibility.");
+            "). It must have either an explicit bytecode fallback expression "
+            "or an ODS default value for backward compatibility.");
       }
     }
 
     parameters.push_back(std::move(param));
   }
+
+  unsigned previewExtensionCount = 0;
+  for (auto [index, param] : llvm::enumerate(parameters)) {
+    if (!param.isPreviewExtension)
+      continue;
+    ++previewExtensionCount;
+    if (param.isOptional)
+      PrintFatalError(typeRecord->getLoc(),
+                      "preview extension parameter '" + param.name +
+                          "' in type '" + typeName +
+                          "' must not be optional");
+    if (param.bytecodeFallbackValue.empty())
+      PrintFatalError(typeRecord->getLoc(),
+                      "preview extension parameter '" + param.name +
+                          "' in type '" + typeName +
+                          "' requires bytecodeFallbackValue");
+    bool isLastOnWire = needsReverseOrder ? index == 0
+                                          : index + 1 == parameters.size();
+    if (!isLastOnWire)
+      PrintFatalError(typeRecord->getLoc(),
+                      "preview extension parameter '" + param.name +
+                          "' in type '" + typeName +
+                          "' must be last in bytecode serialization order");
+  }
+  if (previewExtensionCount > 1)
+    PrintFatalError(typeRecord->getLoc(),
+                    "type '" + typeName +
+                        "' may have at most one preview extension parameter");
 }
 
 //===----------------------------------------------------------------------===//
@@ -198,10 +271,13 @@ CudaTileType::CudaTileType(const AttrOrTypeDef &typeDef, unsigned tagValue,
 //===----------------------------------------------------------------------===//
 
 BuiltinType::BuiltinType(StringRef name, StringRef qualifiedType, unsigned tag,
-                         StringRef version, unsigned width, StringRef floatType)
+                         StringRef version, unsigned width, StringRef floatType,
+                         StringRef singleton, bool preview,
+                         StringRef owningPreviewFeature)
     : enumName(name.str()), qualifiedTypeName(qualifiedType.str()),
       typeTagValue(tag), sinceVersion(version.str()), integerBitWidth(width),
-      floatMlirTypeName(floatType.str()) {}
+      floatMlirTypeName(floatType.str()), singletonCppType(singleton.str()),
+      isPreview(preview), owningPreviewFeature(owningPreviewFeature.str()) {}
 
 //===----------------------------------------------------------------------===//
 // Analysis Entry Point.
@@ -215,7 +291,9 @@ static void validateAllTypesHaveBytecodeSupport(
     StringRef typeName = entry.getKey();
     const Record *typeRecord = entry.getValue();
 
-    if (typeRecord->getValueAsString("sinceVersion").empty()) {
+    bool isPreview = typeRecord->isSubClassOf("CudaTilePreviewTypeDef");
+
+    if (!isPreview && typeRecord->getValueAsString("sinceVersion").empty()) {
       PrintFatalError(typeRecord->getLoc(), "CudaTileTypeDef '" +
                                                 typeName.str() +
                                                 "' is missing 'sinceVersion'");
@@ -285,6 +363,20 @@ mlir::tblgen::analyzeBytecodeTypes(const RecordKeeper &records) {
        records.getAllDerivedDefinitions("BytecodeTypeTag")) {
     StringRef enumName = record->getValueAsString("cppTypeName");
     unsigned tagValue = record->getValueAsInt("typeTagValue");
+    // Preview tags are the CudaTile preview tag subclass or the preview builtin
+    // singleton subclass.
+    bool isPreviewTag =
+        record->isSubClassOf("PreviewCudaTileTypeTag") ||
+        record->isSubClassOf("PreviewBuiltinSingletonTypeTag");
+
+    if (isPreviewTag && (tagValue < 0xD0 || tagValue > 0xEF))
+      PrintFatalError(record->getLoc(),
+                      "PreviewCudaTileTypeTag value must be in the reserved "
+                      "range [0xD0, 0xEF]");
+    if (!isPreviewTag && tagValue >= 0xD0 && tagValue <= 0xEF)
+      PrintFatalError(record->getLoc(),
+                      "type tags in the reserved range [0xD0, 0xEF] must use "
+                      "PreviewCudaTileTypeTag");
 
     // Validate the tag name is non-empty.
     if (enumName.empty()) {
@@ -305,21 +397,55 @@ mlir::tblgen::analyzeBytecodeTypes(const RecordKeeper &records) {
       structure.builtinSerializableTypes.emplace_back(
           enumName, "FloatType", tagValue, lookupBuiltinVersion(enumName), 0,
           record->getValueAsString("floatMlirTypeName"));
+    } else if (record->isSubClassOf("PreviewBuiltinSingletonTypeTag")) {
+      // Nullary preview builtin: versionless, matched via
+      // isa<cppType> and reconstructed via cppType::get(ctx).
+      StringRef cppType = record->getValueAsString("builtinSingletonCppType");
+      structure.builtinSerializableTypes.emplace_back(
+          enumName, cppType, tagValue, /*version=*/"", /*width=*/0,
+          /*floatType=*/"", /*singleton=*/cppType, /*preview=*/true,
+          getOwningPreviewFeatureName(record));
+    } else if (record->isSubClassOf("HandSerializedTypeTag")) {
+      // Reserves the tag value in the enum only; the serializer and
+      // deserializer live in BytecodeWriter.cpp and BytecodeReader.cpp.
     } else if (record->isSubClassOf("CudaTileTypeTag")) {
       typesWithTags.insert(enumName);
       auto it = cudaTileTypeDefRecords.find(enumName);
-      if (it != cudaTileTypeDefRecords.end()) {
-        AttrOrTypeDef typeDef(it->second);
-        StringRef typeVersion =
-            typeDef.getDef()->getValueAsString("sinceVersion");
-        structure.cudaTileTypes.emplace_back(typeDef, tagValue, typeVersion);
+      if (it == cudaTileTypeDefRecords.end()) {
+        // The tag value is frozen wire format and was added to the enum above,
+        // so accepting the unmatched record would consume it while generating
+        // no serializer, deserializer or classifier. A type deliberately
+        // serialized by hand must say so with HandSerializedTypeTag.
+        PrintFatalError(record->getLoc(),
+                        "BytecodeTypeTag '" + enumName.str() +
+                            "' has no matching CudaTileTypeDef; use "
+                            "HandSerializedTypeTag if it is serialized by hand");
       }
+      AttrOrTypeDef typeDef(it->second);
+      bool isPreviewType =
+          typeDef.getDef()->isSubClassOf("CudaTilePreviewTypeDef");
+      if (isPreviewType != isPreviewTag)
+        PrintFatalError(record->getLoc(),
+                        "preview type/tag classification mismatch for '" +
+                            enumName.str() + "'");
+      StringRef typeVersion = typeDef.getDef()->getValueAsString("sinceVersion");
+      structure.cudaTileTypes.emplace_back(typeDef, tagValue, typeVersion,
+                                           isPreviewType);
     } else {
       PrintFatalError(record->getLoc(),
                       "BytecodeTypeTag '" + enumName.str() +
-                          "' must subclass IntegerTypeTag, FloatTypeTag, or "
-                          "CudaTileTypeTag");
+                          "' must subclass IntegerTypeTag, FloatTypeTag, "
+                          "PreviewBuiltinSingletonTypeTag, "
+                          "HandSerializedTypeTag, or CudaTileTypeTag");
     }
+  }
+  for (const BuiltinType &bt : structure.builtinSerializableTypes) {
+    if (bt.isSingleton() && !bt.isPreview)
+      PrintFatalError("builtin singleton type '" + bt.enumName +
+                      "' is not public-preview. Public singletons need a "
+                      "version guard in the type serializer and a "
+                      "getTypeMinVersion entry before they can be serialized; "
+                      "add those, or expose it via PreviewBuiltinSingletonTypeTag.");
   }
 
   // Validate all CudaTileTypeDef types have bytecode support.

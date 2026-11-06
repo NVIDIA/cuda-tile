@@ -16,6 +16,7 @@
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/Passes.h"
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "cuda_tile/Bytecode/Writer/BytecodeWriter.h"
@@ -74,8 +75,9 @@ MlirTypeID mlirCudaTileTileTypeGetTypeID(void) {
 
 MlirType mlirCudaTileTileTypeGet(MlirContext ctx, intptr_t rank,
                                  const int64_t *shape, MlirType elementType) {
+  (void)ctx;
   ArrayRef<int64_t> shapeRef(shape, rank);
-  return wrap(TileType::get(unwrap(ctx), shapeRef, unwrap(elementType)));
+  return wrap(TileType::get(shapeRef, unwrap(elementType)));
 }
 
 MlirType mlirCudaTileTileTypeGetElementType(MlirType type) {
@@ -94,8 +96,62 @@ MlirType mlirCudaTileTileTypeGetChecked(MlirContext ctx, intptr_t rank,
                                         const int64_t *shape,
                                         MlirType elementType) {
   ArrayRef<int64_t> shapeRef(shape, rank);
+  return wrap(TileType::getChecked(
+      [&] { return emitError(UnknownLoc::get(unwrap(ctx))); }, shapeRef,
+      unwrap(elementType)));
+}
+
+//===----------------------------------------------------------------------===//
+// FragmentType
+//===----------------------------------------------------------------------===//
+
+bool mlirCudaTileTypeIsAFragmentType(MlirType type) {
+  return isa<FragmentType>(unwrap(type));
+}
+
+MlirTypeID mlirCudaTileFragmentTypeGetTypeID(void) {
+  return wrap(FragmentType::getTypeID());
+}
+
+MlirType mlirCudaTileFragmentTypeGetChecked(
+    MlirContext ctx, intptr_t rank, const int64_t *shape, MlirType elementType,
+    MlirStringRef memorySpace, MlirAttribute memLayout, MlirAttribute fragmap) {
+  std::optional<MemorySpace> space = symbolizeMemorySpace(unwrap(memorySpace));
+  if (!space)
+    return {nullptr};
+  ArrayRef<int64_t> shapeRef(shape, rank);
+  // Construct a concrete fragment (default alignment of 1) via the inferred-
+  // context builder; the symbolic shape cache is derived from `shapeRef`.
+  return wrap(FragmentType::getChecked(
+      [&] { return emitError(UnknownLoc::get(unwrap(ctx))); }, shapeRef,
+      unwrap(elementType), *space, cast<LayoutAttr>(unwrap(memLayout)),
+      cast<LayoutAttr>(unwrap(fragmap))));
+}
+
+MlirType mlirCudaTileFragmentTypeGetElementType(MlirType type) {
+  return wrap(cast<FragmentType>(unwrap(type)).getElementType());
+}
+
+intptr_t mlirCudaTileFragmentTypeGetRank(MlirType type) {
+  return cast<FragmentType>(unwrap(type)).getShape().size();
+}
+
+int64_t mlirCudaTileFragmentTypeGetDimSize(MlirType type, intptr_t pos) {
+  return cast<FragmentType>(unwrap(type)).getShape()[pos];
+}
+
+MlirStringRef
+mlirCudaTileFragmentTypeGetMemorySpace(MlirType type) {
   return wrap(
-      getCheckedType<TileType>(unwrap(ctx), shapeRef, unwrap(elementType)));
+      stringifyMemorySpace(cast<FragmentType>(unwrap(type)).getMemorySpace()));
+}
+
+MlirAttribute mlirCudaTileFragmentTypeGetMemLayout(MlirType type) {
+  return wrap(cast<FragmentType>(unwrap(type)).getMemLayout());
+}
+
+MlirAttribute mlirCudaTileFragmentTypeGetFragmap(MlirType type) {
+  return wrap(cast<FragmentType>(unwrap(type)).getFragmap());
 }
 
 //===----------------------------------------------------------------------===//
@@ -315,6 +371,70 @@ MlirType mlirCudaTileStridedViewTypeGetChecked(
   return wrap(getCheckedType<StridedViewType>(
       unwrap(ctx), tileShapeDenseI32, traversalStridesDenseI32, tensorView,
       dimMapRef, paddingValueAttr));
+}
+
+//===----------------------------------------------------------------------===//
+// GatherScatterViewType
+//===----------------------------------------------------------------------===//
+
+bool mlirCudaTileTypeIsAGatherScatterViewType(MlirType type) {
+  return isa<GatherScatterViewType>(unwrap(type));
+}
+
+MlirTypeID mlirCudaTileGatherScatterViewTypeGetTypeID(void) {
+  return wrap(GatherScatterViewType::getTypeID());
+}
+
+MlirType mlirCudaTileGatherScatterViewTypeGet(
+    MlirContext ctx, MlirAttribute tileShapeAttr, MlirType tensorViewType,
+    uint32_t sparseDim, MlirAttribute paddingValue) {
+  auto tileShapeDenseI32 = cast<DenseI32ArrayAttr>(unwrap(tileShapeAttr));
+  auto tensorView = cast<TensorViewType>(unwrap(tensorViewType));
+  PaddingValueAttr paddingValueAttr = nullptr;
+  if (!mlirAttributeIsNull(paddingValue))
+    paddingValueAttr = cast<PaddingValueAttr>(unwrap(paddingValue));
+  return wrap(GatherScatterViewType::get(
+      unwrap(ctx), tileShapeDenseI32, tensorView, sparseDim, paddingValueAttr));
+}
+
+MlirAttribute mlirCudaTileGatherScatterViewTypeGetTileShape(MlirType type) {
+  return wrap(cast<GatherScatterViewType>(unwrap(type)).getTileShape());
+}
+
+MlirType mlirCudaTileGatherScatterViewTypeGetTensorView(MlirType type) {
+  return wrap(cast<GatherScatterViewType>(unwrap(type)).getTensorView());
+}
+
+uint32_t mlirCudaTileGatherScatterViewTypeGetSparseDim(MlirType type) {
+  return cast<GatherScatterViewType>(unwrap(type)).getSparseDim();
+}
+
+MlirAttribute mlirCudaTileGatherScatterViewTypeGetPaddingValue(MlirType type) {
+  auto paddingValue =
+      cast<GatherScatterViewType>(unwrap(type)).getPaddingValue();
+  if (paddingValue)
+    return wrap(paddingValue);
+  return {nullptr};
+}
+
+MlirType mlirCudaTileGatherScatterViewTypeGetViewTileType(MlirType type) {
+  return wrap(cast<GatherScatterViewType>(unwrap(type)).getViewTileType());
+}
+
+intptr_t mlirCudaTileGatherScatterViewTypeGetViewIndexRank(MlirType type) {
+  return cast<GatherScatterViewType>(unwrap(type)).getViewIndexRank();
+}
+
+MlirType mlirCudaTileGatherScatterViewTypeGetChecked(
+    MlirContext ctx, MlirAttribute tileShapeAttr, MlirType tensorViewType,
+    uint32_t sparseDim, MlirAttribute paddingValue) {
+  auto tileShapeDenseI32 = cast<DenseI32ArrayAttr>(unwrap(tileShapeAttr));
+  auto tensorView = cast<TensorViewType>(unwrap(tensorViewType));
+  PaddingValueAttr paddingValueAttr = nullptr;
+  if (!mlirAttributeIsNull(paddingValue))
+    paddingValueAttr = cast<PaddingValueAttr>(unwrap(paddingValue));
+  return wrap(getCheckedType<GatherScatterViewType>(
+      unwrap(ctx), tileShapeDenseI32, tensorView, sparseDim, paddingValueAttr));
 }
 
 //===----------------------------------------------------------------------===//
@@ -665,6 +785,46 @@ bool mlirOperationIsAModuleOp(MlirOperation op) {
   return isa<mlir::ModuleOp>(unwrap(op));
 }
 
+static FailureOr<PreviewFeatures>
+parsePreviewFeatures(MlirContext context, MlirStringRef previewFeatures) {
+  PreviewFeatures enabledFeatures;
+  StringRef input(previewFeatures.data, previewFeatures.length);
+  if (input.empty()) {
+    return enabledFeatures;
+  }
+
+  SmallVector<StringRef> names;
+  input.split(names, ',', /*MaxSplit=*/-1, /*KeepEmpty=*/true);
+  for (StringRef name : names) {
+    std::optional<PreviewFeature> feature = symbolizePreviewFeature(name);
+    if (!feature) {
+      emitError(UnknownLoc::get(unwrap(context)))
+          << "unknown preview feature '" << name << "'";
+      return failure();
+    }
+    if (isRetiredPreviewFeature(*feature)) {
+      emitError(UnknownLoc::get(unwrap(context)))
+          << "preview feature '" << name << "' has been retired";
+      return failure();
+    }
+    enabledFeatures.enable(*feature);
+  }
+  return enabledFeatures;
+}
+
+bool mlirCudaTileContextSetPreviewFeatures(MlirContext context,
+                                           MlirStringRef previewFeatures) {
+  FailureOr<PreviewFeatures> enabledFeatures =
+      parsePreviewFeatures(context, previewFeatures);
+  if (failed(enabledFeatures)) {
+    return false;
+  }
+  unwrap(context)
+      ->getOrLoadDialect<CudaTileDialect>()
+      ->setEnabledPreviewFeatures(std::move(*enabledFeatures));
+  return true;
+}
+
 MlirStringRef mlirCudaTileWriteBytecodeToBuffer(MlirOperation moduleOp) {
   auto *op = unwrap(moduleOp);
 
@@ -676,8 +836,8 @@ MlirStringRef mlirCudaTileWriteBytecodeToBuffer(MlirOperation moduleOp) {
   // Allocate buffer that caller must free
   std::string temp;
   llvm::raw_string_ostream stream(temp);
-  if (failed(cuda_tile::writeBytecode(stream, cudaTileModule,
-                                      BytecodeVersion::kCurrentVersion)))
+  cuda_tile::BytecodeWriterConfig config(BytecodeVersion::kCurrentVersion);
+  if (failed(cuda_tile::writeBytecode(stream, cudaTileModule, config)))
     return mlirStringRefCreateFromCString("");
 
   stream.flush();

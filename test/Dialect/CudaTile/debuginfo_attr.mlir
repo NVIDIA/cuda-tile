@@ -28,6 +28,19 @@
   scopeLine = 2
 >
 
+// A subprogram carrying the `declaration` flag. The flag is optional, so the
+// two subprograms above must keep printing with no `flags` field at all.
+// CHECK-DAG: #[[DECL:[_a-zA-Z0-9]*]] = #cuda_tile.di_subprogram<file = #[[FILE]], line = 1, name = "test_decl", linkageName = "test_decl", compileUnit = #[[COMPILE_UNIT]], scopeLine = 2, flags = declaration>
+#decl = #cuda_tile.di_subprogram<
+  file = #file,
+  line = 1,
+  name = "test_decl",
+  linkageName = "test_decl",
+  compileUnit = #compile_unit,
+  scopeLine = 2,
+  flags = declaration
+>
+
 // CHECK-DAG: #[[BLOCK_FUNC:[_a-zA-Z0-9]*]] = #cuda_tile.di_lexical_block<scope = #[[FUNC]], file = #[[FILE]], line = 3, column = 4>
 #block_func = #cuda_tile.di_lexical_block<
   scope = #func,
@@ -81,16 +94,25 @@
 #di_loc_block_entry = #cuda_tile.di_loc<#loc_block in #block_entry>
 #di_loc_inner_block_entry = #cuda_tile.di_loc<#loc_inner_block in #inner_block_entry>
 
+// `test_decl` is only declared here, so no function in this module has it as a
+// scope; it is reached through an inlined callsite instead.
+// CHECK-DAG: [[DI_LOC_DECL:#loc[0-9]*]] = #cuda_tile.di_loc<[[LOC_FUNC]] in #[[DECL]]>
+// CHECK-DAG: [[LOC_INLINED_DECL:#loc[0-9]*]] = loc(callsite([[DI_LOC_DECL]] at [[DI_LOC_FUNC]]))
+#di_loc_decl = #cuda_tile.di_loc<#loc_func in #decl>
+#loc_inlined_decl = loc(callsite(#di_loc_decl at #di_loc_func))
+
 cuda_tile.module @kernels {
   // CHECK-DAG: @test_func()
   // CHECK-DAG:   constant <i32: 1> : tile<i32> loc([[DI_LOC_FUNC]])
   // CHECK-DAG:   constant <i32: 2> : tile<i32> loc([[DI_LOC_BLOCK_FUNC]])
   // CHECK-DAG:   constant <i32: 3> : tile<i32> loc([[DI_LOC_INNER_BLOCK_FUNC]])
+  // CHECK-DAG:   constant <i32: 4> : tile<i32> loc([[LOC_INLINED_DECL]])
   // CHECK-DAG: } loc([[DI_LOC_FUNC]])
   entry @test_func() {
     %c1 = constant <i32: 1> : !cuda_tile.tile<i32> loc(#di_loc_func)
     %c2 = constant <i32: 2> : !cuda_tile.tile<i32> loc(#di_loc_block_func)
     %c3 = constant <i32: 3> : !cuda_tile.tile<i32> loc(#di_loc_inner_block_func)
+    %c4 = constant <i32: 4> : !cuda_tile.tile<i32> loc(#loc_inlined_decl)
     return loc(unknown)
   } loc(#di_loc_func)
 

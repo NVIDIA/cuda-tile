@@ -453,7 +453,6 @@ cuda_tile.module @test {
     return %5 : !cuda_tile.tile<f32>
   }
 }
-
 // -----
 
 // addf with no mulf operands (should not fuse)
@@ -503,10 +502,10 @@ cuda_tile.module @test {
     %0 = constant <f32: 2.0> : !cuda_tile.tile<f32>
     %1 = constant <f32: 3.0> : !cuda_tile.tile<f32>
     %2 = constant <f32: 4.0> : !cuda_tile.tile<f32>
-    
+
     %3 = cuda_tile.mulf %0, %1 rounding<nearest_even> : !cuda_tile.tile<f32>
     %4 = cuda_tile.subf %3, %2 rounding<zero> : !cuda_tile.tile<f32>
-    
+
     return %4 : !cuda_tile.tile<f32>
   }
 }
@@ -524,10 +523,10 @@ cuda_tile.module @test {
     %0 = constant <f32: 2.0> : !cuda_tile.tile<f32>
     %1 = constant <f32: 3.0> : !cuda_tile.tile<f32>
     %2 = constant <f32: 4.0> : !cuda_tile.tile<f32>
-    
+
     %3 = cuda_tile.mulf %0, %1 rounding<nearest_even> flush_to_zero : !cuda_tile.tile<f32>
     %4 = cuda_tile.subf %3, %2 rounding<nearest_even> : !cuda_tile.tile<f32>
-    
+
     return %4 : !cuda_tile.tile<f32>
   }
 }
@@ -545,10 +544,10 @@ cuda_tile.module @test {
     %0 = constant <f32: 2.0> : !cuda_tile.tile<f32>
     %1 = constant <f32: 3.0> : !cuda_tile.tile<f32>
     %2 = constant <f32: 4.0> : !cuda_tile.tile<f32>
-    
+
     %3 = cuda_tile.mulf %0, %1 rounding<nearest_even> flush_to_zero : !cuda_tile.tile<f32>
     %4 = cuda_tile.subf %3, %2 rounding<nearest_even> flush_to_zero : !cuda_tile.tile<f32>
-    
+
     return %4 : !cuda_tile.tile<f32>
   }
 }

@@ -15,3 +15,39 @@ cuda_tile.module @hint_not_dict {
     return
   }
 }
+
+// -----
+
+cuda_tile.module @duplicate_key_error {
+  // expected-error @below{{duplicate optimization_hints key `sm_100`}}
+  entry @test_optimization_hints(%arg0: !cuda_tile.tile<ptr<f32>>) optimization_hints=<sm_100={num_cta_in_cga=2}, sm_100={num_cta_in_cga=4}> {
+    return
+  }
+}
+
+// -----
+
+cuda_tile.module @parseLess_failure {
+  // expected-error @below{{expected '<'}}
+  entry @test_optimization_hints(%arg0: !cuda_tile.tile<ptr<f32>>) optimization_hints={sm_100={num_cta_in_cga=2}} {
+    return
+  }
+}
+
+// -----
+
+cuda_tile.module @parseEqual_failure {
+  // expected-error @below{{expected '='}}
+  entry @test_optimization_hints(%arg0: !cuda_tile.tile<ptr<f32>>) optimization_hints=<sm_100 {num_cta_in_cga=2}> {
+    return
+  }
+}
+
+// -----
+
+cuda_tile.module @parseAttribute_failure {
+  // expected-error @below{{expected attribute value}}
+  entry @test_optimization_hints(%arg0: !cuda_tile.tile<ptr<f32>>) optimization_hints=<sm_100=> {
+    return
+  }
+}

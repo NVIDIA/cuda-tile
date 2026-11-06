@@ -4,9 +4,15 @@ set(LLVM_OPTIONAL_SOURCES
 
 set(CudaTileDialect_SOURCES
   Attributes.cpp
+  CompactLayoutParser.cpp
   CudaTile.cpp
+  PreviewAttrs.cpp
+  PreviewOps.cpp
   Interfaces.cpp
+  LayoutAlgebra.cpp
+  PreviewFeatures.cpp
   Remark.cpp
+  SymbolicAttrs.cpp
   Types.cpp
   Traits.cpp
 )
@@ -39,5 +45,4 @@ add_mlir_library(CudaTileDialect
 target_include_directories(CudaTileDialect
   PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
-    ${CMAKE_CURRENT_LIST_DIR}/../../../../compiler/include
 )

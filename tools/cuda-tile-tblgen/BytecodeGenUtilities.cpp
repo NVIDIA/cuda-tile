@@ -96,6 +96,26 @@ mlir::tblgen::extractSameOperandRankName(const NamedAttribute &namedAttr,
   return std::nullopt;
 }
 
+std::optional<std::string> mlir::tblgen::getAttributeEncodingRequiredPredicate(
+    const NamedAttribute &namedAttr, const Operator &op, StringRef opExpr) {
+  const std::string getter = op.getGetterName(namedAttr.name);
+
+  if (std::optional<std::string> defaultValue =
+          extractDefaultValue(namedAttr)) {
+    return formatv("{0}.{1}() != {2}", opExpr, getter, *defaultValue).str();
+  }
+
+  // A `RequireSameOperandRank` attribute has no ODS default because its shape
+  // depends on the operand: a reader predating it rebuilds an all-`false`
+  // vector sized from that operand, so only a set bit needs the field.
+  if (extractSameOperandRankName(namedAttr, op)) {
+    return formatv("::llvm::is_contained({0}.{1}(), true)", opExpr, getter)
+        .str();
+  }
+
+  return std::nullopt;
+}
+
 std::string mlir::tblgen::extractVersionFromOperation(const Operator &op) {
   const auto &def = op.getDef();
   if (const auto *metadata = def.getValueAsOptionalDef("metadata"))
@@ -103,6 +123,27 @@ std::string mlir::tblgen::extractVersionFromOperation(const Operator &op) {
 
   PrintFatalError(op.getLoc(), "operation '" + op.getOperationName() +
                                    "' is missing version metadata");
+}
+
+bool mlir::tblgen::isPreviewOperation(const Operator &op) {
+  return op.getDef().isSubClassOf("CudaTilePreviewOpDef");
+}
+
+StringRef mlir::tblgen::getOwningPreviewFeatureName(const Record *record) {
+  const Record *feature = record->getValueAsDef("previewFeature");
+  return feature->getValueAsString("cppName");
+}
+
+bool mlir::tblgen::isVersionlessOperation(const Operator &op) {
+  if (isPreviewOperation(op))
+    return true;
+  return false;
+}
+
+bool mlir::tblgen::isExternallyEncodedOpAttribute(StringRef attrName) {
+  // Function symbol visibility is encoded in the function-table entry flags,
+  // not in the generated operation payload.
+  return attrName == "sym_visibility";
 }
 
 std::pair<StringRef, StringRef>
@@ -154,6 +195,25 @@ mlir::tblgen::getVersionOrderedBitAssignments(const Operator &op) {
   std::optional<std::pair<std::string, std::string>> minVersion;
   size_t bitIndex = 0;
 
+  // Fast path for versionless operations: simple declaration-order assignment
+  // with no version tracking.
+  if (isVersionlessOperation(op)) {
+    // Assign bits to optional attributes first (declaration order).
+    for (const auto &namedAttr : op.getAttributes())
+      if (namedAttr.attr.isOptional() &&
+          !isExternallyEncodedOpAttribute(namedAttr.name)) {
+        bitAssignments[namedAttr.name.str()] = bitIndex++;
+      }
+
+    // Then assign bits to optional operands (declaration order).
+    if (op.getTrait("::mlir::OpTrait::AttrSizedOperandSegments"))
+      for (const auto &odsOperand : op.getOperands())
+        if (odsOperand.isOptional())
+          bitAssignments[odsOperand.name.str()] = bitIndex++;
+
+    return {bitAssignments, std::nullopt};
+  }
+
   // Path for public operations: version-ordered assignment.
   struct VersionKey {
     int major;
@@ -178,7 +238,8 @@ mlir::tblgen::getVersionOrderedBitAssignments(const Operator &op) {
   // Group optional attributes by version (attributes processed first within
   // each version).
   for (const auto &namedAttr : op.getAttributes()) {
-    if (namedAttr.attr.isOptional()) {
+    if (namedAttr.attr.isOptional() &&
+        !isExternallyEncodedOpAttribute(namedAttr.name)) {
       auto [majorStr, minorStr] = extractVersionFromAttribute(namedAttr, op);
       versionGroups[parseToVersionKey(majorStr, minorStr)].push_back(
           namedAttr.name);
@@ -234,4 +295,15 @@ mlir::tblgen::extractVersionFromResult(unsigned resultIndex,
                   "result '" + result.name.str() + "' in operation '" +
                       op.getOperationName() +
                       "' is missing version metadata (CudaTileArgMetadata)");
+}
+
+std::string
+mlir::tblgen::replaceTableGenPlaceholders(StringRef code, StringRef ctxtVar,
+                                          ArrayRef<ParamSubst> paramSubsts) {
+  FmtContext ctx;
+  ctx.addSubst("_ctxt", ctxtVar);
+  for (const auto &subst : paramSubsts) {
+    ctx.addSubst(("_param_" + subst.paramName).str(), subst.expr);
+  }
+  return tgfmt(code, &ctx);
 }

@@ -17,7 +17,9 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/TableGen/Error.h"
@@ -28,6 +30,7 @@
 #include "BytecodeGenUtilities.h"
 #include "BytecodeTypeAnalysis.h"
 #include "BytecodeTypeCodeGen.h"
+#include <algorithm>
 #include <map>
 
 using namespace llvm;
@@ -124,6 +127,13 @@ validateAllOpcodeAssignments(const RecordKeeper &records,
         PrintFatalError(record->getLoc(), rangeMsg);
       }
 
+      // Public-preview operations must not use PublicOpcode.
+      if (opRecord->isSubClassOf("CudaTilePreviewOpDef"))
+        PrintFatalError(record->getLoc(),
+                        "PublicOpcode cannot be used with public-preview "
+                        "operation '" +
+                            opName + "'. Use PreviewOpcode instead.");
+
       // Testing operation validation.
       if (testingRange && records.getClass("CudaTileTestingOpDef")) {
         bool inTestingRange = opcodeValue >= testingRange->first;
@@ -146,6 +156,24 @@ validateAllOpcodeAssignments(const RecordKeeper &records,
                                 "). This range is reserved for testing.");
         }
       }
+    }
+
+    // Public-preview opcode validation (available in all builds).
+    if (record->isSubClassOf("PreviewOpcode")) {
+      auto range = getOpcodeRange(records, "PreviewOpcodeRange");
+      if (range && (opcodeValue < range->first || opcodeValue > range->second))
+        PrintFatalError(
+            record->getLoc(),
+            "PreviewOpcode value 0x" + llvm::utohexstr(opcodeValue) +
+                " is out of range (must be 0x" + llvm::utohexstr(range->first) +
+                " - 0x" + llvm::utohexstr(range->second) + ")");
+
+      // Preview opcodes should only be used with public-preview operations.
+      if (!opRecord->isSubClassOf("CudaTilePreviewOpDef"))
+        PrintFatalError(record->getLoc(),
+                        "PreviewOpcode should only be used with public-preview "
+                        "operations (CudaTilePreviewOpDef), but '" +
+                            opName + "' is not a preview operation");
     }
 
   }
@@ -188,6 +216,22 @@ static void generateOpcodeEnumDefinition(const RecordKeeper &records,
     }
   }
   os << "\n// Reserved range for future PUBLIC operations.\n\n";
+
+  // Generate public-preview opcodes. These ship in all builds but are gated at
+  // runtime by their named preview feature and are not part of the versioned
+  // map.
+  os << "  // === PUBLIC-PREVIEW OPERATIONS ===\n"
+     << "  // Available in all builds; runtime-gated and version-locked.\n";
+  for (const Record *record : opcodeRecords) {
+    if (record->isSubClassOf("PreviewOpcode")) {
+      const Record *opRecord = record->getValueAsDef("operation");
+      unsigned opcodeValue = record->getValueAsInt("opcodeValue");
+      Operator op(opRecord);
+      os << "  " << op.getCppClassName() << " = 0x"
+         << llvm::format("%X", opcodeValue) << ",\n";
+    }
+  }
+  os << "\n";
   os << "};\n\n"
      << "} // namespace Bytecode\n"
      << "} // namespace cuda_tile\n"
@@ -213,6 +257,17 @@ static void generateOpcodeMap(const RecordKeeper &records, raw_ostream &os) {
   // Generate public operation mappings.
   for (const Record *record : opcodeRecords) {
     if (record->isSubClassOf("PublicOpcode")) {
+      const Record *opRecord = record->getValueAsDef("operation");
+      Operator op(opRecord);
+      os << "    {\"" << op.getOperationName()
+         << "\", Opcode::" << op.getCppClassName() << "},\n";
+    }
+  }
+
+  // Generate public-preview operation mappings (available in all builds).
+  os << "\n    // === PUBLIC-PREVIEW OPERATIONS ===\n";
+  for (const Record *record : opcodeRecords) {
+    if (record->isSubClassOf("PreviewOpcode")) {
       const Record *opRecord = record->getValueAsDef("operation");
       Operator op(opRecord);
       os << "    {\"" << op.getOperationName()
@@ -262,6 +317,9 @@ static void generateFunctionSignature(const Operator &op, raw_ostream &os) {
 /// No actual attribute data is written to the stream for UnitAttr.
 static void generateFlagsFieldSerialization(const Operator &op,
                                             raw_ostream &os) {
+  // Versionless ops set optional-field flag bits without any version checks.
+  bool isVersionless = isVersionlessOperation(op);
+
   // Get version-ordered bit assignments and earliest optional field version.
   auto [bitAssignments, minOptionalVersion] =
       getVersionOrderedBitAssignments(op);
@@ -274,11 +332,22 @@ static void generateFlagsFieldSerialization(const Operator &op,
 
   // Set flags bits for optional attributes and validate their versions.
   for (const auto &namedAttr : op.getAttributes()) {
+    if (isExternallyEncodedOpAttribute(namedAttr.name)) {
+      continue;
+    }
     if (namedAttr.attr.isOptional()) {
       StringRef attrName = namedAttr.name;
       std::string getterName = op.getGetterName(attrName);
+      std::string storageGetterName = getterName + "Attr";
       size_t bitPos = bitAssignments.lookup(attrName);
 
+      if (isVersionless) {
+        os << llvm::formatv(R"(
+  auto flagsAttrValue_{0} = op.{1}();
+  if (flagsAttrValue_{0}) flags |= (1ULL << {2});
+)",
+                            attrName, storageGetterName, bitPos);
+      } else {
         auto [majorStr, minorStr] = extractVersionFromAttribute(namedAttr, op);
         std::string version = (Twine(majorStr) + "." + minorStr).str();
 
@@ -288,7 +357,7 @@ static void generateFlagsFieldSerialization(const Operator &op,
   auto flagsAttrValue_{0} = op.{1}();
   if (flagsAttrValue_{0}) flags |= (1ULL << {2});
 )",
-                              attrName, getterName, bitPos);
+                              attrName, storageGetterName, bitPos);
         } else {
           // Versioned attribute - validate version compatibility.
           os << llvm::formatv(R"(
@@ -296,8 +365,8 @@ static void generateFlagsFieldSerialization(const Operator &op,
   if (flagsAttrValue_{0}) {{
     auto flagsRequiredVersionFor_{0} = BytecodeVersion::fromVersion({2}, {3}, 0);
     assert(flagsRequiredVersionFor_{0} && "TableGen should guarantee valid versions");
-    if (config.bytecodeVersion < *flagsRequiredVersionFor_{0}) {{
-      op.emitError() << "optional attribute '{0}' is provided but requires bytecode version {4}, targeting " << config.bytecodeVersion.toString();
+    if (config.getBytecodeVersion() < *flagsRequiredVersionFor_{0}) {{
+      op.emitError() << "optional attribute '{0}' is provided but requires bytecode version {4}, targeting " << config.getBytecodeVersion().toString();
       return failure();
     }
     // Attribute provided and compatible - set flag.
@@ -305,9 +374,10 @@ static void generateFlagsFieldSerialization(const Operator &op,
   }
   // Attribute not provided - don't set flag.
 )",
-                              attrName, getterName, majorStr, minorStr, version,
-                              bitPos);
+                              attrName, storageGetterName, majorStr, minorStr,
+                              version, bitPos);
         }
+      }
     }
   }
 
@@ -315,8 +385,7 @@ static void generateFlagsFieldSerialization(const Operator &op,
   if (op.getTrait("::mlir::OpTrait::AttrSizedOperandSegments")) {
     for (const auto &[operandIndex, odsOperand] :
          llvm::enumerate(op.getOperands())) {
-      if (!odsOperand.isOptional()
-      ) {
+      if (!odsOperand.isOptional() && !isVersionless) {
         // Validate that required operands were introduced with the operation
         // itself.
         auto [majorStr, minorStr] = extractVersionFromOperand(operandIndex, op);
@@ -334,6 +403,12 @@ static void generateFlagsFieldSerialization(const Operator &op,
 )",
                             operandIndex);
 
+        if (isVersionless) {
+          os << llvm::formatv(R"(
+  if (!operandGroup_{0}.empty()) flags |= (1ULL << {1});
+)",
+                              operandIndex, bitPos);
+        } else {
           auto [majorStr, minorStr] =
               extractVersionFromOperand(operandIndex, op);
           std::string version = (Twine(majorStr) + "." + minorStr).str();
@@ -350,8 +425,8 @@ static void generateFlagsFieldSerialization(const Operator &op,
   if (!operandGroup_{0}.empty()) {{
     auto requiredVersionFor_{1} = BytecodeVersion::fromVersion({2}, {3}, 0);
     assert(requiredVersionFor_{1} && "TableGen should guarantee valid versions");
-    if (config.bytecodeVersion < *requiredVersionFor_{1}) {{
-      op.emitError() << "optional operand '{1}' is provided but requires bytecode version {4}, targeting " << config.bytecodeVersion.toString();
+    if (config.getBytecodeVersion() < *requiredVersionFor_{1}) {{
+      op.emitError() << "optional operand '{1}' is provided but requires bytecode version {4}, targeting " << config.getBytecodeVersion().toString();
       return failure();
     }
     // Operand provided and compatible - set flag.
@@ -362,6 +437,7 @@ static void generateFlagsFieldSerialization(const Operator &op,
                                 operandIndex, operandName, majorStr, minorStr,
                                 version, bitPos);
           }
+        }
       }
     }
   }
@@ -385,7 +461,7 @@ static void generateFlagsFieldSerialization(const Operator &op,
         R"(  // Only write flags if targeting version >= {0}.{1} (first optional field version)
   auto requiredVersionForFlags = BytecodeVersion::fromVersion({0}, {1}, 0);
   assert(requiredVersionForFlags && "TableGen should guarantee valid versions");
-  if (config.bytecodeVersion >= *requiredVersionForFlags) {{
+  if (config.getBytecodeVersion() >= *requiredVersionForFlags) {{
     writer.writeVarInt(flags);
   }
 
@@ -435,6 +511,9 @@ static void generateAttributeSerialization(const Operator &op,
   os << "  // Serialize Attributes.\n";
   for (const auto &namedAttr : op.getAttributes()) {
     StringRef attrName = namedAttr.name;
+    if (isExternallyEncodedOpAttribute(attrName)) {
+      continue;
+    }
     std::string getterName = op.getGetterName(attrName);
     bool isOptional = namedAttr.attr.isOptional();
     bool isUnitAttr =
@@ -442,21 +521,40 @@ static void generateAttributeSerialization(const Operator &op,
     if (isUnitAttr) {
       // UnitAttr: only flags field, no serialization needed.
       continue;
+    } else if (isOptional && namedAttr.attr.hasDefaultValue()) {
+      // The flags field records exact storage presence. Use the raw attribute
+      // getter here too: a DefaultValuedOptionalAttr's native getter returns
+      // its default even when the attribute is absent.
+      os << llvm::formatv(R"(
+  if (auto nativeAttrValue_{0} = op.{1}Attr()) {{
+    if (failed(writeOpAttribute(op.getOperation(), "{0}", nativeAttrValue_{0}, writer, typeMgr, constMgr, strMgr)))
+      return failure();
+  }
+)",
+                          attrName, getterName);
     } else if (isOptional) {
-      // Optional non-UnitAttr: validation done by flags field, just serialize.
+      // Ordinary optional native getters return std::optional<T>, which both
+      // preserves absence and converts attribute storage to the expected
+      // native wire representation.
       generateAttributeSerializationLogic(os, getterName, attrName);
     } else {
       // Required attributes: need version checking and default value
       // validation.
+      if (isVersionlessOperation(op)) {
+        os << "  // Versionless operations: serialize directly without version "
+              "checks.\n";
+        generateAttributeSerializationLogic(os, getterName, attrName);
+      } else {
         auto [majorStr, minorStr] = extractVersionFromAttribute(namedAttr, op);
         auto defaultValue = extractDefaultValue(namedAttr);
-        auto sameOperandRank = extractSameOperandRankName(namedAttr, op);
+        auto encodingRequired =
+            getAttributeEncodingRequiredPredicate(namedAttr, op);
         std::string version = (Twine(majorStr) + "." + minorStr).str();
 
         os << llvm::formatv(R"(
   auto requiredVersionFor_{0} = BytecodeVersion::fromVersion({1}, {2}, 0);
   assert(requiredVersionFor_{0} && "TableGen should guarantee valid versions");
-  if (config.bytecodeVersion >= *requiredVersionFor_{0}) {{
+  if (config.getBytecodeVersion() >= *requiredVersionFor_{0}) {{
 )",
                             attrName, majorStr, minorStr);
         generateAttributeSerializationLogic(os, getterName, attrName, "    ");
@@ -464,25 +562,23 @@ static void generateAttributeSerialization(const Operator &op,
         if (defaultValue.has_value()) {
           os << llvm::formatv(R"(
     // Check that attribute equals default value for older versions.
-    auto nativeAttrValue_{0} = op.{1}();
-    if (nativeAttrValue_{0} != {2}) {{
-      op.emitError() << "attribute '{0}' requires bytecode version {3}+, but targeting " << config.bytecodeVersion.toString();
+    if ({0}) {{
+      op.emitError() << "attribute '{1}' requires bytecode version {2}+, but targeting " << config.getBytecodeVersion().toString();
       return failure();
     }
 )",
-                              attrName, getterName, *defaultValue, version);
-        } else if (sameOperandRank.has_value()) {
+                              *encodingRequired, attrName, version);
+        } else if (encodingRequired.has_value()) {
           // Implicit default is all-`false` (the value the reader fixup
           // resynthesizes for legacy bytecode), so downgrade is lossless
           // iff the runtime value is itself all-`false`. Otherwise error.
           os << llvm::formatv(R"(
-    auto nativeAttrValue_{1} = op.{2}();
-    if (::llvm::is_contained(nativeAttrValue_{1}, true)) {{
-      op.emitError() << "operation requires bytecode version {0}+ because it carries a non-default '{1}' attribute (the legacy reader can only reconstruct an all-`false` vector), but targeting " << config.bytecodeVersion.toString();
+    if ({0}) {{
+      op.emitError() << "operation requires bytecode version {1}+ because it carries a non-default '{2}' attribute (the legacy reader can only reconstruct an all-`false` vector), but targeting " << config.getBytecodeVersion().toString();
       return failure();
     }
 )",
-                              version, attrName, getterName);
+                              *encodingRequired, version, attrName);
         } else {
           // No default value available.
           std::string opVersion = extractVersionFromOperation(op);
@@ -500,6 +596,7 @@ static void generateAttributeSerialization(const Operator &op,
           // defaults.
         }
         os << "  }\n";
+      }
     }
   }
   os << "\n";
@@ -607,14 +704,14 @@ static void generateVersionAwareResultSerialization(const Operator &op,
       os << llvm::formatv(R"(
   auto requiredVersionFor_result_{0} = BytecodeVersion::fromVersion({1}, {2}, 0);
   assert(requiredVersionFor_result_{0} && "TableGen should guarantee valid versions");
-  if (config.bytecodeVersion >= *requiredVersionFor_result_{0}) {{
+  if (config.getBytecodeVersion() >= *requiredVersionFor_result_{0}) {{
     ++compatibleResults;
     compatibleResultTypes.push_back(op->getResult({3}).getType());
   } else {{
     Value resultValue = op->getResult({3});
     if (!resultValue.getUsers().empty()) {{
       op.emitError() << "result '{0}' requires bytecode version {4} but is being used and targeting "
-                     << config.bytecodeVersion.toString()
+                     << config.getBytecodeVersion().toString()
                      << ". Cannot serialize to older bytecode version when newer features are used.";
       return failure();
     }
@@ -650,6 +747,9 @@ static void generateResultTypeSerialization(const Operator &op,
     os << "  return failure();\n";
   }
 
+  // Versionless ops serialize result types without version conditioning.
+  if (isVersionlessOperation(op))
+    return generateSimpleResultSerialization(op, os);
   generateVersionAwareResultSerialization(op, os);
 }
 
@@ -813,6 +913,16 @@ static void generateVersionConstants(const RecordKeeper &records,
   os << "  }();\n";
   os << "  return map;\n";
   os << "}\n\n";
+
+  // Public-preview opcode range (available in all builds). Preview opcodes are
+  // gated at runtime by their named preview feature and are only valid at the
+  // exact current bytecode version.
+  if (auto previewRange = getOpcodeRange(records, "PreviewOpcodeRange")) {
+    os << "static constexpr uint32_t kPreviewOpcodesMin = 0x"
+       << llvm::format("%X", previewRange->first) << ";\n";
+    os << "static constexpr uint32_t kPreviewOpcodesMax = 0x"
+       << llvm::format("%X", previewRange->second) << ";\n\n";
+  }
 
   os << "} // namespace cuda_tile\n} // namespace mlir\n";
 }
@@ -1016,6 +1126,9 @@ static void generateOpVersionChecker(const Operator &op, raw_ostream &os) {
   // Track if we've emitted any attr checks (for section comment).
   bool hasAttrChecks = false;
   for (const auto &namedAttr : op.getAttributes()) {
+    if (isExternallyEncodedOpAttribute(namedAttr.name)) {
+      continue;
+    }
     bool isUnitAttr =
         StringRef(namedAttr.attr.getStorageType()).contains("UnitAttr");
 
@@ -1053,10 +1166,27 @@ static void generateOpVersionChecker(const Operator &op, raw_ostream &os) {
     } else {
       // Required attr: bump version if versioned, always check attr version.
       if (isVersioned) {
-        os << "  updateMax(*mlir::cuda_tile::BytecodeVersion::fromVersion("
+        // The writer drops an attribute introduced after its operation when the
+        // value matches the fallback an older reader reconstructs, so it only
+        // constrains the module when it would have to be encoded.
+        auto encodingRequired =
+            getAttributeEncodingRequiredPredicate(namedAttr, op);
+        if (!encodingRequired) {
+          PrintFatalError(
+              op.getLoc(),
+              "attribute '" + namedAttr.name + "' in operation '" +
+                  op.getOperationName() +
+                  "' was introduced after the operation itself and has no "
+                  "default value, so its minimum version cannot be computed");
+        }
+        os << "  if (" << *encodingRequired << ") {\n";
+        os << "    updateMax(*mlir::cuda_tile::BytecodeVersion::fromVersion("
            << attrMajor << ", " << attrMinor << ", 0));\n";
+        os << "    updateMax(getAttrVersion(op." << getterName << "Attr()));\n";
+        os << "  }\n";
+      } else {
+        os << "  updateMax(getAttrVersion(op." << getterName << "Attr()));\n";
       }
-      os << "  updateMax(getAttrVersion(op." << getterName << "Attr()));\n";
     }
   }
 
@@ -1087,10 +1217,22 @@ static void generateOpVersionCheckerImplementations(const RecordKeeper &records,
         "===-------------------------------------------------------------------"
         "---===//\n\n";
 
+  // Checkers compare against the default spelled in ODS, and those expressions
+  // are relative to the dialect namespace (`RoundingMode::FULL`), so emit the
+  // checkers there.
+  os << "namespace mlir::cuda_tile {\n\n";
+
   for (const Record *opDef : opDefs) {
     Operator op(opDef);
+    // Versionless ops have no version checker: their min version is handled
+    // out-of-band (preview forces the current version).
+    if (isVersionlessOperation(op)) {
+      continue;
+    }
     generateOpVersionChecker(op, os);
   }
+
+  os << "} // namespace mlir::cuda_tile\n\n";
 
   os << "//"
         "===-------------------------------------------------------------------"
@@ -1123,6 +1265,19 @@ static void generateVersionCheckDispatch(const RecordKeeper &records,
     StringRef dialectNamespace = op.getDialect().getCppNamespace();
     std::string qualifiedClassName =
         dialectNamespace.str() + "::" + opClassName.str();
+
+    if (isVersionlessOperation(op)) {
+      // Versionless ops carry no version metadata. Public-preview ops are still
+      // version-locked to the current version, so emit a case reporting that.
+      // Other versionless ops keep the default minimum.
+      if (isPreviewOperation(op)) {
+        os << "    .Case<" << qualifiedClassName << ">([&](auto) {\n"
+           << "      return mlir::cuda_tile::BytecodeVersion::kCurrentVersion;\n"
+           << "    })\n";
+      }
+      continue;
+    }
+
     os << "    .Case<" << qualifiedClassName << ">([&](auto concreteOp) {\n"
        << "      return getMinVersionFor_" << opClassName
        << "(concreteOp, getTypeVersion, getAttrVersion);\n"
@@ -1139,6 +1294,190 @@ static void generateVersionCheckDispatch(const RecordKeeper &records,
   os << "//"
         "===-------------------------------------------------------------------"
         "---===//\n";
+}
+
+/// Generates runtime classification of public-preview operations by feature.
+static void generatePreviewOpClassification(const RecordKeeper &records,
+                                            raw_ostream &os) {
+  emitSourceFileHeader("Generated Preview Operation Classification", os);
+  auto opDefs = records.getAllDerivedDefinitions("CudaTilePreviewOpDef");
+
+  os << R"(
+namespace mlir::cuda_tile::detail {
+
+inline std::optional<PreviewFeature> getPreviewFeature(Operation *op) {
+  return llvm::TypeSwitch<Operation *, std::optional<PreviewFeature>>(op)
+)";
+  for (const Record *opDef : opDefs) {
+    Operator op(opDef);
+    os << "      .Case<" << op.getDialect().getCppNamespace()
+       << "::" << op.getCppClassName() << ">([](auto) { return PreviewFeature::"
+       << getOwningPreviewFeatureName(opDef) << "; })\n";
+  }
+  os << R"(      .Default([](Operation *) { return std::nullopt; });
+}
+
+} // namespace mlir::cuda_tile::detail
+)";
+}
+
+static SmallVector<const Record *>
+getPreviewFeatureRecords(const RecordKeeper &records) {
+  SmallVector<const Record *> features(
+      records.getAllDerivedDefinitions("CudaTilePreviewFeature"));
+  llvm::sort(features, [](const Record *lhs, const Record *rhs) {
+    return lhs->getValueAsInt("value") < rhs->getValueAsInt("value");
+  });
+
+  llvm::DenseSet<int64_t> values;
+  llvm::StringSet<> cppNames;
+  llvm::StringSet<> spellings;
+  for (const Record *feature : features) {
+    int64_t value = feature->getValueAsInt("value");
+    StringRef cppName = feature->getValueAsString("cppName");
+    StringRef spelling = feature->getValueAsString("spelling");
+    if (!values.insert(value).second) {
+      PrintFatalError(feature->getLoc(),
+                      "duplicate preview feature numeric value");
+    }
+    if (!cppNames.insert(cppName).second) {
+      PrintFatalError(feature->getLoc(), "duplicate preview feature C++ name");
+    }
+    if (!spellings.insert(spelling).second) {
+      PrintFatalError(feature->getLoc(),
+                      "duplicate preview feature command-line spelling");
+    }
+  }
+  return features;
+}
+
+static void
+generatePreviewFeatureDeclarations(ArrayRef<const Record *> features,
+                                   raw_ostream &os) {
+  os << "enum class PreviewFeature {\n";
+  for (const Record *feature : features) {
+    os << "  " << feature->getValueAsString("cppName") << " = "
+       << feature->getValueAsInt("value") << ",\n";
+  }
+  os << R"(};
+
+/// Return the permanent command-line spelling for a preview feature.
+llvm::StringRef stringifyPreviewFeature(PreviewFeature feature);
+
+/// Parse any known command-line spelling, including retired features.
+std::optional<PreviewFeature> symbolizePreviewFeature(llvm::StringRef name);
+
+/// Return whether a known preview feature has been retired.
+bool isRetiredPreviewFeature(PreviewFeature feature);
+
+/// Return active feature names accepted by this build.
+llvm::ArrayRef<PreviewFeature> getSupportedPreviewFeatures();
+
+/// Return every feature known by this build, including retired features.
+llvm::ArrayRef<PreviewFeature> getAllPreviewFeatures();
+)";
+}
+
+static void generatePreviewFeatureDefinitions(ArrayRef<const Record *> features,
+                                              raw_ostream &os) {
+  os << R"(llvm::StringRef
+mlir::cuda_tile::stringifyPreviewFeature(PreviewFeature feature) {
+  switch (feature) {
+)";
+  for (const Record *feature : features) {
+    os << "  case PreviewFeature::" << feature->getValueAsString("cppName")
+       << ":\n"
+       << "    return \"" << feature->getValueAsString("spelling") << "\";\n";
+  }
+  os << R"(  }
+  llvm_unreachable("unknown preview feature");
+}
+
+std::optional<PreviewFeature>
+mlir::cuda_tile::symbolizePreviewFeature(llvm::StringRef name) {
+)";
+  for (const Record *feature : features) {
+    os << "  if (name == \"" << feature->getValueAsString("spelling") << "\")\n"
+       << "    return PreviewFeature::" << feature->getValueAsString("cppName")
+       << ";\n";
+  }
+  os << R"(  return std::nullopt;
+}
+
+bool mlir::cuda_tile::isRetiredPreviewFeature(PreviewFeature feature) {
+  switch (feature) {
+)";
+  for (const Record *feature : features) {
+    os << "  case PreviewFeature::" << feature->getValueAsString("cppName")
+       << ":\n"
+       << "    return "
+       << (feature->getValueAsBit("retired") ? "true" : "false") << ";\n";
+  }
+  os << R"(  }
+  llvm_unreachable("unknown preview feature");
+}
+
+llvm::ArrayRef<PreviewFeature>
+mlir::cuda_tile::getSupportedPreviewFeatures() {
+  static constexpr PreviewFeature features[] = {
+)";
+  for (const Record *feature : features) {
+    if (!feature->getValueAsBit("retired")) {
+      os << "      PreviewFeature::" << feature->getValueAsString("cppName")
+         << ",\n";
+    }
+  }
+  os << R"(  };
+  return features;
+}
+
+llvm::ArrayRef<PreviewFeature>
+mlir::cuda_tile::getAllPreviewFeatures() {
+  static constexpr PreviewFeature features[] = {
+)";
+  for (const Record *feature : features) {
+    os << "      PreviewFeature::" << feature->getValueAsString("cppName")
+       << ",\n";
+  }
+  os << R"(  };
+  return features;
+}
+)";
+}
+
+static bool generatePreviewFeatures(const RecordKeeper &records,
+                                    raw_ostream &os) {
+  SmallVector<const Record *> features = getPreviewFeatureRecords(records);
+  auto typeStructure = analyzeBytecodeTypes(records);
+  if (failed(typeStructure)) {
+    PrintFatalError("Failed to analyze preview feature types");
+    return true;
+  }
+  BytecodeAttrStructure attrStructure = analyzeBytecodeAttrs(records);
+
+  os << "//===-- Begin Preview Feature Declarations --===//\n";
+  os << "#ifdef GEN_PREVIEW_FEATURE_DECLS\n\n";
+  generatePreviewFeatureDeclarations(features, os);
+  os << "\n#undef GEN_PREVIEW_FEATURE_DECLS\n";
+  os << "#endif // GEN_PREVIEW_FEATURE_DECLS\n";
+  os << "//===-- End Preview Feature Declarations --===//\n\n";
+
+  os << "//===-- Begin Preview Feature Definitions --===//\n";
+  os << "#ifdef GEN_PREVIEW_FEATURE_DEFS\n\n";
+  generatePreviewFeatureDefinitions(features, os);
+  os << "\n#undef GEN_PREVIEW_FEATURE_DEFS\n";
+  os << "#endif // GEN_PREVIEW_FEATURE_DEFS\n";
+  os << "//===-- End Preview Feature Definitions --===//\n\n";
+
+  os << "//===-- Begin Preview IR Classification --===//\n";
+  os << "#ifdef GEN_PREVIEW_IR_CLASSIFICATION\n";
+  generatePreviewOpClassification(records, os);
+  generatePreviewTypeValueClassification(*typeStructure, os);
+  generatePreviewAttrValueClassification(attrStructure, os);
+  os << "\n#undef GEN_PREVIEW_IR_CLASSIFICATION\n";
+  os << "#endif // GEN_PREVIEW_IR_CLASSIFICATION\n";
+  os << "//===-- End Preview IR Classification --===//\n";
+  return false;
 }
 
 /// The main entry point for the TableGen backend.
@@ -1169,7 +1508,7 @@ static bool generateBytecode(const RecordKeeper &records, raw_ostream &os) {
   generateVersionCheckDispatch(records, os);
   os << "#undef GEN_OP_VERSION_CHECK_DISPATCH\n";
   os << "#endif // GEN_OP_VERSION_CHECK_DISPATCH\n";
-  os << "//===-- End Version Check Dispatch --===//\n";
+  os << "//===-- End Version Check Dispatch --===//\n\n";
 
   return false;
 }
@@ -1233,6 +1572,13 @@ static bool generateTypeBytecode(const RecordKeeper &records, raw_ostream &os) {
   os << "#endif // GEN_TYPE_TAG_ENUM\n";
   os << "//===-- End Type Tag Enum --===//\n\n";
 
+  os << "//===-- Begin Preview Type Classification --===//\n";
+  os << "#ifdef GEN_PREVIEW_TYPE_CLASSIFICATION\n";
+  generatePreviewTypeClassification(structure, os);
+  os << "\n#undef GEN_PREVIEW_TYPE_CLASSIFICATION\n";
+  os << "#endif // GEN_PREVIEW_TYPE_CLASSIFICATION\n";
+  os << "//===-- End Preview Type Classification --===//\n\n";
+
   os << "//===-- Begin Type Writer Implementations --===//\n";
   os << "#ifdef GEN_TYPE_WRITERS\n\n";
   generateTypeSerializers(structure, os);
@@ -1288,6 +1634,14 @@ static bool generateAttrBytecode(const RecordKeeper &records, raw_ostream &os) {
   os << "\n#undef GEN_ATTR_VERSION_CHECK\n";
   os << "#endif // GEN_ATTR_VERSION_CHECK\n";
   os << "//===-- End Attribute Version Check --===//\n\n";
+
+  // Generate public-preview attribute classifiers.
+  os << "//===-- Begin Preview Attribute Classification --===//\n";
+  os << "#ifdef GEN_PREVIEW_ATTR_CLASSIFICATION\n";
+  generatePreviewAttrClassification(structure, os);
+  os << "\n#undef GEN_PREVIEW_ATTR_CLASSIFICATION\n";
+  os << "#endif // GEN_PREVIEW_ATTR_CLASSIFICATION\n";
+  os << "//===-- End Preview Attribute Classification --===//\n\n";
 
   // Generate is_cuda_tile_enum type trait for BytecodeWriter.
   os << "//===-- Begin Enum Type Trait --===//\n";
@@ -1440,4 +1794,11 @@ static mlir::GenRegistration genCudaTileAttrBytecode(
     "Generate cuda_tile attribute bytecode definitions.",
     [](const RecordKeeper &records, raw_ostream &os) {
       return generateAttrBytecode(records, os);
+    });
+
+static mlir::GenRegistration genCudaTilePreviewFeatures(
+    "gen-cuda-tile-preview-features",
+    "Generate cuda_tile preview feature metadata and IR classification.",
+    [](const RecordKeeper &records, raw_ostream &os) {
+      return generatePreviewFeatures(records, os);
     });

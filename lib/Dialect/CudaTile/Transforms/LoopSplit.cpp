@@ -201,7 +201,8 @@ static ForOp copyLoop(RewriterBase &rewriter, ForOp forOp, CmpIOp cmpOp,
   for (Operation *op : opsToClone) {
     if (cmpOp.getOperation() == op) {
       // Replace CmpOp with constant value
-      TileType constType = TileType::get({}, rewriter.getI1Type());
+      TileType constType =
+          TileType::get(ArrayRef<int64_t>{}, rewriter.getI1Type());
       llvm::APInt val(1, cloneThen ? 1 : 0);
       auto constAttr = DenseIntElementsAttr::get(constType, val);
       auto cmpConst =

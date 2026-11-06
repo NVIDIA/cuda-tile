@@ -21,6 +21,8 @@ namespace tblgen {
 void generateSpec(mlir::raw_ostream &os, const llvm::RecordKeeper &records,
                   const std::optional<std::string> &examplesDirectory);
 
+void generateTypeSpec(mlir::raw_ostream &os, const llvm::RecordKeeper &records);
+
 } // namespace tblgen
 } // namespace cudatile
 

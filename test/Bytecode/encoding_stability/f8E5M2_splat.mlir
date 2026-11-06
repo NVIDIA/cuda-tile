@@ -4,7 +4,7 @@
 // bit is set and the mantissa is non-zero, making single-bit shifts in
 // the encoding obvious.
 
-// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module %s -o %t.bc
+// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module -bytecode-version=13.4 %s -o %t.bc
 // RUN: cmp %t.bc %S/goldens/f8E5M2_splat.golden.tileirbc
 
 cuda_tile.module @kernels {

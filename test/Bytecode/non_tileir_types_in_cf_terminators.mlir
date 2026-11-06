@@ -1,4 +1,4 @@
-// RUN: not cuda-tile-translate -mlir-to-cudatilebc %s -no-implicit-module 2>&1 | FileCheck %s
+// RUN: not cuda-tile-translate -mlir-to-cudatilebc %s -no-implicit-module -bytecode-version=250.0 2>&1 | FileCheck %s
 
 // Verify that programs using non-TileIR types in control-flow terminators
 // (yield, break, continue) are rejected by the bytecode writer. The MLIR
@@ -12,27 +12,27 @@
 cuda_tile.module @kernels {
 
   // yield: foreign type flows from a function arg through an if-result.
-  cuda_tile.entry @yield_foreign_type(%val: index, %cond: !cuda_tile.tile<i1>) {
-    %r = cuda_tile.if %cond -> (index) {
-      cuda_tile.yield %val : index
+  cuda_tile.testing$func @yield_foreign_type(%val: vector<4xf32>, %cond: !cuda_tile.tile<i1>) {
+    %r = cuda_tile.if %cond -> (vector<4xf32>) {
+      cuda_tile.yield %val : vector<4xf32>
     } else {
-      cuda_tile.yield %val : index
+      cuda_tile.yield %val : vector<4xf32>
     }
     cuda_tile.return
   }
 
   // break: foreign type flows from a function arg out of a loop via break.
-  cuda_tile.entry @break_foreign_type(%val: index) {
-    %r = cuda_tile.loop : index {
-      cuda_tile.break %val : index
+  cuda_tile.testing$func @break_foreign_type(%val: vector<4xf32>) {
+    %r = cuda_tile.loop : vector<4xf32> {
+      cuda_tile.break %val : vector<4xf32>
     }
     cuda_tile.return
   }
 
   // continue: foreign type flows from a function arg as a loop-carried value.
-  cuda_tile.entry @continue_foreign_type(%val: index) {
-    cuda_tile.loop iter_values(%arg = %val) : index {
-      cuda_tile.continue %arg : index
+  cuda_tile.testing$func @continue_foreign_type(%val: vector<4xf32>) {
+    cuda_tile.loop iter_values(%arg = %val) : vector<4xf32> {
+      cuda_tile.continue %arg : vector<4xf32>
     }
     cuda_tile.return
   }

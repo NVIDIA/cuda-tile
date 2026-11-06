@@ -17,6 +17,12 @@
 #
 # Do not run this to "make the failure go away" without first understanding
 # which encoding moved and why.
+#
+# The -bytecode-version below is pinned and is duplicated in the RUN line of
+# every *.mlir in this directory. If you intentionally advance the pinned
+# version here, update those RUN lines in lockstep; otherwise the goldens
+# will be regenerated at the new version while the tests still emit at the
+# old one, and every cmp will fail.
 
 set -euo pipefail
 
@@ -26,6 +32,14 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 for src in "${DIR}"/*.mlir; do
   name="$(basename "${src}" .mlir)"
   out="${DIR}/goldens/${name}.golden.tileirbc"
+  # Not every test here compares bytes: the round-trip tests write and read
+  # back instead, and some of those are split-file inputs that do not translate
+  # on their own. A test with no golden has nothing to regenerate. To add a new
+  # golden, create the empty file first so this picks it up.
+  if [[ ! -f "${out}" ]]; then
+    echo "Skipping ${src}: no golden"
+    continue
+  fi
   echo "Regenerating ${out}"
-  "${TRANSLATE}" -mlir-to-cudatilebc -no-implicit-module "${src}" -o "${out}"
+  "${TRANSLATE}" -mlir-to-cudatilebc -no-implicit-module -bytecode-version=13.4 "${src}" -o "${out}"
 done

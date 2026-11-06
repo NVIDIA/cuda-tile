@@ -15,11 +15,15 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LLVM.h"
 
+#include "cuda_tile/Dialect/CudaTile/IR/PreviewFeatures.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Remark.h"
 
+// Keep the generated dialect declaration after the types used by its extra
+// class declaration.
 #include "cuda_tile/Dialect/CudaTile/IR/Dialect.h.inc"
 #include <functional>
 #include <optional>
+#include <utility>
 #include <variant>
 
 namespace mlir::cuda_tile {
@@ -66,6 +70,14 @@ void printFunctionSignatureWithCudaTileTypes(mlir::OpAsmPrinter &printer,
                                              mlir::Operation *op,
                                              mlir::TypeRange inputs,
                                              mlir::TypeRange results);
+
+/// Build the `arg_attrs` array for a function-like op, returning null when
+/// every dictionary is empty (null entries count as empty). Presence has to
+/// mean "genuinely has argument attributes": the bytecode function table only
+/// encodes them from 13.5 on, and the version analysis keys off presence.
+mlir::ArrayAttr
+buildNormalizedArgAttrs(mlir::Builder &builder,
+                        llvm::ArrayRef<mlir::Attribute> argAttrs);
 
 } // namespace mlir::cuda_tile
 

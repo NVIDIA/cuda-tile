@@ -16,15 +16,20 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/MathExtras.h"
 
+#include "cuda_tile/Dialect/CudaTile/IR/Attributes.h"
+#include "cuda_tile/Dialect/CudaTile/IR/CompactLayoutParser.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Dialect.h"
-
-#define GET_TYPEDEF_CLASSES
+#include "cuda_tile/Dialect/CudaTile/IR/LayoutAlgebra.h"
 #include "cuda_tile/Dialect/CudaTile/IR/SharedVerifiers.h"
-#include "cuda_tile/Dialect/CudaTile/IR/Types.cpp.inc"
+#include <limits>
 
 using namespace mlir;
 using namespace mlir::cuda_tile;
+
+#define GET_TYPEDEF_CLASSES
+#include "cuda_tile/Dialect/CudaTile/IR/Types.cpp.inc"
 
 //===----------------------------------------------------------------------===//
 // Helpers
@@ -45,7 +50,33 @@ bool cuda_tile::isPointerLike(Type t) {
   return false;
 }
 
-bool CudaTileType::classof(Type type) {
+bool cuda_tile::isIntTile(Type type) {
+  auto tileType = dyn_cast<cuda_tile::TileType>(type);
+  if (!tileType) {
+    return false;
+  }
+  return isa<IntegerType>(tileType.getElementType()) &&
+         !tileType.getElementType().isInteger(1);
+}
+
+bool cuda_tile::isBoolTile(Type type) {
+  auto tileType = dyn_cast<cuda_tile::TileType>(type);
+  if (!tileType) {
+    return false;
+  }
+  return tileType.getElementType().isInteger(1);
+}
+
+unsigned cuda_tile::getBitWidthFromType(Type type) {
+  auto tileType = dyn_cast<cuda_tile::TileType>(type);
+  if (!tileType) {
+    return 0;
+  }
+  auto intTy = dyn_cast<IntegerType>(tileType.getElementType());
+  return intTy ? intTy.getWidth() : 0;
+}
+
+bool CudaTileDialectType::classof(Type type) {
   return ::isa<CudaTileDialect>(type.getDialect());
 }
 
@@ -80,6 +111,50 @@ parseOptionalPaddingValue(AsmParser &parser) {
   }
 
   return PaddingValueAttr::get(parser.getBuilder().getContext(), *attr);
+}
+
+static bool isTileShapeExpr(SymbolicExprAttr attr) {
+  if (isa<SymbolicExprIntAttr, SymbolicExprVarAttr>(attr))
+    return true;
+  if (auto builtin = dyn_cast<SymbolicExprBuiltinAttr>(attr)) {
+    Type type = builtin.getType().getValue();
+    return isa<IndexType>(type);
+  }
+  if (auto mulAttr = dyn_cast<SymbolicExprMulAttr>(attr))
+    return isTileShapeExpr(mulAttr.getLhs()) &&
+           isTileShapeExpr(mulAttr.getRhs());
+  if (auto addAttr = dyn_cast<SymbolicExprAddAttr>(attr))
+    return isTileShapeExpr(addAttr.getLhs()) &&
+           isTileShapeExpr(addAttr.getRhs());
+  if (auto negAttr = dyn_cast<SymbolicExprNegAttr>(attr))
+    return isTileShapeExpr(negAttr.getOperand());
+  if (auto subAttr = dyn_cast<SymbolicExprSubAttr>(attr))
+    return isTileShapeExpr(subAttr.getLhs()) &&
+           isTileShapeExpr(subAttr.getRhs());
+  return false;
+}
+
+static LogicalResult verifyConcreteTile(
+    function_ref<InFlightDiagnostic()> emitError, ArrayRef<int64_t> shape,
+    Type elementType
+) {
+  if (auto pointerType = dyn_cast<cuda_tile::PointerType>(elementType);
+      pointerType && isa<Float4E2M1FNType>(pointerType.getPointeeType()) &&
+      !shape.empty()) {
+    return emitError()
+           << "tiles of ptr<f4E2M1FN> must have rank 0; use an f4 tile "
+              "view for memory accesses";
+  }
+  if (isa<Float4E2M1FNType>(elementType)) {
+    // f4 must have an even number of elements to pack 2 per byte.
+    if (shape.empty() ||
+        llvm::all_of(shape, [](int64_t dim) { return dim % 2 != 0; }))
+      return emitError()
+             << "F4E2M1FN tiles must have an even number of elements";
+  }
+  return verifyTileSize(
+      emitError, shape
+  );
 }
 
 //===----------------------------------------------------------------------===//
@@ -166,50 +241,192 @@ void cuda_tile::printCudaTileTypeSplat(AsmPrinter &p, Operation *op,
 }
 
 //===----------------------------------------------------------------------===//
+// SymbolicType
+//===----------------------------------------------------------------------===//
+
+Type SymbolicType::parse(AsmParser &parser) {
+  SMLoc loc = parser.getCurrentLocation();
+  SymbolicExprAttr expr;
+
+  if (parser.parseLess())
+    return Type();
+
+  // Keep the common dtype-parameter syntax compact (`<T>`), while still
+  // allowing quoted names that cannot be printed as bare identifiers.
+  std::string name;
+  if (succeeded(parser.parseOptionalKeywordOrString(&name))) {
+    expr = SymbolicExprVarAttr::get(parser.getContext(), name);
+  } else {
+    Attribute attr;
+    if (parser.parseAttribute(attr))
+      return Type();
+    expr = llvm::dyn_cast<SymbolicExprAttr>(attr);
+    if (!expr) {
+      parser.emitError(loc, "symbolic type expression must be a "
+                            "symbolic expression attribute");
+      return Type();
+    }
+  }
+
+  if (parser.parseGreater())
+    return Type();
+
+  return parser.getChecked<cuda_tile::SymbolicType>(loc, parser.getContext(),
+                                                    expr);
+}
+
+void SymbolicType::print(AsmPrinter &printer) const {
+  printer << "<";
+  auto varAttr = llvm::cast<SymbolicExprVarAttr>(getExpr());
+  printer.printKeywordOrString(varAttr.getName());
+  printer << ">";
+}
+
+LogicalResult
+cuda_tile::SymbolicType::verify(function_ref<InFlightDiagnostic()> emitError,
+                                SymbolicExprAttr expr) {
+  if (!expr)
+    return emitError() << "symbolic type expression must be non-null";
+  auto varAttr = llvm::dyn_cast<SymbolicExprVarAttr>(expr);
+  if (!varAttr) {
+    return emitError()
+           << "symbolic type expression must be a SymbolicExprVarAttr, got "
+           << expr;
+  }
+  if (varAttr.getName().empty())
+    return emitError() << "symbolic type variable name must be non-empty";
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // TileType
 //===----------------------------------------------------------------------===//
 
-cuda_tile::TileType cuda_tile::TileType::get(ArrayRef<int64_t> shape,
-                                             Type elementType) {
-  return cuda_tile::TileType::get(elementType.getContext(), shape, elementType);
+static ParseResult
+parseTileDimensionList(AsmParser &parser,
+                       SmallVectorImpl<int64_t> &concreteDims,
+                       SmallVectorImpl<SymbolicExprAttr> &symbolicDims) {
+  MLIRContext *context = parser.getContext();
+
+  while (true) {
+    if (succeeded(parser.parseOptionalLSquare())) {
+      SMLoc exprLoc = parser.getCurrentLocation();
+      bool emittedDiagnostic = false;
+      CudaTileCompactLayoutParser exprParser(parser, context, exprLoc,
+                                             emittedDiagnostic);
+      FailureOr<SymbolicExprAttr> expr = exprParser.parseExpr();
+      if (failed(expr) || parser.parseRSquare()) {
+        return failure();
+      }
+      concreteDims.push_back(ShapedType::kDynamic);
+      symbolicDims.push_back(*expr);
+    } else {
+      int64_t value = 0;
+      OptionalParseResult intResult = parser.parseOptionalDecimalInteger(value);
+      if (!intResult.has_value()) {
+        break;
+      }
+      if (failed(*intResult)) {
+        return failure();
+      }
+      concreteDims.push_back(value);
+      symbolicDims.push_back(SymbolicExprIntAttr::get(context, value));
+    }
+
+    if (parser.parseXInDimensionList()) {
+      return failure();
+    }
+  }
+
+  return success();
 }
 
 Type cuda_tile::TileType::parse(AsmParser &parser) {
   SMLoc loc = parser.getCurrentLocation();
-  SmallVector<int64_t> dims;
+  SmallVector<int64_t> concreteDims;
+  SmallVector<SymbolicExprAttr> symbolicDims;
   Type elementType;
   if (parser.parseLess() ||
-      parser.parseDimensionList(dims, /*allowDynamic=*/false) ||
-      parseCudaTileType(parser, elementType) || parser.parseGreater())
+      parseTileDimensionList(parser, concreteDims, symbolicDims) ||
+      parseCudaTileType(parser, elementType) || parser.parseGreater()) {
     return Type();
-  return parser.getChecked<cuda_tile::TileType>(loc, elementType.getContext(),
-                                                dims, elementType);
+  }
+
+  return cuda_tile::TileType::getChecked(
+      [&]() { return parser.emitError(loc); },
+      SymbolicTupleAttr::get(parser.getContext(), symbolicDims), elementType);
 }
 
 void cuda_tile::TileType::print(AsmPrinter &printer) const {
   printer << "<";
-  printShapeAndElem(printer, getShape(), getElementType());
+  auto symbolicShape = cast<SymbolicTupleAttr>(getSymbolicShapeAttr());
+  llvm::interleave(
+      symbolicShape.getValues(), printer,
+      [&](SymbolicExprAttr dim) {
+        if (auto intAttr = dyn_cast<SymbolicExprIntAttr>(dim)) {
+          printer << intAttr.getValue();
+          return;
+        }
+        printer << "[";
+        CudaTileCompactLayoutParser::printCompactExpr(printer.getStream(), dim);
+        printer << "]";
+      },
+      "x");
+  if (!symbolicShape.getValues().empty()) {
+    printer << "x";
+  }
+  cuda_tile::printCudaTileType(printer, getElementType());
   printer << ">";
 }
 
 LogicalResult
 cuda_tile::TileType::verify(function_ref<InFlightDiagnostic()> emitError,
-                            ArrayRef<int64_t> shape, Type elementType) {
-  if (isa<Float4E2M1FNType>(elementType)) {
-    // f4 must have an even number of elements to pack 2 per byte
-    if (shape.empty() ||
-        llvm::all_of(shape, [](int64_t dim) { return dim % 2 != 0; }))
-      return emitError()
-             << "F4E2M1FN tiles must have an even number of elements";
+                            SymbolicExprAttr symbolicShapeAttr,
+                            ArrayRef<int64_t> concreteShapeCache,
+                            Type elementType) {
+  auto symbolicShape = dyn_cast<SymbolicTupleAttr>(symbolicShapeAttr);
+  if (!symbolicShape)
+    return emitError() << "symbolic shape must be a SymbolicTupleAttr";
+
+  if (symbolicShape.getValues().size() != concreteShapeCache.size())
+    return emitError() << "concrete shape cache rank "
+                       << concreteShapeCache.size()
+                       << " does not match symbolic shape rank "
+                       << symbolicShape.getValues().size();
+
+  for (auto [idx, dimAttr] : llvm::enumerate(symbolicShape.getValues())) {
+    if (!isTileShapeExpr(dimAttr))
+      return emitError() << "shape dimension " << idx
+                         << " must be an integer-valued expression";
+
+    if (auto intAttr = dyn_cast<SymbolicExprIntAttr>(dimAttr)) {
+      if (concreteShapeCache[idx] != intAttr.getValue()) {
+        return emitError() << "concrete shape cache dimension " << idx
+                           << " does not match symbolic shape";
+      }
+      continue;
+    }
+
+    if (!ShapedType::isDynamic(concreteShapeCache[idx]))
+      return emitError() << "concrete shape cache dimension " << idx
+                         << " must be dynamic for symbolic shape dimension";
   }
-  return verifyTileSize(emitError, shape);
+  return verifyConcreteTile(
+      emitError, concreteShapeCache, elementType
+  );
+}
+
+ArrayRef<int64_t> cuda_tile::TileType::getShape() const {
+  return getConcreteShapeCache();
 }
 
 cuda_tile::TileType
 cuda_tile::TileType::cloneWith(std::optional<ArrayRef<int64_t>> shape,
                                Type elementType) const {
-  return cuda_tile::TileType::get(shape.has_value() ? *shape : getShape(),
-                                  elementType);
+  if (shape)
+    return cuda_tile::TileType::get(*shape, elementType);
+  return cuda_tile::TileType::get(getContext(), getSymbolicShapeAttr(),
+                                  getConcreteShapeCache(), elementType);
 }
 
 TileType cuda_tile::getI1SameShape(Type type) {
@@ -395,6 +612,8 @@ cuda_tile::TensorViewType::verify(function_ref<InFlightDiagnostic()> emitError,
   if (ptrAttr) {
     switch (ptrAttr.getValue()) {
     case cuda_tile::PtrAttr::NONE:
+    case cuda_tile::PtrAttr::UNICAST:
+    case cuda_tile::PtrAttr::MULTICAST:
       break;
     default:
       return emitError()
@@ -436,6 +655,25 @@ size_t cuda_tile::TensorViewType::dynamicStrideAmount() {
   return llvm::count_if(getStrides(), [](int64_t x) {
     return x == cuda_tile::TensorViewType::kDynamic;
   });
+}
+
+std::optional<unsigned>
+cuda_tile::TensorViewType::getF4PackingDimension() const {
+  if (!isa<Float4E2M1FNType>(getElementType())) {
+    return std::nullopt;
+  }
+
+  std::optional<unsigned> packingDimension;
+  for (auto [dimension, stride] : llvm::enumerate(getStrides())) {
+    if (stride != 1) {
+      continue;
+    }
+    if (packingDimension) {
+      return std::nullopt;
+    }
+    packingDimension = static_cast<unsigned>(dimension);
+  }
+  return packingDimension;
 }
 
 //===----------------------------------------------------------------------===//
@@ -625,8 +863,8 @@ static LogicalResult verifyPartitionViewLike(
 
   // Run the Tile type verifier to catch invalid tiles in the partition type
   SmallVector<int64_t> shape64(tileShape.begin(), tileShape.end());
-  if (failed(cuda_tile::TileType::verify([&]() { return emitError(); }, shape64,
-                                         tensorView.getElementType())))
+  if (failed(verifyConcreteTile([&]() { return emitError(); }, shape64,
+                                tensorView.getElementType())))
     return failure();
 
   // Verify that special padding values are only used with floating point types
@@ -966,8 +1204,8 @@ LogicalResult cuda_tile::GatherScatterViewType::verify(
 
   // Run the Tile type verifier to catch invalid tiles in the gather type
   SmallVector<int64_t> shape64(tileShape.begin(), tileShape.end());
-  if (failed(cuda_tile::TileType::verify([&]() { return emitError(); }, shape64,
-                                         tensorView.getElementType())))
+  if (failed(verifyConcreteTile([&]() { return emitError(); }, shape64,
+                                tensorView.getElementType())))
     return failure();
 
   // Verify that special padding values are only used with floating point types
@@ -1060,6 +1298,330 @@ LogicalResult cuda_tile::GatherScatterViewType::verifyIndices(
   }
 
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// FragmentType
+//===----------------------------------------------------------------------===//
+
+Type cuda_tile::FragmentType::parse(AsmParser &parser) {
+  MLIRContext *ctx = parser.getContext();
+  SMLoc loc = parser.getCurrentLocation();
+
+  // Shape and element type: `NxMx...xElem`. Concrete dims are bare integers,
+  // symbolic dims are written in brackets, e.g. `2x[F]xf32`. Shared with
+  // TileType via parseTileDimensionList.
+  SmallVector<int64_t> concreteDims;
+  SmallVector<SymbolicExprAttr> symbolicDims;
+  Type elementType;
+  if (parser.parseLess() ||
+      parseTileDimensionList(parser, concreteDims, symbolicDims) ||
+      parseCudaTileType(parser, elementType)) {
+    return {};
+  }
+
+  // Memory space.
+  if (parser.parseComma()) {
+    return {};
+  }
+  SMLoc memLoc = parser.getCurrentLocation();
+  StringRef memStr;
+  if (parser.parseKeyword(&memStr)) {
+    return {};
+  }
+  std::optional<MemorySpace> memorySpace = symbolizeMemorySpace(memStr);
+  if (!memorySpace) {
+    parser.emitError(memLoc) << "unknown memory space '" << memStr << "'";
+    return {};
+  }
+
+  // mem_layout = <layout>. Parsed via FieldParser so the layout may be written
+  // in the stripped `<(...):(...)>` form without the `#cuda_tile.preview$layout`
+  // prefix.
+  if (parser.parseComma() || parser.parseKeyword("mem_layout") ||
+      parser.parseEqual()) {
+    return {};
+  }
+  FailureOr<LayoutAttr> memLayout = FieldParser<LayoutAttr>::parse(parser);
+  if (failed(memLayout)) {
+    return {};
+  }
+
+  // fragmap = <layout>. Same as above, we use FieldParser so we can parse it in
+  // the stripped form.
+  if (parser.parseComma() || parser.parseKeyword("fragmap") ||
+      parser.parseEqual()) {
+    return {};
+  }
+  FailureOr<LayoutAttr> fragmap = FieldParser<LayoutAttr>::parse(parser);
+  if (failed(fragmap)) {
+    return {};
+  }
+
+  // Optional: `, alignment = <expr>` (elided in the IR when equal to 1).
+  SymbolicExprAttr alignment;
+  if (succeeded(parser.parseOptionalComma())) {
+    SMLoc alignLoc = parser.getCurrentLocation();
+    if (parser.parseKeyword("alignment") || parser.parseEqual()) {
+      return {};
+    }
+    bool emittedDiagnostic = false;
+    CudaTileCompactLayoutParser exprParser(parser, ctx, alignLoc,
+                                           emittedDiagnostic);
+    FailureOr<SymbolicExprAttr> expr = exprParser.parseExpr();
+    if (failed(expr)) {
+      if (!emittedDiagnostic) {
+        parser.emitError(alignLoc, "expected alignment expression");
+      }
+      return {};
+    }
+    alignment = *expr;
+  }
+
+  // Absent alignment defaults to a concrete 1 element.
+  if (!alignment) {
+    alignment = SymbolicExprIntAttr::get(ctx, 1);
+  }
+
+  if (parser.parseGreater()) {
+    return {};
+  }
+
+  return FragmentType::getChecked([&] { return parser.emitError(loc); },
+                                  SymbolicTupleAttr::get(ctx, symbolicDims),
+                                  elementType, *memorySpace, *memLayout,
+                                  *fragmap, alignment);
+}
+
+void cuda_tile::FragmentType::print(AsmPrinter &printer) const {
+  printer << "<";
+  auto symbolicShape = cast<SymbolicTupleAttr>(getSymbolicShapeAttr());
+  llvm::interleave(
+      symbolicShape.getValues(), printer,
+      [&](SymbolicExprAttr dim) {
+        if (auto intAttr = dyn_cast<SymbolicExprIntAttr>(dim)) {
+          printer << intAttr.getValue();
+          return;
+        }
+        printer << "[";
+        CudaTileCompactLayoutParser::printCompactExpr(printer.getStream(), dim);
+        printer << "]";
+      },
+      "x");
+  if (!symbolicShape.getValues().empty()) {
+    printer << "x";
+  }
+  cuda_tile::printCudaTileType(printer, getElementType());
+  printer << ", " << stringifyMemorySpace(getMemorySpace());
+  printer << ", mem_layout = ";
+  printer.printStrippedAttrOrType(getMemLayout());
+  printer << ", fragmap = ";
+  printer.printStrippedAttrOrType(getFragmap());
+  // Elide alignment when it is the default (concrete 1 element).
+  auto alignmentInt = dyn_cast<SymbolicExprIntAttr>(getAlignment());
+  if (!alignmentInt || alignmentInt.getValue() != 1) {
+    printer << ", alignment = ";
+    CudaTileCompactLayoutParser::printCompactExpr(printer.getStream(),
+                                                  getAlignment());
+  }
+  printer << ">";
+}
+
+/// Element count of a fragment shape, or nullopt when a dimension is still
+/// symbolic or the product overflows.
+static std::optional<int64_t>
+staticFragmentElementCount(ArrayRef<int64_t> concreteShapeCache) {
+  // tryGetNumElements() multiplies kDynamic in as a plain factor, so the
+  // symbolic dimensions have to be ruled out first.
+  if (ShapedType::isDynamicShape(concreteShapeCache)) {
+    return std::nullopt;
+  }
+  return ShapedType::tryGetNumElements(concreteShapeCache);
+}
+
+/// Verify the storage-safety contract on a fragment's `mem_layout`.
+///
+/// A fragment buffer holds exactly the footprint elements of one invocation and
+/// the SIMT ABI hands the implementation a bare pointer to it, so the layout
+/// must be a permutation of `[0, elementCount)`.
+///
+/// A parametric layout is re-checked once concretization substitutes its
+/// variables.
+static LogicalResult
+verifyFragmentMemLayout(function_ref<InFlightDiagnostic()> emitError,
+                        ArrayRef<int64_t> concreteShapeCache,
+                        cuda_tile::MemorySpace memorySpace,
+                        cuda_tile::LayoutAttr memLayout) {
+  FailureOr<SmallVector<LayoutLeaf>> leaves = flattenStaticLayout(memLayout);
+  if (failed(leaves)) {
+    return success();
+  }
+
+  // A symbolic fragment shape leaves the element count unknown, so the two
+  // checks that relate the layout to it are deferred with the layout itself.
+  std::optional<int64_t> elementCount =
+      staticFragmentElementCount(concreteShapeCache);
+
+  FailureOr<int64_t> memLayoutSize = staticLayoutSize(*leaves);
+  if (failed(memLayoutSize)) {
+    return emitError() << "mem_layout domain size must be representable as a "
+                          "signed 64-bit integer";
+  }
+  if (elementCount && *memLayoutSize != *elementCount) {
+    return emitError() << "mem_layout domain size (" << *memLayoutSize
+                       << ") must equal the fragment element count ("
+                       << *elementCount << ")";
+  }
+
+  FailureOr<int64_t> storageCosize = staticLayoutCosize(*leaves);
+  if (failed(storageCosize)) {
+    return emitError() << "mem_layout storage span must be representable as a "
+                          "signed 64-bit integer";
+  }
+  if (memorySpace == cuda_tile::MemorySpace::SMEM &&
+      *storageCosize > std::numeric_limits<int32_t>::max()) {
+    return emitError() << "smem mem_layout storage span (" << *storageCosize
+                       << ") exceeds the current signed 32-bit offset ABI "
+                          "limit ("
+                       << std::numeric_limits<int32_t>::max() << ")";
+  }
+  if (elementCount && *storageCosize != *elementCount) {
+    return emitError()
+           << "mem_layout must be a bijection on the footprint elements (a "
+              "permutation of [0, "
+           << *elementCount << ")), but its codomain spans " << *storageCosize
+           << " element(s)";
+  }
+
+  if (!hasNoBroadcastModes(*leaves) || !hasCompactStrideChain(*leaves)) {
+    return emitError() << "mem_layout must be a bijection on the footprint "
+                          "elements, but its modes overlap or leave gaps";
+  }
+
+  return success();
+}
+
+LogicalResult cuda_tile::FragmentType::verify(
+    function_ref<InFlightDiagnostic()> emitError,
+    SymbolicExprAttr symbolicShapeAttr, ArrayRef<int64_t> concreteShapeCache,
+    Type elementType, cuda_tile::MemorySpace memorySpace,
+    cuda_tile::LayoutAttr memLayout, cuda_tile::LayoutAttr fragmap,
+    SymbolicExprAttr alignment) {
+  auto symbolicShape = dyn_cast<SymbolicTupleAttr>(symbolicShapeAttr);
+  if (!symbolicShape) {
+    return emitError() << "symbolic shape must be a SymbolicTupleAttr";
+  }
+
+  if (!alignment) {
+    return emitError() << "alignment must not be null (use 1 for the default)";
+  }
+
+  // An alignment is a single number of elements, so it must be integer-valued:
+  // a tuple, a datatype, or a toward-zero division has no meaning here. This
+  // mirrors the scratch alignment check in ScratchRequestAttr::verify.
+  if (failed(verifySymbolicExprKind(alignment, SymbolicExprKind::Int, [&] {
+        return emitError() << "fragment alignment: ";
+      }))) {
+    return failure();
+  }
+
+  // A concrete alignment must additionally be a positive power-of-two number
+  // of elements. The check runs on the simplified expression so that an
+  // alignment stays rejected however it was spelled: `-(4)` and `4 - 8` mean
+  // the same thing as `-4`, and the compact printer spells all three the same
+  // way once they are folded.
+  if (auto alignInt = dyn_cast<SymbolicExprIntAttr>(alignment.simplify())) {
+    int64_t raw = alignInt.getValue();
+    if (raw <= 0) {
+      return emitError() << "fragment alignment must be a positive number of "
+                            "elements";
+    }
+    if (!llvm::isPowerOf2_64(raw)) {
+      return emitError() << "fragment alignment must be a power of two number "
+                            "of elements, got "
+                         << raw;
+    }
+  }
+
+  if (symbolicShape.getValues().size() != concreteShapeCache.size()) {
+    return emitError() << "concrete shape cache rank ("
+                       << concreteShapeCache.size()
+                       << ") does not match symbolic shape rank ("
+                       << symbolicShape.getValues().size() << ")";
+  }
+
+  for (auto [idx, dim] : llvm::enumerate(symbolicShape.getValues())) {
+    if (!isTileShapeExpr(dim)) {
+      return emitError() << "shape dimension " << idx
+                         << " must be an integer-valued expression";
+    }
+
+    // If the dimension is an int expression (i.e. concrete), then verify it
+    // matches the concrete shape cache.
+    if (auto intDim = dyn_cast<SymbolicExprIntAttr>(dim)) {
+      int64_t value = intDim.getValue();
+      if (value <= 0) {
+        return emitError() << "fragment shape dimension " << idx
+                           << " must be positive, got " << value;
+      }
+      if (concreteShapeCache[idx] != value) {
+        return emitError() << "concrete shape cache dimension " << idx
+                           << " does not match symbolic shape";
+      }
+      continue;
+    }
+
+    // Otherwise, the concrete shape cache *must* hold a "dynamic" entry at this
+    // index.
+    if (!ShapedType::isDynamic(concreteShapeCache[idx])) {
+      return emitError() << "concrete shape cache dimension " << idx
+                         << " must be dynamic for a symbolic shape dimension";
+    }
+  }
+
+  if (ShapedType::isStaticShape(concreteShapeCache) &&
+      !staticFragmentElementCount(concreteShapeCache)) {
+    return emitError()
+           << "fragment element count must fit in a signed 64-bit integer";
+  }
+
+  // The memory space is constrained to `local`/`smem` by the MemorySpace enum
+  // itself; there is no `tmem` value.
+
+  if (!memLayout) {
+    return emitError() << "mem_layout must not be null";
+  }
+  if (!fragmap) {
+    return emitError() << "fragmap must not be null";
+  }
+
+  return verifyFragmentMemLayout(emitError, concreteShapeCache, memorySpace,
+                                 memLayout);
+}
+
+/// Forward the getShape for ShapedTypeInterface to the concrete shape cache on
+/// the type.
+ArrayRef<int64_t> cuda_tile::FragmentType::getShape() const {
+  return getConcreteShapeCache();
+}
+
+static bool fragmentHasUnresolvedSymbolicExpr(Attribute attr) {
+  return attr
+      .walk([](Attribute nested) {
+        return isa<SymbolicExprVarAttr, SymbolicExprBuiltinAttr>(nested)
+                   ? WalkResult::interrupt()
+                   : WalkResult::advance();
+      })
+      .wasInterrupted();
+}
+
+bool cuda_tile::FragmentType::isConcrete() const {
+  if (llvm::any_of(getShape(), ShapedType::isDynamic)) {
+    return false;
+  }
+  return !fragmentHasUnresolvedSymbolicExpr(getMemLayout()) &&
+         !fragmentHasUnresolvedSymbolicExpr(getFragmap()) &&
+         !fragmentHasUnresolvedSymbolicExpr(getAlignment());
 }
 
 //===----------------------------------------------------------------------===//

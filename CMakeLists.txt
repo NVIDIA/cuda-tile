@@ -3,7 +3,11 @@
 # ------------------------------------------------------------------------------
 cmake_minimum_required(VERSION 3.20.0)
 
-project(CUDA_TILE)
+option(CUDA_TILE_BUILD_IN_LLVM "Build Cuda Tile as an external project in an LLVM build" OFF)
+
+if (NOT CUDA_TILE_BUILD_IN_LLVM)
+  project(CUDA_TILE)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -16,12 +20,16 @@ set_cuda_tile_build_type()
 set(CUDA_TILE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH
    "Path to CUDA Tile source directory")
 set(CUDA_TILE_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR} CACHE PATH
-   "Path to CUDA Tile binary directory")
+  "Path to CUDA Tile binary directory")
 set(CUDA_TILE_INSTALL_DIR ${CMAKE_INSTALL_PREFIX} CACHE PATH
    "Path to CUDA Tile install directory")
 option(CUDA_TILE_ENABLE_TESTING "Enable CUDA Tile testing" OFF)
 option(CUDA_TILE_ENABLE_CCACHE "Enable ccache for faster rebuilds" OFF)
-option(CUDA_TILE_BUILD_IN_LLVM "Build Cuda Tile as an external project in an LLVM build" OFF)
+if (CUDA_TILE_BUILD_IN_LLVM)
+  set(CUDA_TILE_OUTPUT_INTDIR ${CMAKE_BINARY_DIR})
+else()
+  set(CUDA_TILE_OUTPUT_INTDIR ${CUDA_TILE_BINARY_DIR})
+endif()
 
 message(STATUS "CUDA Tile source directory: ${CUDA_TILE_SOURCE_DIR}")
 message(STATUS "CUDA Tile binary directory: ${CUDA_TILE_BINARY_DIR}")
@@ -132,14 +140,26 @@ endif()
 include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${MLIR_INCLUDE_DIRS})
 
-# Create a cross-compilation target for CUDA Tile. This is mostly required by
-# cuda-tile-tblgen as we need to use the host's tablegen executable.
-if(CMAKE_CROSSCOMPILING)
+# Create a native sub-build for cuda-tile-tblgen when either cross-compiling
+# (need host arch) or LLVM_OPTIMIZED_TABLEGEN=ON (want Release tblgen even
+# when main build is Debug). Mirrors the trigger LLVM uses for
+# LLVM_USE_HOST_TOOLS in llvm/CMakeLists.txt.
+if(NOT CUDA_TILE_BUILD_IN_LLVM AND
+   (CMAKE_CROSSCOMPILING OR LLVM_OPTIMIZED_TABLEGEN))
   include(CrossCompile)
   set(LLVM_USE_HOST_TOOLS ON)
 
   if (NOT DEFINED CUDA_TILE_USE_NATIVE_LLVM_INSTALL_DIR)
-    message(FATAL_ERROR "CUDA_TILE_USE_NATIVE_LLVM_INSTALL_DIR is not defined")
+    if (CMAKE_CROSSCOMPILING)
+      message(FATAL_ERROR "CUDA_TILE_USE_NATIVE_LLVM_INSTALL_DIR is not defined")
+    else()
+      # Non-cross same-arch build: the host install dir is the main one.
+      set(CUDA_TILE_USE_NATIVE_LLVM_INSTALL_DIR ${CUDA_TILE_USE_LLVM_INSTALL_DIR})
+      if (NOT CUDA_TILE_USE_NATIVE_LLVM_INSTALL_DIR)
+        message(FATAL_ERROR
+          "LLVM_OPTIMIZED_TABLEGEN requires CUDA_TILE_USE_LLVM_INSTALL_DIR to be set")
+      endif()
+    endif()
   endif()
 
   llvm_create_cross_target(CUDA_TILE NATIVE "" Release
@@ -164,8 +184,8 @@ include_directories(${CUDA_TILE_BINARY_DIR}/include)
 
 # Place generated executables (and libraries) in bin (or lib), instead of
 # tools/<tool_name>/.
-set(LLVM_RUNTIME_OUTPUT_INTDIR ${CUDA_TILE_BINARY_DIR}/bin)
-set(LLVM_LIBRARY_OUTPUT_INTDIR ${CUDA_TILE_BINARY_DIR}/lib)
+set(LLVM_RUNTIME_OUTPUT_INTDIR ${CUDA_TILE_OUTPUT_INTDIR}/bin)
+set(LLVM_LIBRARY_OUTPUT_INTDIR ${CUDA_TILE_OUTPUT_INTDIR}/lib)
 
 # Used by lit test configuration
 set(CUDA_TILE_TOOL_DIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
@@ -186,21 +206,23 @@ if((CMAKE_HOST_WIN32 OR WIN32 OR CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
   set(_CUDA_TILE_TBLGEN_HOST_EXE_SUFFIX ".exe")
 endif()
 
-if(CMAKE_CROSSCOMPILING)
+if(LLVM_USE_HOST_TOOLS)
   get_native_tool_path(cuda-tile-tblgen CUDA_TILE_TABLEGEN_EXE)
   if(NOT CUDA_TILE_TABLEGEN_EXE MATCHES "\\.exe$")
     set(CUDA_TILE_TABLEGEN_EXE "${CUDA_TILE_TABLEGEN_EXE}${_CUDA_TILE_TBLGEN_HOST_EXE_SUFFIX}")
   endif()
-  set(_MLIR_TBLGEN_HOST_EXE_SUFFIX "${CMAKE_HOST_EXECUTABLE_SUFFIX}")
-  if((CMAKE_HOST_WIN32 OR WIN32 OR CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
-     AND _MLIR_TBLGEN_HOST_EXE_SUFFIX STREQUAL "")
-    set(_MLIR_TBLGEN_HOST_EXE_SUFFIX ".exe")
+
+  if (NOT CUDA_TILE_BUILD_IN_LLVM)
+    set(_MLIR_TBLGEN_HOST_EXE_SUFFIX "${CMAKE_HOST_EXECUTABLE_SUFFIX}")
+    if((CMAKE_HOST_WIN32 OR WIN32 OR CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+      AND _MLIR_TBLGEN_HOST_EXE_SUFFIX STREQUAL "")
+      set(_MLIR_TBLGEN_HOST_EXE_SUFFIX ".exe")
+    endif()
+    set(MLIR_TABLEGEN_EXE
+        "${CUDA_TILE_USE_NATIVE_LLVM_INSTALL_DIR}/bin/${MLIR_TABLEGEN_EXE}${_MLIR_TBLGEN_HOST_EXE_SUFFIX}")
   endif()
-  set(MLIR_TABLEGEN_EXE
-      "${CUDA_TILE_USE_NATIVE_LLVM_INSTALL_DIR}/bin/${MLIR_TABLEGEN_EXE}${_MLIR_TBLGEN_HOST_EXE_SUFFIX}")
 else()
-  set(CUDA_TILE_TABLEGEN_EXE
-      "${CUDA_TILE_BINARY_DIR}/bin/cuda-tile-tblgen${CMAKE_EXECUTABLE_SUFFIX}")
+  set(CUDA_TILE_TABLEGEN_EXE "${CUDA_TILE_OUTPUT_INTDIR}/bin/cuda-tile-tblgen${CMAKE_EXECUTABLE_SUFFIX}")
 endif()
 
 message(STATUS "CUDA_TILE_TABLEGEN_EXE: ${CUDA_TILE_TABLEGEN_EXE}")

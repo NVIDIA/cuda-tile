@@ -1,4 +1,4 @@
-//===- CommandLineOptions.cpp -----------------------------------*- C++ -*-===//
+//===- CommandLineOptions.cpp - CUDA Tile Bytecode CLI ----------*- C++ -*-===//
 //
 // Part of the CUDA Tile IR project, under the Apache License v2.0 with LLVM
 // Exceptions. See https://llvm.org/LICENSE.txt for license information.
@@ -9,10 +9,13 @@
 
 #include "cuda_tile/Bytecode/Common/CommandLineOptions.h"
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include <memory>
 
 using namespace mlir;
 using namespace mlir::cuda_tile;
@@ -65,12 +68,16 @@ public:
   static void print(raw_ostream &os, const BytecodeVersion &v) { os << v; }
 };
 
-// Static storage for command line option value.
-static BytecodeVersion *bytecodeVersionPtr = nullptr;
+// Pointer to the registered bytecode-version option.
+static llvm::cl::opt<BytecodeVersion, /*ExternalStorage=*/false,
+                     BytecodeVersionParser> *bytecodeVersionOpt = nullptr;
 
 // Static storage for hints command line option value.
 static bool warnUnsupportedHintsVar = false;
 static bool errorUnsupportedHintsVar = false;
+
+static llvm::cl::list<PreviewFeature, /*StorageClass=*/bool,
+                      PreviewFeatureCLParser> *previewFeaturesOpt = nullptr;
 } // namespace
 
 void mlir::cuda_tile::registerTileIRBytecodeVersionOption() {
@@ -81,12 +88,16 @@ void mlir::cuda_tile::registerTileIRBytecodeVersionOption() {
                       llvm::cl::desc("Bytecode version to use for translation"),
                       llvm::cl::init(BytecodeVersion::kCurrentVersion));
 
-  bytecodeVersionPtr = &bytecodeVersion;
+  bytecodeVersionOpt = &bytecodeVersion;
 }
 
 BytecodeVersion mlir::cuda_tile::getCurrentBytecodeVersion() {
-  return bytecodeVersionPtr ? *bytecodeVersionPtr
+  return bytecodeVersionOpt ? bytecodeVersionOpt->getValue()
                             : BytecodeVersion::kCurrentVersion;
+}
+
+bool mlir::cuda_tile::isBytecodeVersionExplicitlySet() {
+  return bytecodeVersionOpt && bytecodeVersionOpt->getNumOccurrences() > 0;
 }
 
 void mlir::cuda_tile::registerTileIROptimizationHintsOptions() {
@@ -101,6 +112,48 @@ void mlir::cuda_tile::registerTileIROptimizationHintsOptions() {
       "Werr-hints",
       llvm::cl::desc("Treat unsupported/invalid optimization hints as errors."),
       llvm::cl::location(errorUnsupportedHintsVar), llvm::cl::init(false));
+}
+
+bool PreviewFeatureCLParser::parse(llvm::cl::Option &option,
+                                   llvm::StringRef /*argName*/,
+                                   llvm::StringRef arg, PreviewFeature &value) {
+  std::optional<PreviewFeature> feature = symbolizePreviewFeature(arg);
+  if (!feature) {
+    std::string supported;
+    llvm::raw_string_ostream os(supported);
+    llvm::interleaveComma(getSupportedPreviewFeatures(), os, [&](auto item) {
+      os << stringifyPreviewFeature(item);
+    });
+    return option.error("unknown preview feature '" + arg +
+                        "'; supported features: " + os.str());
+  }
+  if (isRetiredPreviewFeature(*feature)) {
+    return option.error("preview feature '" + arg + "' has been retired");
+  }
+  value = *feature;
+  return false;
+}
+
+void mlir::cuda_tile::registerTileIRPreviewOption() {
+  static llvm::cl::list<PreviewFeature, /*StorageClass=*/bool,
+                        PreviewFeatureCLParser>
+      previewFeatures(
+          "preview",
+          llvm::cl::desc("Enable one or more named preview features"),
+          llvm::cl::value_desc("feature[,feature...]"),
+          llvm::cl::CommaSeparated, llvm::cl::ValueRequired);
+  previewFeaturesOpt = std::addressof(previewFeatures);
+}
+
+PreviewFeatures mlir::cuda_tile::getPreviewFeaturesFromCommandLine() {
+  PreviewFeatures features;
+  if (!previewFeaturesOpt) {
+    return features;
+  }
+  for (PreviewFeature feature : *previewFeaturesOpt) {
+    features.enable(feature);
+  }
+  return features;
 }
 
 bool mlir::cuda_tile::getWarnUnsupportedHints() {
@@ -125,4 +178,3 @@ void mlir::cuda_tile::registerListVersionsOption() {
         }
       }));
 }
-

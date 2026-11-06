@@ -45,6 +45,28 @@ class CudaTileTypeTag<string name, int tag>
   : BytecodeTypeTag<name, tag> {
 }
 
+/// Public-preview CudaTile type tag.
+class PreviewCudaTileTypeTag<string name, int tag>
+    : CudaTileTypeTag<name, tag>;
+
+/// Type tag whose serializer and deserializer are written by hand rather than
+/// generated, because the type is not a CudaTileTypeDef. The tag value is still
+/// reserved here so it participates in the frozen tag enum and cannot be
+/// reused. Every other tag must name a def; use this only when the hand-written
+/// code actually exists in BytecodeWriter.cpp and BytecodeReader.cpp.
+class HandSerializedTypeTag<string name, int tag>
+    : BytecodeTypeTag<name, tag>;
+
+/// Public-preview builtin singleton type tag. Names a nullary builtin MLIR
+/// type that is reconstructed on read with `<cppType>::get(ctx)`
+/// and matched on write with `isa<cppType>`.
+class PreviewBuiltinSingletonTypeTag<string name, string cppType, int tag,
+                                     CudaTilePreviewFeature feature>
+    : BytecodeTypeTag<name, tag> {
+  string builtinSingletonCppType = cppType;
+  CudaTilePreviewFeature previewFeature = feature;
+}
+
 //===----------------------------------------------------------------------===//
 // Explicit Type Tag Assignments - FROZEN for backward compatibility.
 //===----------------------------------------------------------------------===//
@@ -66,7 +88,7 @@ def : CudaTileTypeTag<"PointerType", 12>;
 def : CudaTileTypeTag<"TileType", 13>;
 def : CudaTileTypeTag<"TensorViewType", 14>;
 def : CudaTileTypeTag<"PartitionViewType", 15>;
-def : CudaTileTypeTag<"FunctionType", 16>;
+def : HandSerializedTypeTag<"FunctionType", 16>;
 def : CudaTileTypeTag<"TokenType", 17>;
 
 // 13.2 types.
@@ -78,9 +100,27 @@ def : CudaTileTypeTag<"GatherScatterViewType", 20>;
 def : CudaTileTypeTag<"StridedViewType", 21>;
 def : IntegerTypeTag<"Int4", 22, 4>;
 
+// Public-preview types (0xD0 - 0xEF).
+def : PreviewCudaTileTypeTag<"SymbolicType", 0xD1>;
+def : PreviewCudaTileTypeTag<"FragmentType", 0xD2>;
+def : PreviewCudaTileTypeTag<"DTypeParamType", 0xD3>;
+def : PreviewCudaTileTypeTag<"ShapeParamType", 0xD4>;
+def : PreviewCudaTileTypeTag<"StringParamType", 0xD5>;
+def : PreviewBuiltinSingletonTypeTag<
+          "IndexType", "::mlir::IndexType", 0xD6,
+          CudaTile_SIMTPreviewFeature>;
+def : PreviewBuiltinSingletonTypeTag<
+          "NoneType", "::mlir::NoneType", 0xD7,
+          CudaTile_SIMTPreviewFeature>;
+
 #ifdef TILE_IR_INCLUDE_TESTS
 // Testing type for parameter versioning evolution (version from TestingTypes.td).
 def : CudaTileTypeTag<"BytecodeTestEvolvedType", 200>;
+def : CudaTileTypeTag<"BytecodeTestSandwichedOptionalType", 201>;
+def : CudaTileTypeTag<"BytecodeTestTypeContainerType", 202>;
+
+// Testing public-preview type tags (0xD0 - 0xEF).
+def : PreviewCudaTileTypeTag<"PreviewBytecodeTestType", 0xD0>;
 #endif // TILE_IR_INCLUDE_TESTS
 
 def : FloatTypeTag<"Float8E5M3FNU", 0x82, "Float8E5M3FNUType">;

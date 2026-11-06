@@ -2,7 +2,7 @@
 // Catches both endianness shifts in the raw buffer and any change in how
 // non-splat dense ints are laid out.
 
-// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module %s -o %t.bc
+// RUN: cuda-tile-translate -mlir-to-cudatilebc -no-implicit-module -bytecode-version=13.4 %s -o %t.bc
 // RUN: cmp %t.bc %S/goldens/i32_array.golden.tileirbc
 
 cuda_tile.module @kernels {

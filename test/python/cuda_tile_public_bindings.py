@@ -1,4 +1,6 @@
-# RUN: %PYTHON -m pytest %s
+# RUN: %PYTHON -m pytest --capture=sys %s
+# Use --capture=sys to avoid nested FD capture on Windows, where stale native
+# stderr handles can write diagnostics into a reused temporary-file handle.
 
 """
 Tests direct Python bindings to CudaTile's C API.
@@ -12,8 +14,9 @@ from cuda_tile._mlir._mlir_libs._cuda_tile import (
     PointerType,
     TileType,
     TensorViewType,
-    writeBytecode,
     register_dialect,
+    setPreviewFeatures,
+    writeBytecode,
 )
 from cuda_tile._mlir.extras import types as T
 from cuda_tile._mlir.ir import Context, Location, Module, Type
@@ -376,3 +379,204 @@ def test_write_tile_ir_bytecode_invalid_module():
             finally:
                 f.close()  # Must close before unlink on Windows
                 os.unlink(temp_filename)
+
+
+def test_write_preview_tile_ir_bytecode_requires_explicit_feature():
+    with Context() as ctx:
+        register_dialect(ctx, load=True)
+        assert setPreviewFeatures(ctx, "simt")
+
+        with Location.unknown(ctx):
+            mlir_module = Module.parse(
+                """
+                module {
+                    cuda_tile.module @preview_test {
+                        cuda_tile.entry @entry_func() {
+                            cuda_tile.preview$bytecode_test_op req = 7 opt = 9
+                            cuda_tile.return
+                        }
+                    }
+                }
+            """
+            )
+
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
+            temp_filename = f.name
+            try:
+                assert setPreviewFeatures(ctx, "")
+                assert not writeBytecode(f, mlir_module.operation)
+                assert os.path.getsize(f.name) == 0
+                assert setPreviewFeatures(ctx, "simt")
+                assert writeBytecode(f, mlir_module.operation)
+                assert os.path.getsize(f.name) > 0
+            finally:
+                f.close()
+                os.unlink(temp_filename)
+
+
+def test_set_preview_features_rejects_unknown_feature():
+    with Context() as ctx:
+        register_dialect(ctx, load=True)
+        assert not setPreviewFeatures(ctx, "not_a_feature")
+
+
+def test_public_simt_decl_and_impl_require_preview_bytecode():
+    from cuda_tile._mlir import ir
+    from cuda_tile._mlir.dialects import cuda_tile_ops
+
+    with Context() as ctx, Location.unknown(ctx):
+        register_dialect(ctx, load=True)
+        assert setPreviewFeatures(ctx, "simt")
+        unknown_loc = Location.unknown(ctx)
+
+        mlir_module = Module.create()
+        with ir.InsertionPoint(mlir_module.body):
+            cuda_module = cuda_tile_ops.ModuleOp("public_simt", loc=unknown_loc)
+            with ir.InsertionPoint(cuda_module.body):
+                tile_type = cuda_tile_ops.make_tile_type(cuda_tile_ops.Float32, [32])
+                input_access = ir.DictAttr.get(
+                    {
+                        "cuda_tile.preview$access": ir.Attribute.parse(
+                            "#cuda_tile.preview$access<inout>"
+                        )
+                    }
+                )
+                fragment_type = cuda_tile_ops.FragmentType.get(
+                    [1],
+                    cuda_tile_ops.Float32.mlir_type,
+                    "local",
+                    ir.Attribute.parse("#cuda_tile.preview$layout<(1):(1)>"),
+                    ir.Attribute.parse(
+                        "#cuda_tile.preview$layout<(1, 32, 1):(32, 1, 0)>"
+                    ),
+                )
+                cuda_tile_ops.extern_func(
+                    "public_decl",
+                    [tile_type],
+                    [tile_type],
+                    arg_attrs=[input_access],
+                    loc=unknown_loc,
+                )
+                cuda_tile_ops.extern_impl(
+                    "public_impl",
+                    "public_decl",
+                    [fragment_type],
+                    [],
+                    arg_attrs=[input_access],
+                    synchronization="warp",
+                    arch=["sm90"],
+                    loc=unknown_loc,
+                )
+
+        text = str(mlir_module)
+        assert "preview$func" in text
+        assert "public_decl" in text
+        assert "preview$extern_impl" in text
+        assert "public_impl" in text
+        assert "synchronization = #cuda_tile<preview$synchronization<warp>>" in text
+        assert 'arch = ["sm90"]' in text
+
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
+            temp_filename = f.name
+            try:
+                assert setPreviewFeatures(ctx, "")
+                assert not writeBytecode(f, mlir_module.operation)
+                assert os.path.getsize(f.name) == 0
+                assert setPreviewFeatures(ctx, "simt")
+                assert writeBytecode(f, mlir_module.operation)
+                assert os.path.getsize(f.name) > 0
+            finally:
+                f.close()
+                os.unlink(temp_filename)
+
+
+@pytest.mark.parametrize("config", [None, {}])
+def test_public_simt_impl_rejects_reserved_config(config):
+    from cuda_tile._mlir.dialects import cuda_tile_ops
+
+    with Context() as ctx, Location.unknown(ctx):
+        register_dialect(ctx, load=True)
+        with pytest.raises(TypeError, match="unexpected keyword argument 'config'"):
+            cuda_tile_ops.extern_impl(
+                "public_impl", "public_decl", [], [], config=config
+            )
+
+
+def test_public_simt_impl_rejects_unknown_synchronization():
+    from cuda_tile._mlir import ir
+    from cuda_tile._mlir.dialects import cuda_tile_ops
+
+    with Context() as ctx, Location.unknown(ctx):
+        register_dialect(ctx, load=True)
+        assert setPreviewFeatures(ctx, "simt")
+
+        mlir_module = Module.create()
+        with ir.InsertionPoint(mlir_module.body):
+            cuda_module = cuda_tile_ops.ModuleOp("public_simt")
+            with ir.InsertionPoint(cuda_module.body):
+                fragment_type = cuda_tile_ops.FragmentType.get(
+                    [1],
+                    cuda_tile_ops.Float32.mlir_type,
+                    "local",
+                    ir.Attribute.parse("#cuda_tile.preview$layout<(1):(1)>"),
+                    ir.Attribute.parse(
+                        "#cuda_tile.preview$layout<(1, 32, 1):(32, 1, 0)>"
+                    ),
+                )
+                with pytest.raises(ValueError, match="synchronization must be one of"):
+                    cuda_tile_ops.extern_impl(
+                        "public_impl",
+                        "public_decl",
+                        [fragment_type],
+                        [],
+                        synchronization="cluster",
+                    )
+
+
+def test_public_simt_call_and_tile_library_bridge():
+    """Verify public calls and ordered tile-library registration work together."""
+    from cuda_tile._mlir import ir
+    from cuda_tile._mlir.dialects import cuda_tile_ops
+
+    assert cuda_tile_ops.call.__module__ == cuda_tile_ops.__name__
+    assert cuda_tile_ops.use_tile_library.__module__ == cuda_tile_ops.__name__
+
+    with Context() as ctx, Location.unknown(ctx):
+        register_dialect(ctx, load=True)
+        assert setPreviewFeatures(ctx, "simt")
+
+        mlir_module = Module.parse(
+            """
+            module {
+              cuda_tile.module @public_simt {
+                cuda_tile.entry @kernel() {
+                  cuda_tile.return
+                }
+              }
+            }
+            """
+        )
+        cuda_module = mlir_module.body.operations[0]
+        entry = cuda_module.regions[0].blocks[0].operations[0]
+        entry_block = entry.regions[0].blocks[0]
+
+        with ir.InsertionPoint.at_block_begin(entry_block):
+            cuda_tile_ops.use_tile_library("first.tilelib")
+            cuda_tile_ops.use_tile_library("first.tilelib")
+            cuda_tile_ops.use_tile_library("second.tilelib")
+            result_type = cuda_tile_ops.make_tile_type(cuda_tile_ops.Float32, [32])
+            result = cuda_tile_ops.call(
+                "public_decl", [], [result_type], const_args=[7]
+            )
+
+        assert isinstance(result, cuda_tile_ops.Tile)
+        text = str(mlir_module)
+        assert "preview$call @public_decl" in text
+        assert "first.tilelib" in text
+        assert "second.tilelib" in text
+
+        assert cuda_tile_ops._consume_module_tile_libraries(mlir_module) == [
+            "first.tilelib",
+            "second.tilelib",
+        ]
+        assert "cuda_tile.tile_libraries" not in str(mlir_module)

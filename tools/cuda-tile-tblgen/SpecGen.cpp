@@ -59,6 +59,10 @@ static const char *OP_CLASS_HEADING_PATH = "/sections/op_class_headings/";
 
 static cl::OptionCategory opDefGenCat("Options for op definition generators");
 
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wglobal-constructors"
+#endif
 static cl::opt<std::string> opIncFilter(
     "op-include-regex",
     cl::desc("Regex of name of op's to include (no filter if empty)"),
@@ -67,6 +71,9 @@ static cl::opt<std::string> opExcFilter(
     "op-exclude-regex",
     cl::desc("Regex of name of op's to exclude (no filter if empty)"),
     cl::cat(opDefGenCat));
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 static std::string getOperationName(const Record &def) {
   auto prefix = def.getValueAsDef("opDialect")->getValueAsString("name");
@@ -947,4 +954,201 @@ void cudatile::tblgen::generateSpec(
     }
 
   }
+}
+
+//===----------------------------------------------------------------------===//
+// Type spec generation
+//===----------------------------------------------------------------------===//
+
+// Convert Markdown-style triple-backtick code fences in a TableGen
+// description into rST `.. code-block::` blocks. Types.td descriptions
+// use fenced code blocks for MLIR examples and ASCII diagrams; without
+// conversion, rST interprets the backticks as inline-literal starts and
+// the indented bodies as block quotes, producing many spurious docutils
+// warnings and broken rendering. This rewrites
+//
+//     Examples:
+//     ```
+//     !cuda_tile.foo<...>
+//     ```
+//
+// into
+//
+//     Examples:
+//
+//     .. code-block:: mlir
+//
+//        !cuda_tile.foo<...>
+//
+// preserving line counts when possible so other rST features (e.g.
+// note directives, math blocks) line up.
+static std::string convertFencedCodeBlocks(StringRef description) {
+  std::string out;
+  out.reserve(description.size());
+
+  SmallVector<StringRef, 64> lines;
+  description.split(lines, '\n');
+
+  bool inFence = false;
+  StringRef prevLine;
+  bool prevWasBulletItem = false;
+  for (StringRef line : lines) {
+    StringRef trimmed = line.ltrim();
+    if (trimmed.starts_with("```")) {
+      if (!inFence) {
+        // Opening fence: emit a code-block directive at the same
+        // indent as the fence. Language hint (if any) comes after the
+        // backticks (e.g. ```mlir).
+        size_t indentWidth = line.size() - trimmed.size();
+        std::string indentStr(indentWidth, ' ');
+        StringRef lang = trimmed.drop_front(3).trim();
+        if (lang.empty()) {
+          lang = "mlir";
+        }
+        out.append(indentStr);
+        out.append(".. code-block:: ");
+        out.append(lang.str());
+        out.push_back('\n');
+        out.append(indentStr);
+        out.push_back('\n');
+        inFence = true;
+      } else {
+        // Closing fence: emit a blank line so the next paragraph
+        // starts cleanly.
+        out.push_back('\n');
+        inFence = false;
+      }
+      prevLine = line;
+      prevWasBulletItem = false;
+      continue;
+    }
+    if (!inFence) {
+      // Ensure a blank line precedes a bullet list start. rST requires
+      // a blank line between a paragraph and a following bullet list;
+      // Types.td descriptions sometimes omit this, which breaks list
+      // rendering ("* foo" becomes inline text). Inject the blank line
+      // when a "* " or "- " line follows a non-blank, non-bullet line.
+      bool isBullet = trimmed.starts_with("* ") || trimmed.starts_with("- ");
+      if (isBullet && !prevLine.trim().empty() && !prevWasBulletItem) {
+        out.push_back('\n');
+      }
+      prevLine = line;
+      prevWasBulletItem = isBullet;
+    } else {
+      // Indent fence body by 3 spaces (rST directive content
+      // convention). Preserve original indentation within the body.
+      out.append("   ");
+    }
+    out.append(line.str());
+    out.push_back('\n');
+  }
+
+  return out;
+}
+
+// Read a parameter's sinceVersion. CudaTile*TypeParam wrappers attach this
+// field to the parameter's underlying record. Raw upstream parameter classes
+// (e.g. ArrayRefParameter on its own) lack the field, so we guard the lookup.
+static std::string getParameterSinceVersion(const AttrOrTypeParameter &param) {
+  if (const auto *defInit = dyn_cast_if_present<DefInit>(param.getDef())) {
+    const Record *paramRecord = defInit->getDef();
+    if (paramRecord->getValue("sinceVersion") &&
+        !paramRecord->isValueUnset("sinceVersion")) {
+      return paramRecord->getValueAsString("sinceVersion").str();
+    }
+  }
+  return "";
+}
+
+static void emitTypeDoc(SpecEmitter &emitter, const Record &typeRecord) {
+  TypeDef typeDef(&typeRecord);
+
+  // Use the type's mnemonic (assembly form, e.g. "tile", "tensor_view",
+  // "partition_view") for anchor and heading. This matches the existing
+  // hand-written anchors in spec/sections/types.rst and the assembly
+  // syntax (!cuda_tile.<mnemonic>).
+  auto mnemonicOpt = typeDef.getMnemonic();
+  std::string mnemonic = mnemonicOpt ? mnemonicOpt->str() : "";
+  std::string sinceVersion = typeRecord.getValueAsString("sinceVersion").str();
+
+  std::string fullName = "cuda_tile." + mnemonic;
+
+  emitter.emitAnchor("type", mnemonic);
+
+  std::string heading = ":spelling:ignore:`" + fullName + "`";
+  emitter.os << Header(OP_HEADER_LEVEL, heading);
+  // Blank line after heading underline so rST recognises the section.
+  emitter.os << "\n";
+
+  if (typeDef.hasSummary()) {
+    emitter.emitSummary(typeDef.getSummary());
+  }
+
+  // Emit the type-level version badge after the summary (mirroring the
+  // op-spec layout, which keeps the heading paragraph clean of inline
+  // roles that confuse `:ref:` title extraction).
+  if (!sinceVersion.empty()) {
+    emitter.os << Badge::successLine(sinceVersion) << "\n\n";
+  }
+
+  // Parameters section. List name, summary, and per-parameter version badge.
+  emitter.os << Header(OP_DETAILS_HEADER_LEVEL, "Parameters");
+  auto params = typeDef.getParameters();
+  if (params.empty()) {
+    emitter.os << "No parameters.\n\n";
+  } else {
+    for (const auto &param : params) {
+      emitter.os << "- **" << param.getName() << "**";
+      auto paramSummary = param.getSummary();
+      if (paramSummary && !paramSummary->empty()) {
+        emitter.os << " - " << *paramSummary;
+      }
+      std::string paramVersion = getParameterSinceVersion(param);
+      if (!paramVersion.empty()) {
+        emitter.os << " " << Badge::successLine(paramVersion);
+      }
+      emitter.os << "\n";
+    }
+    emitter.os << "\n\n";
+  }
+
+  // Description: rST markup (`.. note::`, ASCII diagrams) flows through
+  // printReindented unchanged. Markdown-style triple-backtick code
+  // fences get rewritten into rST `.. code-block::` directives first
+  // (Types.td uses fenced code blocks for MLIR examples). Always emit a
+  // placeholder when the description is missing or blank so that the
+  // section has a non-empty body — empty sections confuse later rST
+  // parsing (e.g. the next type anchor gets swallowed into the prior
+  // section).
+  emitter.os << Header(OP_DETAILS_HEADER_LEVEL, "Description");
+  StringRef desc =
+      typeDef.hasDescription() ? typeDef.getDescription() : StringRef{};
+  if (!desc.trim().empty()) {
+    std::string converted = convertFencedCodeBlocks(desc);
+    emitter.emitDescription(converted);
+  } else {
+    emitter.os << "No description.\n\n";
+  }
+  emitter.os << "\n";
+}
+
+void cudatile::tblgen::generateTypeSpec(raw_ostream &os,
+                                        const RecordKeeper &records) {
+  raw_indented_ostream raw_ios(os);
+  SpecEmitter emitter(raw_ios, std::nullopt);
+
+  emitter.emitComment(AUTO_GENERATED_MESSAGE);
+
+  // Iterate CudaTileTypeDef records. Testing types
+  // (CudaTileTestingTypeDef) are skipped — they're for bytecode evolution
+  // tests, not user-facing spec content.
+  auto typeDefs = records.getAllDerivedDefinitionsIfDefined("CudaTileTypeDef");
+
+  for (const Record *typeDef : typeDefs) {
+    if (typeDef->isSubClassOf("CudaTileTestingTypeDef")) {
+      continue;
+    }
+    emitTypeDoc(emitter, *typeDef);
+  }
+
 }

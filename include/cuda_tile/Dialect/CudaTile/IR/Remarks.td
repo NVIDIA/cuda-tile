@@ -20,6 +20,8 @@ def DK_Pass     : TileIRDiagnosticKind<"Pass",     0, "Succeeded">;
 def DK_Miss     : TileIRDiagnosticKind<"Miss",     1, "Missed">;
 def DK_Fail     : TileIRDiagnosticKind<"Fail",     2, "Failed">;
 def DK_Analysis : TileIRDiagnosticKind<"Analysis", 3, "Analysis">;
+def DK_Error    : TileIRDiagnosticKind<"Error",    4, "Error">;
+def DK_Warning  : TileIRDiagnosticKind<"Warning",  5, "Warning">;
 
 //===--------------------------------------------------------------------===//
 // Remark Categories
@@ -52,6 +54,10 @@ def RemarkMemoryTmaLoadFailed
 def RemarkMemoryTmaStoreFailed
   : TileIRRemark<"RemarkMemoryTmaStoreFailed", DK_Fail, CategoryMemory, 2, "Failed to select TMA store instruction">;
 
+def RemarkTensorViewIndexTypeNarrowing
+  : TileIRRemark<"RemarkTensorViewIndexTypeNarrowing", DK_Miss, CategoryMemory, 5,
+                 "Could not narrow tensor_view indexing to i32: {0}">;
+
 def RemarkHint
   : TileIRRemark<"RemarkHint", DK_Pass, CategoryHints, 1, "OptimizationHint used {0}">;
 def RemarkHintFailed
@@ -73,6 +79,7 @@ def RemarkID
                    RemarkTensorCoreMMAFailed,
                    RemarkMemoryTmaLoadFailed,
                    RemarkMemoryTmaStoreFailed,
+                   RemarkTensorViewIndexTypeNarrowing,
                    RemarkHint,
                    RemarkHintFailed,
                    RemarkHintDefault,
@@ -82,21 +89,33 @@ def RemarkID
   let genSpecializedAttr  = 0;
 }
 //===--------------------------------------------------------------------===//
+// Errors / Warnings
+//===--------------------------------------------------------------------===//
+//
+// Always-on diagnostics live in separate files so they can be edited
+// independently of the (filter-controlled) remark catalog above.
+
+include "cuda_tile/Dialect/CudaTile/IR/Errors.td"
+include "cuda_tile/Dialect/CudaTile/IR/Warnings.td"
+
+//===--------------------------------------------------------------------===//
 // Attribute Definitions
 //===--------------------------------------------------------------------===//
 
 def DiagnosticKind : I32EnumAttr<"DiagnosticKind",
       "Kinds of optimization diagnostics",
-      [DK_Pass, DK_Miss, DK_Fail, DK_Analysis]> {
+      [DK_Pass, DK_Miss, DK_Fail, DK_Analysis, DK_Error, DK_Warning]> {
   let cppNamespace       = "::mlir::cuda_tile::remark";
   let genSpecializedAttr = 0;
 }
 
 def CategoryID : I32EnumAttr<"CategoryID",
                              "TileIR remark categories",
-                             [CategoryTensorCore, 
+                             [CategoryTensorCore,
                               CategoryMemory,
-                              CategoryHints
+                              CategoryHints,
+                              CategoryError,
+                              CategoryWarning
                              ]> {
   let cppNamespace        = "::mlir::cuda_tile::remark";
   let genSpecializedAttr  = 0;

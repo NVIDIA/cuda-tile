@@ -48,31 +48,30 @@ cuda_tile.module @kernels {
     cuda_tile.return
   }
 
-  cuda_tile.entry @join_tokens_op(%tok0: !cuda_tile.token, %tok1: !cuda_tile.token) {
+  cuda_tile.entry @join_tokens_op() {
+    %tok0 = cuda_tile.make_token : token
+    %tok1 = cuda_tile.make_token : token
     %0 = cuda_tile.join_tokens %tok0, %tok1 : token
   }
 
   entry @assume(%arg0: !cuda_tile.tile<i16>,
                 %arg1: !cuda_tile.tile<ptr<f32>>,
-                %arg2: !cuda_tile.tile<i1>,
-                %arg3: !cuda_tile.tensor_view<8192x8192x64xf32, strides=[524288,64,1]>,
-                %arg4: !cuda_tile.tile<i16>,
-                %arg5: !cuda_tile.tile<i64>) {
+                %arg2: !cuda_tile.tile<i16>,
+                %arg3: !cuda_tile.tile<i64>) {
     %0 = cuda_tile.assume #cuda_tile.div_by<32>, %arg0 : tile<i16>
     %1 = cuda_tile.assume #cuda_tile.div_by<32>, %arg1 : tile<ptr<f32>>
-    %3 = cuda_tile.assume #cuda_tile.div_by<32>, %arg3 : tensor_view<8192x8192x64xf32, strides=[524288,64,1]>
-    %5 = cuda_tile.assume #cuda_tile.div_by<1>, %arg4 : tile<i16>
-    %6 = cuda_tile.assume #cuda_tile.div_by<1>, %arg5 : tile<i64>
-    %7 = cuda_tile.assume #cuda_tile.same_elements<[]>, %arg4 : tile<i16>
+    %2 = cuda_tile.assume #cuda_tile.div_by<1>, %arg2 : tile<i16>
+    %3 = cuda_tile.assume #cuda_tile.div_by<1>, %arg3 : tile<i64>
+    %4 = cuda_tile.assume #cuda_tile.same_elements<[]>, %arg2 : tile<i16>
 
     // CHECK: assume bounded<0, 42>, %{{.*}} : tile<i16>
-    %9 = cuda_tile.assume #cuda_tile.bounded<0, 42>, %arg4 : tile<i16>
+    %5 = cuda_tile.assume #cuda_tile.bounded<0, 42>, %arg2 : tile<i16>
     // CHECK: assume bounded<?, 42>, %{{.*}} : tile<i16>
-    %10 = cuda_tile.assume #cuda_tile.bounded<?, 42>, %arg4 : tile<i16>
+    %6 = cuda_tile.assume #cuda_tile.bounded<?, 42>, %arg2 : tile<i16>
     // CHECK: assume bounded<-4, ?>, %{{.*}} : tile<i16>
-    %11 = cuda_tile.assume #cuda_tile.bounded<-4, ?>, %arg4 : tile<i16>
+    %7 = cuda_tile.assume #cuda_tile.bounded<-4, ?>, %arg2 : tile<i16>
     // CHECK: assume bounded<?, ?>, %{{.*}} : tile<i16>
-    %12 = cuda_tile.assume #cuda_tile.bounded<?, ?>, %arg4 : tile<i16>
+    %8 = cuda_tile.assume #cuda_tile.bounded<?, ?>, %arg2 : tile<i16>
   }
 
   // Test if-else operation
@@ -92,5 +91,36 @@ cuda_tile.module @kernels {
     %2 = store_ptr_tko weak %arg0, %1 token=%result_token : !cuda_tile.tile<!cuda_tile.ptr<i32>>, !cuda_tile.tile<i32> -> !cuda_tile.token
     print_tko "\0Ahello % from the tile world !\0A\00", %result : !cuda_tile.tile<i32> -> !cuda_tile.token
     return
+  }
+
+  entry @pack_op() {
+    %0 = constant <f16: 0.0> : tile<32xf16>
+    %1 = pack %0 : tile<32xf16> -> tile<64xi8>
+    return
+  }
+
+  entry @unpack_op() {
+    %0 = constant <i8: 0> : tile<64xi8>
+    %1 = unpack %0 : tile<64xi8> -> tile<128xf4E2M1FN>
+    return
+  }
+
+  // Test atan2 operation with all supported float types
+  cuda_tile.entry @atan2_op(%x32: !cuda_tile.tile<f32>, %y32: !cuda_tile.tile<f32>,
+                             %x64: !cuda_tile.tile<f64>, %y64: !cuda_tile.tile<f64>,
+                             %x16: !cuda_tile.tile<f16>, %y16: !cuda_tile.tile<f16>,
+                             %xbf16: !cuda_tile.tile<bf16>, %ybf16: !cuda_tile.tile<bf16>) {
+    %r32 = cuda_tile.atan2 %x32, %y32 : !cuda_tile.tile<f32>
+    %r64 = cuda_tile.atan2 %x64, %y64 : !cuda_tile.tile<f64>
+    %r16 = cuda_tile.atan2 %x16, %y16 : !cuda_tile.tile<f16>
+    %rbf16 = cuda_tile.atan2 %xbf16, %ybf16 : !cuda_tile.tile<bf16>
+    cuda_tile.return
+  }
+
+  // Test negi operation with overflow flags
+  cuda_tile.entry @negi_op(%a: !cuda_tile.tile<i32>) {
+    %0 = cuda_tile.negi %a : tile<i32>
+    %1 = cuda_tile.negi %a overflow<no_signed_wrap> : tile<i32>
+    cuda_tile.return
   }
 }

@@ -45,7 +45,7 @@ const BytecodeVersion BytecodeVersion::kCurrentCompatibilityVersion = {
 /// The current version of the bytecode format.
 const BytecodeVersion BytecodeVersion::kCurrentVersion = {
     /*verMajor=*/13,
-    /*verMinor=*/4,
+    /*verMinor=*/5,
     /*verTag=*/0,
 };
 
@@ -56,11 +56,18 @@ const BytecodeVersion BytecodeVersion::kUnifiedBitfieldVersion = {
     /*verTag=*/0,
 };
 
-/// The version starting from which bits 3-4 of the function-table entry flag
-/// byte are meaningful. Older bytecode treats them as reserved.
+/// Unknown function-table flag bits above the pre-Form base mask become hard
+/// errors at this version.
 const BytecodeVersion BytecodeVersion::kFunctionFlagsExtendedVersion = {
     /*verMajor=*/13,
     /*verMinor=*/4,
+    /*verTag=*/0,
+};
+
+/// Introduces the Form field in bits [3:2] and drops HasOptimizationHints.
+const BytecodeVersion BytecodeVersion::kFunctionFlagsFormVersion = {
+    /*verMajor=*/13,
+    /*verMinor=*/5,
     /*verTag=*/0,
 };
 
@@ -78,12 +85,37 @@ const BytecodeVersion BytecodeVersion::kCanonicalI1Version = {
     /*verTag=*/0,
 };
 
+/// The version where arg attrs were introduced for function ops.
+const BytecodeVersion BytecodeVersion::kMinArgAttrsVersion = {
+    /*verMajor=*/13,
+    /*verMinor=*/5,
+    /*verTag=*/0,
+};
+
+/// The version where the `flags` field of DISubprogramAttr was introduced.
+const BytecodeVersion BytecodeVersion::kMinDISubprogramFlagsVersion = {
+    /*verMajor=*/13,
+    /*verMinor=*/5,
+    /*verTag=*/0,
+};
+
 //===----------------------------------------------------------------------===//
 // Opcode Version Checking
 //===----------------------------------------------------------------------===//
 
+bool mlir::cuda_tile::detail::isPreviewOpcode(uint32_t opcode) {
+  return opcode >= kPreviewOpcodesMin && opcode <= kPreviewOpcodesMax;
+}
+
 bool mlir::cuda_tile::detail::isOpcodeAvailableInVersion(
     uint32_t opcode, const BytecodeVersion &version) {
+  // Preview opcodes are non-portable: accept only when major.minor matches the
+  // exact current version. Named preview-feature opt-in is enforced elsewhere.
+  if (isPreviewOpcode(opcode)) {
+    return version.getMajor() == BytecodeVersion::kCurrentVersion.getMajor() &&
+           version.getMinor() == BytecodeVersion::kCurrentVersion.getMinor();
+  }
+
   auto it = getVersionToMaxOpcodeMap().find(
       std::make_pair(version.getMajor(), version.getMinor()));
   if (it == getVersionToMaxOpcodeMap().end()) {

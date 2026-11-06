@@ -147,7 +147,11 @@ SpecEmitter::SpecEmitter(raw_indented_ostream &os,
                          const std::optional<std::string> &examplesDirectory)
     : os(os), examplesDirectory(examplesDirectory) {
   this->appendixFile = std::ofstream();
-  this->appendixFile.open(examplesAppendixFile(examplesDirectory));
+  // Only open the appendix file when an examples directory is set. The
+  // type-spec generator reuses SpecEmitter but has no separate examples.
+  if (examplesDirectory.has_value()) {
+    this->appendixFile.open(examplesAppendixFile(examplesDirectory));
+  }
 }
 
 void SpecEmitter::emitLiteralInclude(

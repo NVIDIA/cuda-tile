@@ -113,8 +113,10 @@ def CudaTileLICMPass : InterfacePass<"cuda-tile-licm", "mlir::FunctionOpInterfac
     side-effect-free, safe to speculate, not a terminator, and all of its
     operands are defined outside the loop or are themselves loop-invariant.
 
-    The pass recursively scans into cuda_tile.if/cuda_tile.scan/cuda_tile.reduce
-    regions to hoist invariant ops from inside branches.
+    The pass recursively scans into non-isolated regions such as cuda_tile.if
+    to hoist invariant operations from inside branches. Operations with the
+    IsolatedFromAbove trait are considered for hoisting as a whole, but their
+    regions are not traversed.
     It processes loops inner-to-outer (post-order) so that invariants cascade
     through nested loops to the outermost legal position.
   }];

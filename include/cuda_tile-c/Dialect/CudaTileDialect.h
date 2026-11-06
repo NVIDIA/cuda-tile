@@ -18,6 +18,17 @@ extern "C" {
 
 MLIR_DECLARE_CAPI_DIALECT_REGISTRATION(CUDATILE, cuda_tile);
 
+/// Configure the public-preview features enabled in a CUDA Tile MLIR context.
+/// Names are comma-separated; an empty string disables all preview features.
+/// Returns false for an unknown or retired feature name.
+///
+/// Clients must call this explicitly before parsing, reading, verifying, or
+/// writing IR that uses public-preview features. Bytecode APIs do not enable
+/// features implicitly.
+MLIR_CAPI_EXPORTED bool
+mlirCudaTileContextSetPreviewFeatures(MlirContext context,
+                                      MlirStringRef previewFeatures);
+
 // PointerType
 
 /// Returns true if the given type is a cuda_tile PointerType.
@@ -63,6 +74,43 @@ MLIR_CAPI_EXPORTED int64_t mlirCudaTileTileTypeGetDimSize(MlirType type,
 /// performing verification. Returns a null type if verification fails.
 MLIR_CAPI_EXPORTED MlirType mlirCudaTileTileTypeGetChecked(
     MlirContext ctx, intptr_t rank, const int64_t *shape, MlirType elementType);
+
+// FragmentType
+
+/// Returns true if the given type is a cuda_tile FragmentType.
+MLIR_CAPI_EXPORTED bool mlirCudaTileTypeIsAFragmentType(MlirType type);
+
+/// Returns the TypeID for cuda_tile FragmentType.
+MLIR_CAPI_EXPORTED MlirTypeID mlirCudaTileFragmentTypeGetTypeID(void);
+
+/// Returns a cuda_tile FragmentType with the given parameters, performing
+/// verification. Returns a null type if verification fails.
+MLIR_CAPI_EXPORTED MlirType mlirCudaTileFragmentTypeGetChecked(
+    MlirContext ctx, intptr_t rank, const int64_t *shape, MlirType elementType,
+    MlirStringRef memorySpace, MlirAttribute memLayout, MlirAttribute fragmap);
+
+/// Returns the element type of the given cuda_tile FragmentType.
+MLIR_CAPI_EXPORTED MlirType
+mlirCudaTileFragmentTypeGetElementType(MlirType type);
+
+/// Returns the rank of the given cuda_tile FragmentType.
+MLIR_CAPI_EXPORTED intptr_t mlirCudaTileFragmentTypeGetRank(MlirType type);
+
+/// Returns the shape of the given cuda_tile FragmentType at the given index.
+MLIR_CAPI_EXPORTED int64_t
+mlirCudaTileFragmentTypeGetDimSize(MlirType type, intptr_t pos);
+
+/// Returns the memory space of the given cuda_tile FragmentType.
+MLIR_CAPI_EXPORTED MlirStringRef
+mlirCudaTileFragmentTypeGetMemorySpace(MlirType type);
+
+/// Returns the memory layout of the given cuda_tile FragmentType.
+MLIR_CAPI_EXPORTED MlirAttribute
+mlirCudaTileFragmentTypeGetMemLayout(MlirType type);
+
+/// Returns the fragment map of the given cuda_tile FragmentType.
+MLIR_CAPI_EXPORTED MlirAttribute
+mlirCudaTileFragmentTypeGetFragmap(MlirType type);
 
 // TokenType
 
@@ -221,6 +269,53 @@ MLIR_CAPI_EXPORTED MlirType mlirCudaTileStridedViewTypeGetChecked(
     MlirContext ctx, MlirAttribute tileShapeAttr,
     MlirAttribute traversalStridesAttr, MlirType tensorViewType,
     intptr_t dimMapRank, const int32_t *dimMap, MlirAttribute paddingValue);
+
+// GatherScatterViewType
+
+/// Returns true if the given type is a cuda_tile GatherScatterViewType.
+MLIR_CAPI_EXPORTED bool mlirCudaTileTypeIsAGatherScatterViewType(MlirType type);
+
+/// Returns the TypeID for cuda_tile GatherScatterViewType.
+MLIR_CAPI_EXPORTED MlirTypeID mlirCudaTileGatherScatterViewTypeGetTypeID(void);
+
+/// Returns a cuda_tile GatherScatterViewType with the given tile shape, tensor
+/// view, sparse dimension, and optional padding value.
+MLIR_CAPI_EXPORTED MlirType mlirCudaTileGatherScatterViewTypeGet(
+    MlirContext ctx, MlirAttribute tileShapeAttr, MlirType tensorViewType,
+    uint32_t sparseDim, MlirAttribute paddingValue);
+
+/// Returns the tile shape attribute of the given cuda_tile
+/// GatherScatterViewType.
+MLIR_CAPI_EXPORTED MlirAttribute
+mlirCudaTileGatherScatterViewTypeGetTileShape(MlirType type);
+
+/// Returns the tensor view type of the given cuda_tile GatherScatterViewType.
+MLIR_CAPI_EXPORTED MlirType
+mlirCudaTileGatherScatterViewTypeGetTensorView(MlirType type);
+
+/// Returns the sparse dimension of the given cuda_tile GatherScatterViewType.
+MLIR_CAPI_EXPORTED uint32_t
+mlirCudaTileGatherScatterViewTypeGetSparseDim(MlirType type);
+
+/// Returns the padding value attribute of the given cuda_tile
+/// GatherScatterViewType (may be null).
+MLIR_CAPI_EXPORTED MlirAttribute
+mlirCudaTileGatherScatterViewTypeGetPaddingValue(MlirType type);
+
+/// Returns the view tile type of the given cuda_tile GatherScatterViewType.
+MLIR_CAPI_EXPORTED MlirType
+mlirCudaTileGatherScatterViewTypeGetViewTileType(MlirType type);
+
+/// Returns the view index rank of the given cuda_tile GatherScatterViewType.
+MLIR_CAPI_EXPORTED intptr_t
+mlirCudaTileGatherScatterViewTypeGetViewIndexRank(MlirType type);
+
+/// Returns a cuda_tile GatherScatterViewType with the given tile shape, tensor
+/// view, sparse dimension, and optional padding value, performing verification.
+/// Returns a null type if verification fails.
+MLIR_CAPI_EXPORTED MlirType mlirCudaTileGatherScatterViewTypeGetChecked(
+    MlirContext ctx, MlirAttribute tileShapeAttr, MlirType tensorViewType,
+    uint32_t sparseDim, MlirAttribute paddingValue);
 
 // RoundingModeAttr
 
@@ -427,6 +522,8 @@ MLIR_CAPI_EXPORTED bool mlirCudaTileWriteBytecode(MlirOperation moduleOp,
 /// Writes a cuda_tile module to bytecode format to a memory buffer.
 /// Returns an MlirStringRef containing the bytecode data (with length).
 /// Returns empty string ref on failure.
+/// Public-preview features must first be enabled on the module's context with
+/// mlirCudaTileContextSetPreviewFeatures.
 /// Caller must free the buffer using mlirCudaTileFreeBuffer.
 MLIR_CAPI_EXPORTED MlirStringRef
 mlirCudaTileWriteBytecodeToBuffer(MlirOperation moduleOp);

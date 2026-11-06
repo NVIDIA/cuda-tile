@@ -22,13 +22,18 @@ include "cuda_tile/Dialect/CudaTile/IR/Interfaces.td"
 def CudaTile_PtrAttrEnum : CudaTileI32EnumAttr<
     "PtrAttr", "pointer classification", "13.4",
     [
-        CudaTileI32EnumAttrCase<"Default local pointer", "NONE", 0, "13.4", "none">,
+        CudaTileI32EnumAttrCase<"Ordinary local pointer", "NONE", 0, "13.4", "none">,
+        CudaTileI32EnumAttrCase<"Peer-to-peer pointer", "UNICAST", 1, "13.5", "unicast">,
+        CudaTileI32EnumAttrCase<"Multicast global pointer", "MULTICAST", 2, "13.5", "multicast">
     ]> {
   let specPrefixDescription = [{
     The :code:`ptr_attr` attribute classifies :code:`!cuda_tile.ptr` values.
     :code:`none` denotes an ordinary local pointer. It is a distinct spelling
     from carrying no :code:`ptr_attr` at all: ops that relate a pointer to a
     view require the two to agree on whether the attribute is present.
+    :code:`unicast` indicates unicast memory access requiring an NVLink fabric,
+    and :code:`multicast` indicates multicast memory access requiring an
+    NVLink fabric with an NVLink SHARP-supported NVSwitch.
   }];
   let specSuffixDescription = "";
   let genSpecializedAttr = 0;
@@ -39,6 +44,562 @@ def CudaTile_PtrAttr : CudaTileEnumAttr<CudaTile_PtrAttrEnum, "ptr_attr"> {
   let summary = "Pointer classification";
   let assemblyFormat = "`<` $value `>`";
   let cppNamespace = "::mlir::cuda_tile";
+}
+
+//===----------------------------------------------------------------------===//
+// Multimem reduction kind
+//===----------------------------------------------------------------------===//
+
+def CudaTile_MultimemReductionKind : CudaTileI32EnumAttr<
+    "MultimemReductionKind",
+    "reduction operator for multimem load-reduce and multimem atomic reduce",
+    "13.5",
+    [
+      CudaTileI32EnumAttrCase<"Add reduction", "ADD", 0, "13.5", "add">,
+      CudaTileI32EnumAttrCase<"Minimum reduction", "MIN", 1, "13.5", "min">,
+      CudaTileI32EnumAttrCase<"Maximum reduction", "MAX", 2, "13.5", "max">,
+      CudaTileI32EnumAttrCase<"Bitwise AND reduction", "AND", 3, "13.5", "and">,
+      CudaTileI32EnumAttrCase<"Bitwise OR reduction", "OR", 4, "13.5", "or">,
+      CudaTileI32EnumAttrCase<"Bitwise XOR reduction", "XOR", 5, "13.5", "xor">,
+      CudaTileI32EnumAttrCase<"Unsigned minimum reduction", "UMIN", 6, "13.5", "umin">,
+      CudaTileI32EnumAttrCase<"Unsigned maximum reduction", "UMAX", 7, "13.5", "umax">,
+    ]> {
+  let genSpecializedAttr = 0;
+  let cppNamespace = "::mlir::cuda_tile";
+  let specPrefixDescription = [{
+    The :code:`multimem_reduction_kind` attribute selects the reduction combiner for
+    multimem load-reduce and multimem atomic reduce operations.
+
+    **Signed vs. unsigned integer semantics for MIN and MAX:**
+
+    MLIR integers are signless — a value of type :code:`i32` carries no sign
+    annotation on its own.  The reduction kind is what supplies the
+    interpretation when comparing two integers:
+
+    - :code:`MIN` / :code:`MAX` treat the operands as **signed** two's-complement
+      integers.
+
+    - :code:`UMIN` / :code:`UMAX` treat the operands as **unsigned** integers.
+
+    :code:`UMIN` / :code:`UMAX` require integer element types (:code:`i32` or :code:`i64`).
+    :code:`MIN` / :code:`MAX` additionally support :code:`f16` and :code:`bf16`
+    floating-point element types in :code:`multimem_load_reduce_view_tko`.
+    For :code:`multimem_reduce_view_tko`, floating-point element types support
+    only :code:`ADD`.
+  }];
+  let specSuffixDescription = "Default is :code:`add`.";
+}
+
+def CudaTile_MultimemReductionKindAttr
+    : CudaTileEnumAttr<CudaTile_MultimemReductionKind, "multimem_reduction_kind"> {
+  let assemblyFormat = "`<` $value `>`";
+  let cppNamespace = "::mlir::cuda_tile";
+}
+
+//===----------------------------------------------------------------------===//
+// Memory space attributes
+//===----------------------------------------------------------------------===//
+
+def CudaTile_MemorySpace : CudaTilePreviewI32EnumInfo<
+    "MemorySpace", "Memory space enumeration",
+    [
+        CudaTilePreviewI32EnumAttrCase<"Local memory", "LOCAL", 0, "local">,
+        CudaTilePreviewI32EnumAttrCase<"Shared memory", "SMEM", 1, "smem">
+    ]> {
+    let cppNamespace = "::mlir::cuda_tile";
+    let specPrefixDescription = [{
+      The :code:`memory_space` attribute specifies the physical memory space in which an operand resides.
+      The available memory spaces are local memory (:code:`local`) and shared memory (:code:`smem`).
+    }];
+    let specSuffixDescription = "";
+}
+
+def CudaTile_MemorySpaceAttr
+    : CudaTilePreviewEnumAttr<"MemorySpace", "memory_space",
+                              CudaTile_MemorySpace,
+                              CudaTile_SIMTPreviewFeature> {
+  let summary = "Memory space";
+  let description = [{
+    A public-preview memory-space attribute with distinct runtime identity.
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// Access attributes
+//===----------------------------------------------------------------------===//
+
+def CudaTile_Access : CudaTilePreviewI32EnumInfo<
+    "Access", "Access mode for a tile operand",
+    [
+        CudaTilePreviewI32EnumAttrCase<"Read-only operand", "In", 0, "in">,
+        CudaTilePreviewI32EnumAttrCase<"Write-only operand", "Out", 1, "out">,
+        CudaTilePreviewI32EnumAttrCase<"Read-write (in-place) operand", "InOut", 2, "inout">
+    ]> {
+    let cppNamespace = "::mlir::cuda_tile";
+    let specPrefixDescription = [{
+      The :code:`access` attribute declares how a SIMT interop callee uses a
+      tile operand:
+      :code:`in` (read-only), :code:`out` (write-only), or :code:`inout`
+      (read and write).
+    }];
+    let specSuffixDescription = "";
+}
+
+def CudaTile_AccessAttr
+    : CudaTilePreviewEnumAttr<"Access", "access", CudaTile_Access,
+                              CudaTile_SIMTPreviewFeature>;
+
+//===----------------------------------------------------------------------===//
+// Expression attributes for symbolic shapes, types, and layouts
+//===----------------------------------------------------------------------===//
+
+def CudaTile_SymbolicExprIntAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprInt", "expr_int",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Integer constant expression";
+  let description = [{
+    Represents a constant integer value in a symbolic expression. The value is
+    a signed 64-bit integer.
+
+    Example:
+      #cuda_tile.preview$expr_int<42>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrParam<TypeParameter<"int64_t", "integer value">>:$value
+  );
+  let assemblyFormat = "`<` $value `>`";
+}
+
+def CudaTile_SymbolicExprConstStrAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprConstStr", "expr_const_str",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "String constant expression";
+  let description = [{
+    Represents a concrete string value in a symbolic expression.
+
+    Example:
+      #cuda_tile.preview$expr_const_str<"forward">
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrParam<StringRefParameter<>>:$value
+  );
+  let assemblyFormat = "`<` $value `>`";
+}
+
+def CudaTile_SymbolicExprVarAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprVar", "expr_var",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Symbolic variable expression";
+  let description = [{
+    Represents a source or declaration parameter in an expression. Variable
+    names are simple identifiers such as "M" or "N". Compiler-resolved values
+    use SymbolicExprBuiltinAttr instead.
+
+    Examples:
+      #cuda_tile.preview$expr_var<"M">
+      #cuda_tile.preview$expr_var<"N">
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrParam<StringRefParameter<>>:$name
+  );
+  let assemblyFormat = "`<` $name `>`";
+  let genVerifyDecl = 1;
+}
+
+def CudaTile_SymbolicExprBuiltinAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprBuiltin", "expr_builtin",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Compiler-provided symbolic expression";
+  let description = [{
+    Represents a symbolic value provided by the compilation context rather
+    than a declaration parameter. Builtin names use the :code:`context.*`
+    namespace and carry their expression result type.
+
+    Example:
+      #cuda_tile.preview$expr_builtin<"context.num_threads", index>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrParam<StringRefParameter<>>:$name,
+    CudaTilePreviewAttrParam<
+      TypeParameter<"TypeAttr", "builtin expression result type">>:$type
+  );
+  let assemblyFormat = "`<` $name `,` $type `>`";
+  let genVerifyDecl = 1;
+}
+
+def CudaTile_ConcreteTypeAttr
+    : CudaTilePreviewAttrDef<"ConcreteType", "concrete_type",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Concrete MLIR type expression";
+  let description = [{
+    Wraps a concrete MLIR type so dtype values use the same SymbolicExprAttr
+    representation as symbolic dtype parameters.
+
+    Example:
+      #cuda_tile.preview$concrete_type<f32>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrParam<TypeParameter<"TypeAttr", "concrete type">>:$type
+  );
+  let assemblyFormat = "`<` $type `>`";
+}
+
+def CudaTile_SymbolicExprAttrConstraint : Attr<
+    CPred<"::llvm::isa<::mlir::cuda_tile::SymbolicExprAttr>($_self)">,
+    "symbolic expression attribute">;
+
+def CudaTile_SymbolicExprMulAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprMul", "expr_mul",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Multiplication expression";
+  let description = [{
+    Represents multiplication of two expressions. Both operands must implement
+    the SymbolicExprAttr interface.
+
+    Example:
+      #cuda_tile.preview$expr_mul<#cuda_tile.preview$expr_var<"M">, #cuda_tile.preview$expr_int<16>>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$lhs,
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$rhs
+  );
+  let assemblyFormat = "`<` $lhs `,` $rhs `>`";
+  let genVerifyDecl = 1;
+}
+
+def CudaTile_SymbolicExprDivAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprDiv", "expr_div",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Integer division expression";
+  let description = [{
+    Represents integer division of two expressions. Both operands must implement
+    the SymbolicExprAttr interface.
+
+    Example:
+      #cuda_tile.preview$expr_div<#cuda_tile.preview$expr_var<"threads">, #cuda_tile.preview$expr_int<4>>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$lhs,
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$rhs
+  );
+  let assemblyFormat = "`<` $lhs `,` $rhs `>`";
+  let genVerifyDecl = 1;
+}
+
+def CudaTile_SymbolicExprAddAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprAdd", "expr_add",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Addition expression";
+  let description = [{
+    Represents addition of two expressions. Both operands must implement
+    the SymbolicExprAttr interface.
+
+    Example:
+      #cuda_tile.preview$expr_add<#cuda_tile.preview$expr_var<"M">, #cuda_tile.preview$expr_int<16>>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$lhs,
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$rhs
+  );
+  let assemblyFormat = "`<` $lhs `,` $rhs `>`";
+  let genVerifyDecl = 1;
+}
+
+def CudaTile_SymbolicExprNegAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprNeg", "expr_neg",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Negation expression";
+  let description = [{
+    Represents unary negation of an expression. The operand must implement
+    the SymbolicExprAttr interface.
+
+    Example:
+      #cuda_tile.preview$expr_neg<#cuda_tile.preview$expr_var<"M">>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$operand
+  );
+  let assemblyFormat = "`<` $operand `>`";
+  let genVerifyDecl = 1;
+}
+
+def CudaTile_SymbolicExprSubAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprSub", "expr_sub",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Subtraction expression";
+  let description = [{
+    Represents subtraction of two expressions. Both operands must implement
+    the SymbolicExprAttr interface.
+
+    Example:
+      #cuda_tile.preview$expr_sub<#cuda_tile.preview$expr_var<"M">, #cuda_tile.preview$expr_int<1>>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$lhs,
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$rhs
+  );
+  let assemblyFormat = "`<` $lhs `,` $rhs `>`";
+  let genVerifyDecl = 1;
+}
+
+def CudaTile_SymbolicExprFloorDivAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprFloorDiv", "expr_floor_div",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Floor division expression";
+  let description = [{
+    Represents floor division (rounding toward negative infinity) of two
+    expressions. Both operands must implement the SymbolicExprAttr interface.
+
+    In compact layout syntax this is written as `/`:
+      #cuda_tile.preview$layout<(N / 4):(1)>
+
+    Verbose form:
+      #cuda_tile.preview$expr_floor_div<#cuda_tile.preview$expr_var<"N">, #cuda_tile.preview$expr_int<4>>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$lhs,
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$rhs
+  );
+  let assemblyFormat = "`<` $lhs `,` $rhs `>`";
+  let genVerifyDecl = 1;
+}
+
+def CudaTile_SymbolicExprCeilDivAttr
+    : CudaTilePreviewAttrDef<"SymbolicExprCeilDiv", "expr_ceil_div",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface>]> {
+  let summary = "Ceil division expression";
+  let description = [{
+    Represents ceil division (rounding toward positive infinity) of two
+    expressions. Both operands must implement the SymbolicExprAttr interface.
+
+    In compact layout syntax this is written as `/+`:
+      #cuda_tile.preview$layout<(N /+ 4):(1)>
+
+    Verbose form:
+      #cuda_tile.preview$expr_ceil_div<#cuda_tile.preview$expr_var<"N">, #cuda_tile.preview$expr_int<4>>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$lhs,
+    CudaTilePreviewAttrInterfaceParam<"::mlir::cuda_tile::SymbolicExprAttr">:$rhs
+  );
+  let assemblyFormat = "`<` $lhs `,` $rhs `>`";
+  let genVerifyDecl = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// Layout attributes
+//===----------------------------------------------------------------------===//
+
+def CudaTile_SymbolicTupleAttr
+    : CudaTilePreviewAttrDef<"SymbolicTuple", "symbolic_tuple",
+                             CudaTile_SIMTPreviewFeature,
+                             [DeclareAttrInterfaceMethods<
+                                 CudaTile_SymbolicExprAttrInterface,
+                                 ["simplify"]>]> {
+  let summary = "Nested tuple of expressions or layout tuples";
+  let description = [{
+    Represents a tuple containing expressions or other layout tuples. This
+    supports the hierarchical structure of CuTe layouts. All values must be
+    either SymbolicExprAttr or SymbolicTupleAttr.
+
+    Examples:
+      // Simple: (16, 32, 64)
+      `(16, 32, 64)`
+
+      // Nested: ((M, 16), (1, M))
+      `((M, 16), (1, M))`
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrParam<
+      ArrayRefParameter<"::mlir::cuda_tile::SymbolicExprAttr">>:$values
+  );
+  let assemblyFormat = "`<` `[` $values `]` `>`";
+}
+
+def CudaTile_LayoutAttr
+    : CudaTilePreviewAttrDef<"Layout", "layout",
+                             CudaTile_SIMTPreviewFeature> {
+  let summary = "Layout with shapes and strides";
+  let description = [{
+    Represents a complete layout specification with shapes and strides.
+    Both shapes and strides are SymbolicTupleAttr.
+
+    The two trees must nest identically, except where a shape parameter has yet
+    to expand into the modes its stride describes. A concrete extent counts the
+    elements of its mode and must be positive. A concrete stride steps forward
+    through storage and must be non-negative; stride 0 is the broadcast that
+    maps every index of its mode to the same offset.
+
+    The compact CuTe-style syntax is the canonical spelling:
+    ```
+    #cuda_tile.preview$layout<(M, 64):(64, 1)>
+    #cuda_tile.preview$layout<((M, 16), (1, M)):((16, 1), (M, 1))>
+    #cuda_tile.preview$layout<(M / 4, N * 2):(32, 1)>
+    ```
+
+    Example where a shape parameter stands for a whole mode tuple:
+    ```
+    #cuda_tile.preview$layout<(S, 1):((1, 2, 4), 0)>
+    ```
+
+    In the compact syntax:
+      - Shape and stride are separated by ":"
+      - Integers are written as numbers
+      - Variables are written as identifiers
+      - Nested tuples use parentheses
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrParam<
+      TypeParameter<"SymbolicTupleAttr", "layout shapes">>:$shapes,
+    CudaTilePreviewAttrParam<
+      TypeParameter<"SymbolicTupleAttr", "layout strides">>:$strides
+  );
+  let hasCustomAssemblyFormat = 1;
+  let genVerifyDecl = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// Public-preview SIMT attributes
+//===----------------------------------------------------------------------===//
+
+def CudaTile_Synchronization : CudaTileI32EnumAttr<
+    "Synchronization",
+    "Widest synchronization domain used by a SIMT implementation", "",
+    [
+        CudaTileI32EnumAttrCase<
+            "No cooperative synchronization", "None", 0, "", "none">,
+        CudaTileI32EnumAttrCase<
+            "Warp synchronization", "Warp", 1, "", "warp">,
+        CudaTileI32EnumAttrCase<
+            "Warpgroup synchronization", "Warpgroup", 2, "", "warpgroup">,
+        CudaTileI32EnumAttrCase<
+            "CTA synchronization", "CTA", 3, "", "cta">
+    ]> {
+  let cppNamespace = "::mlir::cuda_tile";
+  let genSpecializedAttr = 0;
+  let specPrefixDescription = [{
+    The :code:`synchronization` property records the widest hardware domain
+    across which a SIMT implementation may synchronize. It is a separate
+    legality contract from fragment-map participation and does not imply an
+    entry barrier.
+
+    - none: The implementation uses no cooperative synchronization
+      primitives and imposes no participant-count constraint.
+    - warp: The implementation may synchronize within a warp and requires a
+      positive participant count that is a multiple of 32.
+    - warpgroup: The implementation may synchronize within a warpgroup and
+      requires a positive participant count that is a multiple of 128.
+    - cta: The implementation may synchronize within a CTA. The number of
+      participating threads must equal the total number of threads in the CTA.
+  }];
+  let specSuffixDescription = "";
+}
+
+def CudaTile_SynchronizationAttr
+    : CudaTilePreviewAttrDef<"Synchronization", "synchronization",
+                             CudaTile_SIMTPreviewFeature> {
+  let summary = "Widest synchronization domain used by a SIMT implementation";
+  let cppNamespace = "::mlir::cuda_tile";
+  let constBuilderCall =
+      "::mlir::cuda_tile::SynchronizationAttr::get($_builder.getContext(), $0)";
+  let returnType = "::mlir::cuda_tile::Synchronization";
+  let convertFromStorage = "$_self.getValue()";
+  let parameters = (ins
+    CudaTileEnumParameter<CudaTile_Synchronization>:$value);
+  let assemblyFormat = "`<` $value `>`";
+}
+
+//===----------------------------------------------------------------------===//
+// Scratch request attributes
+//===----------------------------------------------------------------------===//
+
+def CudaTile_ScratchRequestAttr
+    : CudaTilePreviewAttrDef<"ScratchRequest", "scratch_request",
+                             CudaTile_SIMTPreviewFeature> {
+  let summary = "Scratch memory request for an external implementation";
+  let description = [{
+    Describes implementation-local shared memory scratch. The public
+    extern_impl assembly syntax uses a nested `scratch { ... }` block with
+    fields such as `smem.size` and `smem.alignment`; the operation stores one
+    typed request.
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrInterfaceParam<
+      "::mlir::cuda_tile::SymbolicExprAttr">:$size,
+    CudaTilePreviewAttrInterfaceParam<
+      "::mlir::cuda_tile::SymbolicExprAttr">:$alignment
+  );
+  let assemblyFormat = "`<` `smem.size` `=` $size `,` `smem.alignment` `=` $alignment `>`";
+  let genVerifyDecl = 1;
+}
+
+//===----------------------------------------------------------------------===//
+// Constant parameter attributes
+//===----------------------------------------------------------------------===//
+
+def CudaTile_ConstParamAttr
+    : CudaTilePreviewAttrDef<"ConstParam", "const_param",
+                             CudaTile_SIMTPreviewFeature> {
+  let summary = "Compile-time constant parameter declaration";
+  let description = [{
+    Represents a compile-time constant parameter (template parameter) for
+    external function declarations and implementations.
+
+    An implementation that does not specialize a parameter declares a wildcard
+    slot instead, spelled `?` in the compact constant-parameter list and stored
+    as the name "?" with a `none` type.
+
+    Example:
+      #cuda_tile.preview$const_param<name = "M", type = index>
+      #cuda_tile.preview$const_param<name = "?", type = none>
+  }];
+
+  let parameters = (ins
+    CudaTilePreviewAttrParam<StringRefParameter<>>:$name,
+    CudaTilePreviewAttrParam<
+      TypeParameter<"TypeAttr", "parameter type">>:$type
+  );
+  let assemblyFormat = "`<` struct(params) `>`";
+  let genVerifyDecl = 1;
 }
 
 #ifdef TILE_IR_INCLUDE_TESTS
@@ -191,9 +752,10 @@ def CudaTile_HintKey : CudaTileI32EnumAttr<
          "Controls how many warps are allocated to the worker (non-specialized) "
          "agent in a warp-specialized kernel.  After specialization the final "
          "CTA may contain additional warps for MMA, TMA, or control agents, so "
-         "this value does not represent the total warp count.",
+         "this value does not represent the total warp count. Valid values are "
+         "powers of 2 in [1, 32].",
          "NumWorkerWarpsPerCTA", 4, "13.3", "num_worker_warps_per_cta",
-         "int", "pow2_range", 4, 8, ["EntryOp"],
+         "int", "pow2_range", 1, 32, ["EntryOp"],
          [],
          "suggest the number of worker warps per CTA (excluding "
          "specialized MMA/TMA/control warps)">,
@@ -302,8 +864,8 @@ def CudaTile_RoundingModeAttr : CudaTileEnumAttr<CudaTile_RoundingMode, "roundin
 //===----------------------------------------------------------------------===//
 
 def CudaTile_ComparisonOrdering : CudaTileI32EnumAttr<"ComparisonOrdering", "comparison_ordering", "13.1",
-    [CudaTileI32EnumAttrCase<"Unordered comparison.", "UNORDERED", 0, "13.1", "unordered">,
-     CudaTileI32EnumAttrCase<"Ordered comparison.", "ORDERED", 1, "13.1", "ordered">]> {
+    [CudaTileI32EnumAttrCase<"Unordered comparison (NaN comparisons are true).", "UNORDERED", 0, "13.1", "unordered">,
+     CudaTileI32EnumAttrCase<"Ordered comparison (NaN comparisons are false).", "ORDERED", 1, "13.1", "ordered">]> {
   let cppNamespace = "::mlir::cuda_tile";
   let genSpecializedAttr = 0;
   let specPrefixDescription = "The :code:`comparison_ordering` attribute specifies the kind of ordering to be performed in the comparison operation.";
@@ -720,6 +1282,32 @@ def CudaTile_DILexicalBlockAttr : CudaTile_DILocalScopeAttr<"DILexicalBlock",
 }
 
 //===----------------------------------------------------------------------===//
+// DISubprogramFlags
+//===----------------------------------------------------------------------===//
+
+// This is a bit set, so it uses I32BitEnum rather than the CudaTileI32EnumAttr
+// that the other enums in this file use. CudaTileI32EnumAttr derives from
+// I32EnumAttr, a closed enum: its generated symbolize is a switch over exactly
+// the declared values, so a second flag would mean declaring a named case for
+// every combination of bits. The bit enum instead accepts any combination of
+// declared bits, and mirrors `DebugInfo_DISubprogramFlags`, which this lowers
+// to. The version each flag was introduced in is not tracked per case here
+// (as CudaTileI32EnumAttr would) because `DISubprogramAttr` is serialized by
+// hand rather than through the TableGen bytecode path that consults it; see
+// `kMinDISubprogramFlagsVersion`.
+def CudaTile_DISubprogramFlagNone : I32BitEnumCaseNone<"None", "none">;
+def CudaTile_DISubprogramFlagDeclaration
+    : I32BitEnumCaseBit<"Declaration", 0, "declaration">;
+
+def CudaTile_DISubprogramFlags : I32BitEnum<
+  "DISubprogramFlags", "defines the flags for DISubprogram", [
+    CudaTile_DISubprogramFlagNone,
+    CudaTile_DISubprogramFlagDeclaration
+  ]> {
+  let cppNamespace = "::mlir::cuda_tile";
+}
+
+//===----------------------------------------------------------------------===//
 // DISubprogramAttr
 //===----------------------------------------------------------------------===//
 
@@ -729,7 +1317,9 @@ def CudaTile_DISubprogramAttr : CudaTile_DILocalScopeAttr<"DISubprogram",
   let description = [{
     Represents a function within the source language; specifies the scope, file,
     line number, name, and linkage name of the subprogram. Optionally the line
-    number within the scope can be included.
+    number within the scope can be included. A subprogram marked with the
+    `declaration` flag describes a function that is only declared in this
+    compilation unit and defined elsewhere.
   }];
   let parameters = (ins
     "DIFileAttr":$file,
@@ -737,7 +1327,8 @@ def CudaTile_DISubprogramAttr : CudaTile_DILocalScopeAttr<"DISubprogram",
     "StringAttr":$name,
     "StringAttr":$linkageName,
     "DICompileUnitAttr":$compileUnit,
-    OptionalParameter<"unsigned">:$scopeLine
+    OptionalParameter<"unsigned">:$scopeLine,
+    OptionalParameter<"DISubprogramFlags">:$flags
   );
   let assemblyFormat = "`<` struct(params) `>`";
 
@@ -749,7 +1340,7 @@ def CudaTile_DISubprogramAttr : CudaTile_DILocalScopeAttr<"DISubprogram",
   let extraClassDefinition = [{
     $cppClass $cppClass::cloneWithNewLinkageName(StringAttr newLinkageName) {
       return $cppClass::get(getContext(), getFile(), getLine(), getName(), newLinkageName,
-              getCompileUnit(), getScopeLine());
+              getCompileUnit(), getScopeLine(), getFlags());
     }
   }];
 }

@@ -94,9 +94,9 @@ static void synthesizeScopeForFunction(FunctionOpInterface funcOp,
 
   // Create a new subprogram for the function.
   auto funcName = funcOp.getNameAttr();
-  auto subprogramAttr =
-      DISubprogramAttr::get(context, fileAttr, line, funcName, funcName,
-                            compileUnitAttr, /*scopeLine=*/line);
+  auto subprogramAttr = DISubprogramAttr::get(
+      context, fileAttr, line, funcName, funcName, compileUnitAttr,
+      /*scopeLine=*/line, DISubprogramFlags::None);
   funcOp->walk([&](Operation *op) {
     FileLineColLoc opFileLoc = extractFileLoc(op->getLoc());
     if (!opFileLoc)

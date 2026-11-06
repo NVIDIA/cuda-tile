@@ -11,7 +11,15 @@
 // Version
 //===--------------------------------------------------------------------===//
 // RUN: not cuda-tile-translate -cudatilebc-to-mlir %S/unsupported_version.tileirbc -no-implicit-module 2>&1 | FileCheck %s --check-prefix=VERSION
-// VERSION: unsupported Tile version 18.0.0, this reader supports versions [13.1 - 13.4]
+// VERSION: unsupported Tile version 18.0.0, this reader supports versions [13.1 - 13.5]
+
+//===--------------------------------------------------------------------===//
+// Version Tag
+//===--------------------------------------------------------------------===//
+// Only bit 0 of the 16-bit tag is defined; the fixture sets a reserved low bit
+// and the whole reserved high byte.
+// RUN: not cuda-tile-translate -cudatilebc-to-mlir %S/unknown_version_tag_bits.tileirbc -no-implicit-module 2>&1 | FileCheck %s --check-prefix=VERSION_TAG
+// VERSION_TAG: header has unrecognized version tag bits (0xFF02)
 
 //===--------------------------------------------------------------------===//
 // Section ID

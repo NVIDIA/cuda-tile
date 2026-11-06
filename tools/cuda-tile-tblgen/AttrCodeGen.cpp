@@ -194,6 +194,7 @@ static bool genGpuArchDef(const RecordKeeper &records, raw_ostream &os) {
     os << formatv("{0}({1}, {2}, \"{3}\")\n",
                   isFirst ? "CUDA_TILE_GPU_ARCH_FIRST" : "CUDA_TILE_GPU_ARCH",
                   str, val, str);
+
   }
 
   os << "\n#undef CUDA_TILE_GPU_ARCH\n";
@@ -313,11 +314,11 @@ struct ArchOverrideInfo {
 /// Complete metadata for one hint key, extracted from CudaTileHintKeyCase.
 /// Used by -gen-hint-key-impl to generate validators and op-to-key mapping.
 struct HintKeyInfo {
-  std::string sym;       // C++ enum name and accessor suffix (e.g. "Latency")
-  std::string str;       // MLIR string representation (e.g. "latency")
-  std::string retType;   // Return type (e.g. "int", "bool")
-  std::string validKind; // Validation strategy: "int_range", "pow2_range",
-                         // "bool", or "string"
+  std::string sym;     // C++ enum name and accessor suffix (e.g. "Latency")
+  std::string str;     // MLIR string representation (e.g. "latency")
+  std::string retType; // Return type (e.g. "int", "bool")
+  std::string
+      validKind; // Validation strategy: "int_range", "pow2_range", "bool", or "string"
   int64_t validMin = 0;
   int64_t validMax = 0;
   std::vector<std::string> validForOps; // Op class names this hint applies to

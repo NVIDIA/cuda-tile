@@ -17,30 +17,84 @@
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Support/LogicalResult.h"
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/LogicalResult.h"
 
 #include "cuda_tile/Dialect/CudaTile/IR/Attributes.h"
 #include "cuda_tile/Dialect/CudaTile/IR/Types.h"
-
 namespace mlir {
 namespace cuda_tile {
+
+enum class SymbolicExprKind { Int, Tuple, Datatype, String };
+
+LogicalResult
+verifySymbolicExprKind(SymbolicExprAttr expr, SymbolicExprKind expectedKind,
+                       function_ref<InFlightDiagnostic()> emitError);
+
+/// Verify that every symbolic variable referenced by a function signature is
+/// bound by `constParams`, that function's constant-parameter scope.
+LogicalResult verifySignatureSymbolicScope(Operation *op, TypeRange inputs,
+                                           TypeRange results,
+                                           ArrayRef<Attribute> constParams);
+
+LogicalResult verifyConstantArgumentKind(Operation *op, unsigned index,
+                                         ConstParamAttr param, Attribute arg);
 
 //===----------------------------------------------------------------------===//
 // View Load and Store Utilities
 //===----------------------------------------------------------------------===//
 
+static inline TensorViewType getUnderlyingTensorViewType(Type viewType) {
+  if (auto partitionView = dyn_cast<PartitionViewType>(viewType)) {
+    return partitionView.getTensorView();
+  }
+  if (auto stridedView = dyn_cast<StridedViewType>(viewType)) {
+    return stridedView.getTensorView();
+  }
+  if (auto gatherScatterView = dyn_cast<GatherScatterViewType>(viewType)) {
+    return gatherScatterView.getTensorView();
+  }
+  return {};
+}
+
+/// Verify the compiler-checked portion of the f4 view memory contract. The
+/// remaining evenness requirements are execution preconditions whose violation
+/// is undefined behavior; they intentionally are not verifier requirements.
+static inline LogicalResult verifyF4ViewAccessContract(Operation *op,
+                                                       Type viewType) {
+  TensorViewType tensorView = getUnderlyingTensorViewType(viewType);
+  if (!tensorView || !isa<Float4E2M1FNType>(tensorView.getElementType())) {
+    return success();
+  }
+
+  std::optional<unsigned> packingDimension = tensorView.getF4PackingDimension();
+  if (!packingDimension) {
+    size_t unitStrideCount = llvm::count(tensorView.getStrides(), int64_t{1});
+    return op->emitOpError()
+           << "an f4 view access requires exactly one statically encoded "
+              "unit stride to identify the packing dimension; got "
+           << unitStrideCount << " in " << tensorView;
+  }
+
+  if (auto gatherScatterView = dyn_cast<GatherScatterViewType>(viewType);
+      gatherScatterView &&
+      gatherScatterView.getSparseDim() == *packingDimension) {
+    return op->emitOpError()
+           << "an f4 gather/scatter view cannot use packing dimension "
+           << *packingDimension << " as its sparse dimension";
+  }
+
+  return success();
+}
+
 template <typename Op>
 static LogicalResult verifyOptHintsCommon(Op op) {
   Operation *opInst = op->getOperation();
-  auto hintsAttr =
-      opInst->getAttrOfType<OptimizationHintsAttr>("optimization_hints");
-  if (!hintsAttr || hintsAttr.getValue().empty()) {
+  auto hintsAttr = opInst->getAttrOfType<OptimizationHintsAttr>("optimization_hints");
+  if (!hintsAttr || hintsAttr.getValue().empty())
     return success();
-  }
-  if (failed(
-          hintsAttr.verifyWithOp(op->getOperation(), hintsAttr.getValue()))) {
+  if (failed(hintsAttr.verifyWithOp(op->getOperation(), hintsAttr.getValue())))
     return op->emitOpError("Optimization hints verification failed");
-  }
   return success();
 }
 
@@ -49,28 +103,28 @@ static inline LogicalResult verifyViewIndexTileMatch(Operation *op,
                                                      ValueRange indexVals,
                                                      Value tileVal) {
   auto viewIface = dyn_cast<TileView>(viewVal.getType());
-  if (!viewIface) {
+  if (!viewIface)
     return op->emitOpError("expected a tile view type for the view operand");
-  }
   TypeRange indexTypes = indexVals.getTypes();
   Type tileType = tileVal.getType();
 
-  if (indexTypes.size() != viewIface.getViewIndexRank()) {
+  if (indexTypes.size() != viewIface.getViewIndexRank())
     return op->emitOpError()
            << "expected " << viewIface.getViewIndexRank()
            << " index operands (based on view type), got " << indexTypes.size();
-  }
 
-  if (tileType != viewIface.getViewTileType()) {
+  if (tileType != viewIface.getViewTileType())
     return op->emitOpError()
            << "expected tile type to be " << viewIface.getViewTileType()
            << " (based on view type), got " << tileType;
+
+  if (failed(verifyF4ViewAccessContract(op, viewVal.getType()))) {
+    return failure();
   }
 
   if (failed(viewIface.verifyIndices([&]() { return op->emitOpError(); },
-                                     indexTypes))) {
+                                     indexTypes)))
     return failure();
-  }
 
   return success();
 }
@@ -78,9 +132,8 @@ static inline LogicalResult verifyViewIndexTileMatch(Operation *op,
 template <typename LoadStoreOp>
 static LogicalResult verifyViewLoadStoreCommon(LoadStoreOp op) {
   if (failed(verifyViewIndexTileMatch(op->getOperation(), op->getView(),
-                                      op->getIndex(), op->getTile()))) {
+                                     op->getIndex(), op->getTile())))
     return failure();
-  }
   return verifyOptHintsCommon(op);
 }
 
@@ -91,26 +144,42 @@ static inline LogicalResult verifyViewLoadStoreCommon(Operation *op,
   return verifyViewIndexTileMatch(op, viewVal, indexVals, tileVal);
 }
 
-/// Verifies that every dimension in `shape`
+/// Verifies that every *static* dimension in `shape`
 ///   • is a positive compile‑time constant,
 ///   • is a power of two, and
-///   • the total element count does not exceed `maxTileNumElements`.
+///   • the product of the static dimensions does not exceed
+///     `maxTileNumElements`.
+///
+/// Symbolic dimensions (`ShapedType::isDynamic(dim)`) are skipped: they come
+/// from symbolic shapes whose extent is not known at verification time, so
+/// none of the above can be checked for them. As a consequence, once a shape
+/// contains any symbolic dimension we can no longer guarantee the
+/// `maxTileNumElements` bound on the *full* tile — the count enforced here is
+/// only over the known (static) dimensions, and the symbolic ones may push the
+/// real element count past the limit at runtime. This bound is therefore a
+/// best-effort, static-only check for symbolic tiles.
 static inline LogicalResult
 verifyTileSize(function_ref<InFlightDiagnostic()> emitError,
-               ArrayRef<int64_t> shape) {
+               ArrayRef<int64_t> shape
+) {
   constexpr int64_t kMaxElems = maxTileNumElements;
 
   int64_t numElems = 1;
   for (int64_t dim : shape) {
+    // If a dimension is symbolic skip it.
+    if (ShapedType::isDynamic(dim))
+      continue;
     // Dimension must be positive.
     if (dim <= 0)
       return emitError() << "all dimensions must be positive constants, got "
                          << shape;
 
     // Dimension must be a power of two.
-    if (!llvm::isPowerOf2_64(static_cast<uint64_t>(dim)))
+    if (
+        !llvm::isPowerOf2_64(static_cast<uint64_t>(dim))) {
       return emitError() << "all dimensions must be powers of two, got "
                          << shape;
+    }
 
     // Guard against overflow before multiplying.
     if (numElems > kMaxElems / dim)
@@ -219,11 +288,12 @@ static inline LogicalResult verifyAlloca(OpTy op) {
   Type pointeeTy = ptrType.getPointeeType();
   int64_t sizeInBytes = 0;
   if (auto intTy = dyn_cast<IntegerType>(pointeeTy)) {
-    bool isIntOne = intTy.isInteger(1);
-    sizeInBytes = (isIntOne) ? 1 : intTy.getWidth() / 8;
+    sizeInBytes = (intTy.getWidth() + 7) / 8;
   }
-  if (auto floatTy = dyn_cast<FloatType>(pointeeTy))
-    sizeInBytes = APFloat::getSizeInBits(floatTy.getFloatSemantics()) / 8;
+  if (auto floatTy = dyn_cast<FloatType>(pointeeTy)) {
+    int64_t sizeInBits = APFloat::getSizeInBits(floatTy.getFloatSemantics());
+    sizeInBytes = (sizeInBits + 7) / 8;
+  }
   if (alignment < sizeInBytes)
     return op.emitOpError()
            << "'alignment' (" << alignment
@@ -322,6 +392,60 @@ static LogicalResult verifyUnrestrictedViewPtrAttr(OpT op, Value viewOperand) {
   auto ptrAttrOrErr = getViewPtrAttr(op.getOperation(), viewOperand.getType());
   if (failed(ptrAttrOrErr)) {
     return failure();
+  }
+  if (auto ptrAttr = *ptrAttrOrErr) {
+    if (ptrAttr.getValue() == PtrAttr::MULTICAST) {
+      return op.emitOpError("multicast ptr_attr is not allowed");
+    }
+  }
+  return success();
+}
+
+/// Verify that a TileView operand has multicast ptr_attr.
+/// Used by multimem ops.
+template <typename OpT>
+static LogicalResult verifyMultimemPtrAttr(OpT op, Value viewOperand) {
+  auto ptrAttrOrErr = getViewPtrAttr(op.getOperation(), viewOperand.getType());
+  if (failed(ptrAttrOrErr)) {
+    return failure();
+  }
+  if (!*ptrAttrOrErr) {
+    return op.emitOpError("requires multicast ptr_attr, got none");
+  }
+  if (auto ptrAttr = *ptrAttrOrErr; ptrAttr.getValue() != PtrAttr::MULTICAST) {
+    return op.emitOpError("requires multicast ptr_attr, got ") << ptrAttr;
+  }
+  return success();
+}
+
+/// Verify the target-independent relationship between a synchronization
+/// contract and a concrete physical participant count. CTA synchronization is
+/// checked at the downstream call site, where the target's thread count is
+/// known.
+inline LogicalResult verifySynchronizationParticipation(
+    Synchronization synchronization, int64_t participants,
+    function_ref<InFlightDiagnostic()> emitError) {
+  int64_t granularity;
+  llvm::StringRef scope;
+  switch (synchronization) {
+  case Synchronization::None:
+  case Synchronization::CTA:
+    return success();
+  case Synchronization::Warp:
+    granularity = 32;
+    scope = "warp";
+    break;
+  case Synchronization::Warpgroup:
+    granularity = 128;
+    scope = "warpgroup";
+    break;
+  }
+
+  if (participants <= 0 || participants % granularity != 0) {
+    return emitError() << "synchronization '" << scope
+                       << "' requires the fragmap participant mode size ("
+                       << participants << ") to be a positive multiple of "
+                       << granularity;
   }
   return success();
 }

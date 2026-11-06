@@ -51,6 +51,13 @@ static mlir::GenRegistration genSpecificationRegister(
       return false;
     });
 
-return MlirTblgenMain(argc, argv); 
+static mlir::GenRegistration genTypeSpecificationRegister(
+    "gen-type-spec",
+    "Generate the CUDA Tile IR type specification from the dialect.",
+    [](const RecordKeeper &records, raw_ostream &os) {
+      cudatile::tblgen::generateTypeSpec(os, records);
+      return false;
+    });
 
+return MlirTblgenMain(argc, argv);
 }

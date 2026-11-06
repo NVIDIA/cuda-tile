@@ -1,4 +1,5 @@
 // RUN: cuda-tile-opt %s -split-input-file | FileCheck %s
+// RUN: cuda-tile-opt %s -split-input-file -mlir-print-elementsattrs-with-hex-if-larger=4 | FileCheck %s --check-prefix=HEX
 
 // Test basic valid constants: hex strings, scalar splats, and arrays
 
@@ -123,6 +124,35 @@ cuda_tile.module @kernels {
     // f64 overflow test
     // CHECK: %{{.*}} = constant <f64: 0x7FF0000000000000> : tile<f64>
     %4 = constant <f64: 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0> : tile<f64>
+    return
+  }
+}
+
+// -----
+// Round-trip the dense-elements hex-blob form: splat case (4-byte
+// buffer broadcast across all 32 elements). Default printer re-emits
+// the canonical splat form.
+
+cuda_tile.module @kernels {
+  entry @kernel() {
+    // CHECK: %{{.*}} = constant <i32: 66> : tile<32xi32>
+    // HEX:   %{{.*}} = constant <i32: 66> : tile<32xi32>
+    %0 = constant <i32: "0x42000000"> : tile<32xi32>
+    return
+  }
+}
+
+// -----
+// Round-trip the dense-elements hex-blob form: non-splat case (32 i32
+// little-endian values [0..31]). Default printer emits the bracketed
+// array; with the hex threshold lowered, the printer re-emits the hex
+// form -- exercising the parser fix.
+
+cuda_tile.module @kernels {
+  entry @kernel() {
+    // CHECK: %{{.*}} = constant <i32: [0, 1, 2, {{.*}}30, 31]> : tile<32xi32>
+    // HEX:   %{{.*}} = constant <i32: "0x000000000100000002000000{{[0-9A-F]+}}"> : tile<32xi32>
+    %0 = constant <i32: "0x000000000100000002000000030000000400000005000000060000000700000008000000090000000A0000000B0000000C0000000D0000000E0000000F000000100000001100000012000000130000001400000015000000160000001700000018000000190000001A0000001B0000001C0000001D0000001E0000001F000000"> : tile<32xi32>
     return
   }
 }

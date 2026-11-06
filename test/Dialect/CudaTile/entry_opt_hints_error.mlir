@@ -72,9 +72,21 @@ cuda_tile.module @warps_not_power_of_2 {
 // -----
 
 cuda_tile.module @warps_out_of_range {
-  // expected-warning @below{{value 64 clamped to 8 for sm_100.num_worker_warps_per_cta}}
+  // expected-warning @below{{value 64 clamped to 32 for sm_100.num_worker_warps_per_cta}}
   // expected-error @below{{Optimization hints verification failed}}
   entry @test_optimization_hints(%arg0: !cuda_tile.tile<ptr<f32>>) optimization_hints=<sm_100={num_worker_warps_per_cta=64}> {
+    return
+  }
+}
+
+// -----
+
+// A value below the [1, 32] range (< 1) is non-positive, so it is rejected by
+// the power-of-2 check.
+cuda_tile.module @warps_below_range {
+  // expected-warning @below{{power-of-2 expected for sm_100.num_worker_warps_per_cta}}
+  // expected-error @below{{Optimization hints verification failed}}
+  entry @test_optimization_hints(%arg0: !cuda_tile.tile<ptr<f32>>) optimization_hints=<sm_100={num_worker_warps_per_cta=0}> {
     return
   }
 }

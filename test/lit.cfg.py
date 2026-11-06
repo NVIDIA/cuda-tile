@@ -10,16 +10,21 @@ from lit.llvm import llvm_config
 # name: The name of this test suite
 config.name = "CUDA_TILE"
 
-# Use lit's shell. external-shell execution (execute_external=True)
+# Use lit's built-in shell. external-shell execution (execute_external=True)
 # was deprecated in LLVM-23 and ShTest now rejects it; all CUDA Tile tests
-# use standard lit constructs that the lit's shell supports.
+# use standard lit constructs that the built-in shell supports.
 config.test_format = lit.formats.ShTest()
 
 # suffixes: A list of file extensions to treat as test files.
 config.suffixes = [".mlir", ".c", ".py"]
 
 # excludes: A list of directories/files to exclude from the test suite.
-config.excludes = ["lit.cfg.py", "lit.site.cfg.py", "round_trip_test.py"]
+config.excludes = [
+    "diff_helper.py",
+    "lit.cfg.py",
+    "lit.site.cfg.py",
+    "round_trip_test.py",
+]
 
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
@@ -57,6 +62,7 @@ tools = [
     "cuda-tile-optimize",
     "FileCheck",
     "not",
+    "split-file",
 ]
 
 llvm_config.add_tool_substitutions(tools, tool_dirs)

@@ -89,6 +89,68 @@ inline bool isAttrTagAvailableInVersion(uint8_t tag,
 }
 
 //===----------------------------------------------------------------------===//
+// Code Generation: Public-Preview Attribute Classification
+//===----------------------------------------------------------------------===//
+
+void mlir::tblgen::generatePreviewAttrClassification(
+    const BytecodeAttrStructure &structure, raw_ostream &os) {
+  os << R"(
+namespace mlir::cuda_tile::detail {
+
+/// Return the feature owning a public-preview attribute tag.
+inline std::optional<PreviewFeature>
+getPreviewFeatureForAttributeTag(uint64_t tag) {
+  switch (static_cast<Bytecode::AttributeTag>(tag)) {
+)";
+
+  for (const auto &attr : structure.bytecodeAttrs) {
+    if (!attr.isPreview)
+      continue;
+    os << formatv(R"(  case Bytecode::AttributeTag::{0}:
+    return PreviewFeature::{1};
+)",
+                  attr.attrName, attr.owningPreviewFeature);
+  }
+
+  os << R"(  default:
+    return std::nullopt;
+  }
+}
+
+inline bool isPreviewAttributeTag(uint64_t tag) {
+  return getPreviewFeatureForAttributeTag(tag).has_value();
+}
+
+} // namespace mlir::cuda_tile::detail
+)";
+}
+
+void mlir::tblgen::generatePreviewAttrValueClassification(
+    const BytecodeAttrStructure &structure, raw_ostream &os) {
+  os << R"(
+namespace mlir::cuda_tile::detail {
+
+/// Return the feature owning a public-preview attribute.
+inline std::optional<PreviewFeature> getPreviewFeature(Attribute attr) {
+  return llvm::TypeSwitch<Attribute, std::optional<PreviewFeature>>(attr)
+)";
+
+  for (const auto &attr : structure.serializableAttrs) {
+    if (!attr.isPreview)
+      continue;
+    os << "      .Case<" << attr.qualifiedCppName
+       << ">([](auto) { return PreviewFeature::" << attr.owningPreviewFeature
+       << "; })\n";
+  }
+
+  os << R"(      .Default([](Attribute) { return std::nullopt; });
+}
+
+} // namespace mlir::cuda_tile::detail
+)";
+}
+
+//===----------------------------------------------------------------------===//
 // Code Generation: Enum Type Traits
 //===----------------------------------------------------------------------===//
 
@@ -165,8 +227,9 @@ inline bool isEnumAttrAvailableInVersion(const BytecodeVersion &) {
 )";
 
   for (const auto &enumAttr : structure.enumAttrs) {
-    if (enumAttr.skipsVersionCheck || enumAttr.sinceVersion.empty())
+    if (enumAttr.skipsVersionCheck || enumAttr.sinceVersion.empty()) {
       continue;
+    }
 
     auto [majorStr, minorStr] = parseVersion(enumAttr.sinceVersion);
     os << formatv(R"(template <>
@@ -201,8 +264,9 @@ inline bool isEnumValueAvailableInVersion(EnumType, const BytecodeVersion &) {
 )";
 
   for (const auto &enumAttr : structure.enumAttrs) {
-    if (enumAttr.skipsVersionCheck || enumAttr.cases.empty())
+    if (enumAttr.skipsVersionCheck || enumAttr.cases.empty()) {
       continue;
+    }
 
     os << formatv(R"(template <>
 inline bool isEnumValueAvailableInVersion<cuda_tile::{0}>(
@@ -236,14 +300,23 @@ void mlir::tblgen::generateAttrVersionMap(
   os << R"(namespace mlir::cuda_tile::detail {
 
 /// Returns the minimum bytecode version required for an Attribute.
-/// Returns nullopt for unsupported or unversioned attributes, or those
-/// at the minimum supported version.
+/// Preview attributes require the exact current version. Returns nullopt for
+/// unsupported or otherwise unversioned attributes, or those at the minimum
+/// supported version.
 inline std::optional<BytecodeVersion>
 getAttrMinVersion(Attribute attr) {
   return llvm::TypeSwitch<Attribute, std::optional<BytecodeVersion>>(attr)
 )";
 
   for (const auto &attr : structure.bytecodeAttrs) {
+    if (attr.isPreview) {
+      os << formatv(R"(      .Case<cuda_tile::{0}Attr>([](auto) {{
+        return BytecodeVersion::kCurrentVersion;
+      })
+)",
+                    attr.attrName);
+      continue;
+    }
     if (attr.skipsVersionCheck || attr.sinceVersion.empty()) {
       continue;
     }
@@ -358,70 +431,83 @@ void mlir::tblgen::generateAttrParamVersionMap(
   os << R"(namespace mlir::cuda_tile::detail {
 
 /// Returns the minimum bytecode version required based on attribute parameters.
-/// Checks if optional parameters added in later versions are present.
-/// Returns nullopt if no versioned parameters are present.
+/// An evolved parameter contributes its `sinceVersion` when its value differs
+/// from the fallback expression (`bytecodeFallbackValue` or ODS `defaultValue`,
+/// which `OptionalParameter` auto-populates to the type's value-initialized
+/// form). This mirrors the writer-side gate. Returns the highest contributing
+/// version across all evolved parameters, or nullopt if none contribute.
 inline std::optional<BytecodeVersion>
 getAttrParamMinVersion(Attribute attr) {
   return llvm::TypeSwitch<Attribute, std::optional<BytecodeVersion>>(attr)
 )";
 
-  // Generate cases for attrs with versioned optional parameters.
   for (const auto &attr : structure.serializableAttrs) {
     if (attr.skipVersionCheck) {
       continue;
     }
 
-    // Find optional parameters with version > attribute's base version.
     auto [attrMajor, attrMinor] = parseVersion(attr.sinceVersion);
-    bool hasVersionedParams = false;
+
+    // Skip attrs with no evolved params.
+    bool hasEvolvedParams = false;
     for (const auto &param : attr.parameters) {
-      if (!param.isOptional) {
-        continue;
-      }
       auto [paramMajor, paramMinor] = parseVersion(param.sinceVersion);
       if (isVersionGreater(paramMajor, paramMinor, attrMajor, attrMinor)) {
-        hasVersionedParams = true;
+        hasEvolvedParams = true;
         break;
       }
     }
-
-    if (!hasVersionedParams) {
+    if (!hasEvolvedParams) {
       continue;
     }
 
-    // Generate the Case with inline parameter checks.
+    // The attr is already fully built here, so all accessors are valid
+    // regardless of parameter order. Build the full substitution map upfront.
+    SmallVector<ParamSubst, 4> paramSubsts;
+    for (const auto &param : attr.parameters) {
+      paramSubsts.push_back({param.name, "a." + param.accessorName + "()"});
+    }
+
     // Note: attrName already includes "Attr" suffix (e.g.,
     // "BytecodeTestEvolvedAttr").
     os << formatv("      .Case<cuda_tile::{0}>([](cuda_tile::{0} a)"
                   " -> std::optional<BytecodeVersion> {{\n",
                   attr.attrName);
+    os << R"(        std::optional<BytecodeVersion> minVersion;
+        auto raiseMin = [&](std::optional<BytecodeVersion> v) {
+          if (v && (!minVersion || *v > *minVersion))
+            minVersion = v;
+        };
+)";
 
-    // Generate checks for each versioned optional parameter.
-    bool first = true;
     for (const auto &param : attr.parameters) {
-      if (!param.isOptional) {
-        continue;
-      }
       auto [paramMajor, paramMinor] = parseVersion(param.sinceVersion);
       if (!isVersionGreater(paramMajor, paramMinor, attrMajor, attrMinor)) {
         continue;
       }
 
-      if (first) {
-        os << formatv("        if (a.{0}())\n", param.accessorName);
-        os << formatv(
-            "          return BytecodeVersion::fromVersion({0}, {1}, 0);\n",
-            paramMajor, paramMinor);
-        first = false;
-      } else {
-        os << formatv("        else if (a.{0}())\n", param.accessorName);
-        os << formatv(
-            "          return BytecodeVersion::fromVersion({0}, {1}, 0);\n",
-            paramMajor, paramMinor);
+      // An evolved param raises the min version when its value differs from
+      // the fallback. For OptionalParameter<T>, MLIR sets defaultValue to
+      // "T()", so the comparison doubles as a has_value()/non-null check.
+      StringRef fallbackExpr = param.bytecodeFallbackValue.empty()
+                                   ? StringRef(param.defaultValue)
+                                   : StringRef(param.bytecodeFallbackValue);
+      if (fallbackExpr.empty()) {
+        PrintFatalError("Evolved parameter '" + param.name +
+                        "' in attribute '" + attr.attrName +
+                        "' is missing a bytecode fallback expression or "
+                        "ODS default value.");
       }
+      std::string fallbackValue = replaceTableGenPlaceholders(
+          fallbackExpr, "a.getContext()", paramSubsts);
+      os << formatv("        if (a.{0}() != {1})\n", param.accessorName,
+                    fallbackValue);
+      os << formatv("          raiseMin(BytecodeVersion::fromVersion({0}, "
+                    "{1}, 0));\n",
+                    paramMajor, paramMinor);
     }
 
-    os << "        return std::nullopt;\n";
+    os << "        return minVersion;\n";
     os << "      })\n";
   }
 
@@ -503,6 +589,13 @@ if (failed(writeSelfContainedAttribute(op, "polymorphic_nested", {0}, writer,
 
 static const char *const serializeTypeAttrTemplate = R"(
 if (failed(typeMgr.writeTypeIndex({0}.getValue(), writer)))
+  return failure();
+)";
+
+// Serialized as a type-table index, mirroring the type-side encoding.
+// {0}: getter call.
+static const char *const serializeTypeTemplate = R"(
+if (failed(typeMgr.writeTypeIndex({0}, writer)))
   return failure();
 )";
 
@@ -588,6 +681,27 @@ if (!{0}_type)
 {0} = TypeAttr::get({0}_type);
 )";
 
+// Raw bare `mlir::Type` parameter deserialization.
+// {0}: variable name.
+static const char *const readGenericTypeTemplate = R"(
+{0} = types.readAndGetType(reader);
+if (!{0})
+  return reader.emitError() << "failed to read {0} type";
+)";
+
+// Concrete Type-subclass parameter deserialization (e.g. ShapedType). Reads a
+// generic type from the type table then narrows it to the declared type.
+// {0}: variable name. {1}: declared C++ type.
+static const char *const readSpecificTypeTemplate = R"(
+Type {0}_generic = types.readAndGetType(reader);
+if (!{0}_generic)
+  return reader.emitError() << "failed to read {0} type";
+{0} = ::mlir::dyn_cast<{1}>({0}_generic);
+if (!{0})
+  return reader.emitError() << "expected '{1}' for parameter '{0}', got "
+                            << {0}_generic;
+)";
+
 // Reads an enum value as uint64_t then narrows it to the enum's underlying
 // type. Supports both I32EnumAttr and I64EnumAttr.
 static const char *const readEnumTemplate = R"(
@@ -626,19 +740,14 @@ static const char *const finalizeAttrArrayAsArrayAttrTemplate =
 
 // Finalizes an AttributeArray deserialization into an
 // ArrayRef<ConcreteAttr> by casting each element.
-// {0}: variable name, {1}: storage name, {2}: concrete element type.
+// {0}: variable name, {1}: attribute storage name, {2}: ArrayRef backing
+// storage name, {3}: concrete element type.
 static const char *const finalizeAttrArrayAsArrayRefCastTemplate = R"(
-SmallVector<{2}, 4> {0}_typed_storage;
-{0}_typed_storage.reserve({1}.size());
+{2}.reserve({1}.size());
 for (Attribute a : {1})
-  {0}_typed_storage.push_back(cast<{2}>(a));
-{0} = {0}_typed_storage;
+  {2}.push_back(cast<{3}>(a));
+{0} = {2};
 )";
-
-// Finalizes an AttributeArray deserialization into an ArrayRef<Attribute>
-// (no cast required).
-// {0}: variable name, {1}: storage name.
-static const char *const finalizeAttrArrayAsArrayRefTemplate = "{0} = {1};\n";
 
 static const char *const readStringAttrTemplate = R"(
 uint64_t {0}_idx;
@@ -664,10 +773,22 @@ if (!{0}_attr)
 // Helper Functions for Attr Serialization
 //===----------------------------------------------------------------------===//
 
+/// Generates the opening of a version check. The content of the generated if
+/// statement will be ran if the bytecode version is higher or equal to the
+/// provided version.
+static std::string generateBytecodeVersionCondition(StringRef version,
+                                                    StringRef versionVarName) {
+  auto [majorStr, minorStr] = parseVersion(version);
+  return formatv(R"(
+  if ({2} >= *BytecodeVersion::fromVersion({0}, {1}, 0)) {{
+)",
+                 majorStr, minorStr, versionVarName);
+}
+
 /// Generate version check for attr serialization.
 static std::string
 generateAttrVersionCheck(unsigned indent, StringRef version, StringRef attrName,
-                         StringRef versionVar = "config.bytecodeVersion",
+                         StringRef versionVar = "config.getBytecodeVersion()",
                          StringRef contextExpr = "attr.getContext()") {
   auto [majorStr, minorStr] = parseVersion(version);
   std::string indentStr(indent, ' ');
@@ -721,6 +842,10 @@ generateAttrParameterSerialization(const BytecodeAttrParameter &param,
     ios.printReindented(formatv(serializeTypeAttrTemplate, getterCall).str(),
                         indent);
     break;
+  case BytecodeAttrParameter::Kind::Type:
+    ios.printReindented(formatv(serializeTypeTemplate, getterCall).str(),
+                        indent);
+    break;
   case BytecodeAttrParameter::Kind::NestedAttr:
     ios.printReindented(formatv(serializeNestedAttrTemplate, getterCall).str(),
                         indent);
@@ -748,6 +873,94 @@ generateAttrParameterSerialization(const BytecodeAttrParameter &param,
 //===----------------------------------------------------------------------===//
 // Parameter Deserialization (Attr)
 //===----------------------------------------------------------------------===//
+
+namespace {
+
+struct AttributeArrayInfo {
+  bool isArrayAttr = false;
+  bool isArrayRef = false;
+  std::string elemType = "Attribute";
+  bool needsCast = false;
+
+  static AttributeArrayInfo get(StringRef cppType) {
+    AttributeArrayInfo info;
+    info.isArrayAttr = cppType.contains("ArrayAttr");
+    info.isArrayRef = cppType.contains("ArrayRef");
+
+    if (info.isArrayRef) {
+      size_t begin = cppType.find('<');
+      size_t end = cppType.rfind('>');
+      if (begin != StringRef::npos && end != StringRef::npos && begin < end) {
+        info.elemType = cppType.slice(begin + 1, end).trim().str();
+      }
+    }
+
+    info.needsCast = info.isArrayRef && info.elemType != "Attribute" &&
+                     info.elemType != "::mlir::Attribute";
+    return info;
+  }
+
+  bool needsLocalReadStorage() const { return isArrayAttr || needsCast; }
+
+  std::string getArrayRefBackingStorageName(StringRef paramName) const {
+    return (paramName + "_storage").str();
+  }
+
+  std::string getReadStorageName(StringRef paramName) const {
+    if (isArrayRef && !needsCast) {
+      return getArrayRefBackingStorageName(paramName);
+    }
+    if (needsCast) {
+      return (paramName + "_attr_storage").str();
+    }
+    if (isArrayAttr) {
+      return (paramName + "_storage").str();
+    }
+    return paramName.str();
+  }
+};
+
+} // namespace
+
+/// Returns true if the parameter's declared C++ type is a bare `mlir::Type`
+/// rather than a concrete subclass (e.g. `ShapedType`) that needs narrowing on
+/// read.
+static bool isBareType(StringRef cppType) {
+  return cppType == "Type" || cppType == "mlir::Type" ||
+         cppType == "::mlir::Type";
+}
+
+/// Helper to declare the variable into which a parameter will be written after
+/// being deserialized.
+static void declareParamVariableAndScratch(const BytecodeAttrParameter &param,
+                                           llvm::raw_ostream &os,
+                                           StringRef indent) {
+  switch (param.kind) {
+  case BytecodeAttrParameter::Kind::TypeAttr:
+    os << indent << "TypeAttr " << param.name << ";";
+    break;
+  case BytecodeAttrParameter::Kind::AttributeArray: {
+    AttributeArrayInfo info = AttributeArrayInfo::get(param.cppType);
+    if (info.isArrayAttr) {
+      os << indent << "ArrayAttr " << param.name << ";";
+    } else {
+      os << indent << param.cppType << " " << param.name << ";";
+    }
+
+    // Because ArrayRef is not an owning data structure, we need an intermediary
+    // storage to build fresh values.
+    if (info.isArrayRef) {
+      os << "\n"
+         << indent << "SmallVector<" << info.elemType << ", 4> "
+         << info.getArrayRefBackingStorageName(param.name) << ";";
+    }
+    break;
+  }
+  default:
+    os << indent << param.cppType << " " << param.name << ";";
+    break;
+  }
+}
 
 /// Helper to get array element type and MLIR attr type from C++ type string.
 static std::pair<StringRef, StringRef> getDenseArrayInfo(StringRef cppType) {
@@ -777,8 +990,7 @@ static std::pair<StringRef, StringRef> getDenseArrayInfo(StringRef cppType) {
 
 static void
 generateAttrParameterDeserialization(const BytecodeAttrParameter &param,
-                                     llvm::raw_ostream &os, StringRef indent,
-                                     bool declareVariable) {
+                                     llvm::raw_ostream &os, StringRef indent) {
   mlir::raw_indented_ostream ios(os);
   std::string varName = param.name;
 
@@ -786,9 +998,6 @@ generateAttrParameterDeserialization(const BytecodeAttrParameter &param,
   case BytecodeAttrParameter::Kind::VarInt:
     if (param.isOptional) {
       // For optional VarInt, read into temp then assign to std::optional.
-      if (declareVariable) {
-        os << indent << formatv("{0} {1};\n", param.cppType, varName);
-      }
       std::string baseType = param.isSigned ? "int64_t" : "uint64_t";
       os << indent << "{\n";
       os << indent << "  " << baseType << " " << varName << "_val;\n";
@@ -804,9 +1013,6 @@ generateAttrParameterDeserialization(const BytecodeAttrParameter &param,
       os << indent << "}\n";
     } else {
       // Regular VarInt
-      if (declareVariable) {
-        os << indent << formatv("{0} {1};\n", param.cppType, varName);
-      }
       if (param.isSigned) {
         ios.printReindented(formatv(readSignedVarIntTemplate, varName).str(),
                             indent);
@@ -817,16 +1023,10 @@ generateAttrParameterDeserialization(const BytecodeAttrParameter &param,
     break;
 
   case BytecodeAttrParameter::Kind::APInt:
-    if (declareVariable) {
-      os << indent << formatv("{0} {1};\n", param.cppType, varName);
-    }
     ios.printReindented(formatv(readAPIntTemplate, varName).str(), indent);
     break;
 
   case BytecodeAttrParameter::Kind::DenseArray: {
-    if (declareVariable) {
-      os << indent << formatv("{0} {1};\n", param.cppType, varName);
-    }
     auto [elemType, attrType] = getDenseArrayInfo(param.cppType);
     ios.printReindented(
         formatv(readDenseArrayTemplate, varName, elemType, attrType).str(),
@@ -835,31 +1035,30 @@ generateAttrParameterDeserialization(const BytecodeAttrParameter &param,
   }
 
   case BytecodeAttrParameter::Kind::EnumValue:
-    if (declareVariable) {
-      os << indent << formatv("{0} {1};\n", param.cppType, varName);
-    }
     ios.printReindented(formatv(readEnumTemplate, varName, param.cppType).str(),
                         indent);
     break;
 
   case BytecodeAttrParameter::Kind::TypeAttr:
-    if (declareVariable) {
-      os << indent << formatv("TypeAttr {0};\n", varName);
-    }
     ios.printReindented(formatv(readTypeAttrTemplate, varName).str(), indent);
     break;
 
-  case BytecodeAttrParameter::Kind::NestedAttr:
-    if (declareVariable) {
-      os << indent << formatv("{0} {1};\n", param.cppType, varName);
+  case BytecodeAttrParameter::Kind::Type:
+    if (isBareType(param.cppType)) {
+      ios.printReindented(formatv(readGenericTypeTemplate, varName).str(),
+                          indent);
+    } else {
+      ios.printReindented(
+          formatv(readSpecificTypeTemplate, varName, param.cppType).str(),
+          indent);
     }
+    break;
+
+  case BytecodeAttrParameter::Kind::NestedAttr:
     ios.printReindented(formatv(readNestedAttrTemplate, varName).str(), indent);
     break;
 
   case BytecodeAttrParameter::Kind::PolymorphicNestedAttr:
-    if (declareVariable) {
-      os << indent << formatv("{0} {1};\n", param.cppType, varName);
-    }
     ios.printReindented(
         formatv(readPolymorphicNestedAttrTemplate, varName, param.cppType)
             .str(),
@@ -867,72 +1066,44 @@ generateAttrParameterDeserialization(const BytecodeAttrParameter &param,
     break;
 
   case BytecodeAttrParameter::Kind::AttributeArray: {
-    bool isArrayAttr = StringRef(param.cppType).contains("ArrayAttr");
-    bool isArrayRef = StringRef(param.cppType).contains("ArrayRef");
+    AttributeArrayInfo info = AttributeArrayInfo::get(param.cppType);
 
-    // Extract element type from ArrayRef<ElementType>, if present.
-    std::string elemType = "Attribute";
-    if (isArrayRef) {
-      StringRef typeStr(param.cppType);
-      size_t begin = typeStr.find('<');
-      size_t end = typeStr.rfind('>');
-      if (begin != StringRef::npos && end != StringRef::npos && begin < end) {
-        elemType = typeStr.slice(begin + 1, end).trim().str();
-      }
+    // ArrayRef backing storage is declared with the parameter, so it outlives
+    // any evolved-version block and dominates the final get() call.
+    std::string storageName = info.getReadStorageName(varName);
+    if (info.needsLocalReadStorage()) {
+      os << indent << "SmallVector<Attribute, 4> " << storageName << ";\n";
     }
-    bool needsCast = isArrayRef && elemType != "Attribute" &&
-                     elemType != "::mlir::Attribute";
-
-    // Declaration (only when declareVariable is true — optional parameter
-    // sites declare the storage separately).
-    if (declareVariable) {
-      if (isArrayAttr) {
-        os << indent << formatv("ArrayAttr {0};\n", varName);
-      } else if (isArrayRef) {
-        os << indent << param.cppType << " " << varName << ";\n";
-      }
-    }
-
-    // Deserialization (must always run regardless of declareVariable).
-    std::string storageName =
-        isArrayAttr ? varName + "_storage"
-                    : (isArrayRef ? varName + "_attr_storage" : varName);
-    os << indent << "SmallVector<Attribute, 4> " << storageName << ";\n";
     ios.printReindented(formatv(readAttrArrayTemplate, storageName).str(),
                         indent);
 
-    if (isArrayAttr) {
+    if (info.isArrayAttr) {
       ios.printReindented(
           formatv(finalizeAttrArrayAsArrayAttrTemplate, varName, storageName)
               .str(),
           indent);
-    } else if (isArrayRef) {
-      if (needsCast) {
+    } else if (info.isArrayRef) {
+      if (info.needsCast) {
+        std::string backingStorageName =
+            info.getArrayRefBackingStorageName(varName);
         ios.printReindented(formatv(finalizeAttrArrayAsArrayRefCastTemplate,
-                                    varName, storageName, elemType)
+                                    varName, storageName, backingStorageName,
+                                    info.elemType)
                                 .str(),
                             indent);
       } else {
-        ios.printReindented(
-            formatv(finalizeAttrArrayAsArrayRefTemplate, varName, storageName)
-                .str(),
-            indent);
+        os << indent << varName << " = "
+           << info.getArrayRefBackingStorageName(varName) << ";\n";
       }
     }
     break;
   }
 
   case BytecodeAttrParameter::Kind::StringAttr:
-    if (declareVariable) {
-      os << indent << formatv("{0} {1};\n", param.cppType, varName);
-    }
     ios.printReindented(formatv(readStringAttrTemplate, varName).str(), indent);
     break;
 
   case BytecodeAttrParameter::Kind::StringRef:
-    if (declareVariable) {
-      os << indent << formatv("{0} {1};\n", param.cppType, varName);
-    }
     ios.printReindented(formatv(readStringRefTemplate, varName).str(), indent);
     break;
   }
@@ -947,6 +1118,17 @@ static bool isEvolvedParam(const CudaTileSerializableAttr &attr,
                            const BytecodeAttrParameter &param) {
   return !attr.skipVersionCheck && !param.sinceVersion.empty() &&
          param.sinceVersion != attr.sinceVersion;
+}
+
+/// Returns the presence-test expression for an optional parameter:
+/// std::optional getters use has_value(); nullable Type/Attribute handles use
+/// truthiness.
+static std::string optionalPresenceCheck(const BytecodeAttrParameter &param) {
+  std::string getter = "attr." + param.accessorName + "()";
+  if (StringRef(param.cppType).contains("std::optional")) {
+    return getter + ".has_value()";
+  }
+  return getter;
 }
 
 /// Generate serialization function for a single attribute.
@@ -965,69 +1147,142 @@ LogicalResult serialize{0}Data(Operation *op, {1} attr,
     os << generateAttrVersionCheck(2, attr.sinceVersion, attr.attrName);
   }
 
-  // For requiredParamsFirst attrs (legacy: DivByAttr only), write required
-  // params first.
-  if (attr.requiredParamsFirst) {
+  auto generateParam = [&](const BytecodeAttrParameter &param) {
+    std::string indent = "  ";
+
+    bool evolved = isEvolvedParam(attr, param);
+    if (evolved) {
+      os << generateBytecodeVersionCondition(param.sinceVersion,
+                                             "config.getBytecodeVersion()");
+      indent.append("  ");
+    }
+
+    if (param.isOptional) {
+      os << formatv("{0}if ({1}) {{\n", indent, optionalPresenceCheck(param));
+      generateAttrParameterSerialization(param, os, indent + "  ");
+      os << indent << "}\n";
+    } else {
+      generateAttrParameterSerialization(param, os, indent);
+    }
+
+    if (evolved) {
+      os << "  }\n";
+    }
+  };
+
+  auto generateRequiredParams = [&] {
+    for (const auto &param : attr.parameters) {
+      if (param.isOptional) {
+        continue;
+      }
+
+      generateParam(param);
+    }
+  };
+
+  auto generateOptionalParams = [&] {
     for (const auto &param : attr.parameters) {
       if (!param.isOptional) {
-        generateAttrParameterSerialization(param, os, "  ");
+        continue;
       }
-    }
-  }
 
-  // Validate evolved optional params: error if value is present but targeting
-  // an older version.
-  for (const auto &param : attr.parameters) {
-    if (param.isOptional && isEvolvedParam(attr, param)) {
-      auto [majorStr, minorStr] = parseVersion(param.sinceVersion);
-      os << formatv(R"(
-  if (config.bytecodeVersion < *BytecodeVersion::fromVersion({0}, {1}, 0) &&
-      attr.{2}().has_value())
-    return ::emitError(UnknownLoc::get(attr.getContext()))
-           << "attribute parameter '{3}' requires bytecode version {4}+, "
-              "but targeting " << config.bytecodeVersion.toString();
-)",
-                    majorStr, minorStr, param.accessorName, param.name,
-                    param.sinceVersion);
+      generateParam(param);
     }
-  }
+  };
 
-  // Generate optional flags if attribute has optional params.
-  if (attr.hasOptionalParams) {
+  auto generateOptionalParamFlags = [&] {
     os << R"(
   // Build and write optional parameter flags (varint-encoded bitmask).
   uint64_t optionalFlags = 0;
+  // Index pointing to the next bit of the flag to use, based on bytecode
+  // version.
+  uint64_t nextBitIndex = 0;
 )";
-    unsigned bitIndex = 0;
     for (const auto &param : attr.parameters) {
-      if (param.isOptional) {
-        os << formatv(
-            R"(  if (attr.{0}().has_value()) optionalFlags |= (1ULL << {1});
+      if (!param.isOptional) {
+        continue;
+      }
+
+      std::string indent = "  ";
+      bool evolved = isEvolvedParam(attr, param);
+      if (evolved) {
+        os << generateBytecodeVersionCondition(param.sinceVersion,
+                                               "config.getBytecodeVersion()");
+        indent.append("  ");
+      }
+
+      os << indent
+         << formatv(
+                R"(if ({0}) {{ optionalFlags |= (1ULL << nextBitIndex); }
 )",
-            param.accessorName, bitIndex++);
+                optionalPresenceCheck(param))
+         << indent << "nextBitIndex++;\n";
+
+      if (evolved) {
+        os << "  }\n";
       }
     }
     os << "  writer.writeVarInt(optionalFlags);\n";
+  };
+
+  // Validate evolved params when targeting an older version: optional params
+  // must be absent, fallback-valued params must equal the fallback.
+  SmallVector<ParamSubst, 4> writerParamSubsts;
+  for (const auto &param : attr.parameters) {
+    if (isEvolvedParam(attr, param)) {
+      auto [majorStr, minorStr] = parseVersion(param.sinceVersion);
+      StringRef fallbackExpr = param.bytecodeFallbackValue.empty()
+                                   ? StringRef(param.defaultValue)
+                                   : StringRef(param.bytecodeFallbackValue);
+      if (fallbackExpr.empty()) {
+        PrintFatalError("Evolved parameter '" + param.name +
+                        "' in attribute '" + attr.attrName +
+                        "' is missing a bytecode fallback expression or "
+                        "ODS default value.");
+      }
+      std::string fallbackValue = replaceTableGenPlaceholders(
+          fallbackExpr, "attr.getContext()", writerParamSubsts);
+      std::string getterCall = "attr." + param.accessorName + "()";
+      std::string validationCheck =
+          formatv("{0} != {1}", getterCall, fallbackValue).str();
+      os << formatv(R"(
+  if (config.getBytecodeVersion() < *BytecodeVersion::fromVersion({0}, {1}, 0) &&
+      {2})
+    return ::emitError(UnknownLoc::get(attr.getContext()))
+           << "attribute parameter '{3}' requires bytecode version {4}+ "
+           << "to differ from fallback or default value, "
+           << "but targeting " << config.getBytecodeVersion().toString();
+)",
+                    majorStr, minorStr, validationCheck, param.name,
+                    param.sinceVersion);
+    }
+    writerParamSubsts.push_back(
+        {param.name, "attr." + param.accessorName + "()"});
+  }
+
+  // Structure of parameters:
+  // Legacy (requiredParamsFirst):
+  //    [required params] [optionals flags] [optional params]
+  // Current (!requiredParamsFirst):
+  //    [optionals flags] [required params] [optional params]
+
+  // For requiredParamsFirst attrs (legacy: DivByAttr only), write required
+  // params before the optional flags.
+  if (attr.requiredParamsFirst) {
+    generateRequiredParams();
+  }
+
+  if (attr.hasOptionalParams) {
+    generateOptionalParamFlags();
   }
 
   // For non-requiredParamsFirst attrs, write required params after flags.
   if (!attr.requiredParamsFirst) {
-    for (const auto &param : attr.parameters) {
-      if (!param.isOptional) {
-        generateAttrParameterSerialization(param, os, "  ");
-      }
-    }
+    generateRequiredParams();
   }
 
-  // Serialize optional parameters (evolved params already validated above).
-  for (const auto &param : attr.parameters) {
-    if (param.isOptional) {
-      os << formatv(R"(  if (attr.{0}().has_value()) {{
-)",
-                    param.accessorName);
-      generateAttrParameterSerialization(param, os, "    ");
-      os << "  }\n";
-    }
+  if (attr.hasOptionalParams) {
+    generateOptionalParams();
   }
 
   os << "  return success();\n}\n";
@@ -1063,62 +1318,139 @@ LogicalResult parse{0}Data(EncodingReader &reader, Attribute &result) {{
 )",
                 attr.attrName);
 
+  if (attr.isPreview) {
+    os << R"(  if (!(fileVersion.getTag() &
+        Bytecode::VersionTag::kContainsPreview))
+    return reader.emitError()
+           << "malformed bytecode: encountered public-preview attribute "
+              "without the preview header tag";
+)";
+  }
+
   // Version check.
   if (!attr.skipVersionCheck && !attr.sinceVersion.empty()) {
     os << generateAttrVersionCheck(2, attr.sinceVersion, attr.attrName,
                                    "fileVersion", "context");
   }
 
-  // For requiredParamsFirst attrs (legacy: DivByAttr only), read required
-  // params first.
-  if (attr.requiredParamsFirst) {
+  // Progressively populated substitution map, used in fallback values for
+  // evolved parameters. Ordering is important and the content evolves over
+  // time: only values that have already been deserialized so far will be
+  // available in the map.
+  SmallVector<ParamSubst, 4> readerParamSubsts;
+
+  auto generateParam = [&](const BytecodeAttrParameter &param) {
+    std::string indent = "  ";
+
+    bool evolved = isEvolvedParam(attr, param);
+
+    declareParamVariableAndScratch(param, os, "  ");
+
+    if (evolved) {
+      os << generateBytecodeVersionCondition(param.sinceVersion, "fileVersion");
+      indent.append("  ");
+    }
+
+    if (param.isOptional) {
+      os << indent << "if (optionalFlags & (1ULL << nextFlagToUseIndex)) {\n";
+      generateAttrParameterDeserialization(param, os, indent + "  ");
+      os << indent << "}\n";
+      os << indent << "nextFlagToUseIndex++;\n";
+      os << indent << "assert(nextFlagToUseIndex < 64);\n";
+    } else {
+      generateAttrParameterDeserialization(param, os, indent);
+    }
+
+    if (evolved) {
+      StringRef fallbackExpr = param.bytecodeFallbackValue.empty()
+                                   ? StringRef(param.defaultValue)
+                                   : StringRef(param.bytecodeFallbackValue);
+      if (fallbackExpr.empty()) {
+        PrintFatalError("Evolved parameter '" + param.name +
+                        "' in attribute '" + attr.attrName +
+                        "' is missing a bytecode fallback expression or "
+                        "ODS default value.");
+      }
+      std::string fallbackValue = replaceTableGenPlaceholders(
+          fallbackExpr, "context", readerParamSubsts);
+
+      os << "  } else {\n";
+      os << formatv("    {0} = {1};\n", param.name, fallbackValue);
+      os << "  }";
+    }
+
+    readerParamSubsts.push_back({param.name, param.name});
+  };
+
+  auto generateRequiredParams = [&] {
+    for (const auto &param : attr.parameters) {
+      if (param.isOptional) {
+        continue;
+      }
+
+      generateParam(param);
+    }
+  };
+
+  auto generateOptionalParams = [&] {
     for (const auto &param : attr.parameters) {
       if (!param.isOptional) {
-        generateAttrParameterDeserialization(param, os, "  ",
-                                             /*declareVariable=*/true);
+        continue;
       }
+
+      generateParam(param);
     }
+  };
+
+  // Structure of parameters:
+  // Legacy (requiredParamsFirst):
+  //    [required params] [optionals flags] [optional params]
+  // Current (!requiredParamsFirst):
+  //    [optionals flags] [required params] [optional params]
+
+  // For requiredParamsFirst attrs (legacy: DivByAttr only), read required
+  // params before the optional flags.
+  if (attr.requiredParamsFirst) {
+    generateRequiredParams();
   }
 
-  // Read optional flags if attribute has optional params.
   if (attr.hasOptionalParams) {
     os << R"(
   // Read optional parameter flags (varint-encoded bitmask).
   uint64_t optionalFlags = 0;
   if (failed(reader.readVarInt(optionalFlags)))
     return reader.emitError() << "failed to read optional parameter flags";
+  // Index of the next flag to use for optional deserialization, based on
+  // bytecode version.
+  uint64_t nextFlagToUseIndex = 0;
 )";
   }
 
   // For non-requiredParamsFirst attrs, read required params after flags.
   if (!attr.requiredParamsFirst) {
-    for (const auto &param : attr.parameters) {
-      if (!param.isOptional) {
-        generateAttrParameterDeserialization(param, os, "  ",
-                                             /*declareVariable=*/true);
-      }
-    }
+    generateRequiredParams();
   }
 
-  // Deserialize optional parameters.
-  unsigned optionalBitIndex = 0;
-  for (const auto &param : attr.parameters) {
-    if (param.isOptional) {
-      // Optional param: conditionally deserialize based on flag.
-      os << formatv(R"(  {0} {1};
-  if (optionalFlags & (1ULL << {2})) {{
-)",
-                    param.cppType, param.name, optionalBitIndex++);
-      generateAttrParameterDeserialization(param, os, "    ",
-                                           /*declareVariable=*/false);
-      os << "  }\n";
-    }
+  if (attr.hasOptionalParams) {
+    generateOptionalParams();
   }
 
   // Build constructor arguments.
   std::string args;
   for (const auto &param : attr.parameters) {
     args += ", " + param.name;
+  }
+
+  // Reject any unused high bits in the optional parameter flags so that
+  // forward-incompatible writers (or corrupt input) cannot smuggle bits past
+  // the deserializer unnoticed.
+  if (attr.hasOptionalParams) {
+    os << R"(
+  if (nextFlagToUseIndex < 64 &&
+      (optionalFlags & (~uint64_t(0) << nextFlagToUseIndex)))
+    return reader.emitError()
+           << "unused bits set in optional parameter flags";
+)";
   }
 
   // Use getChecked if the attr has a verifier, otherwise use get.
@@ -1282,6 +1614,7 @@ void mlir::tblgen::generateAttrReaderSwitchCases(
 /// serialized.
 static bool needsAttrTypeRegistration(BytecodeAttrParameter::Kind kind) {
   return kind == BytecodeAttrParameter::Kind::TypeAttr ||
+         kind == BytecodeAttrParameter::Kind::Type ||
          kind == BytecodeAttrParameter::Kind::NestedAttr ||
          kind == BytecodeAttrParameter::Kind::PolymorphicNestedAttr ||
          kind == BytecodeAttrParameter::Kind::AttributeArray;
@@ -1305,6 +1638,11 @@ void mlir::tblgen::generateDependentAttrTypeRegistration(
       case BytecodeAttrParameter::Kind::TypeAttr:
         os << formatv("  if (auto paramAttr = concreteAttr.{0}())\n"
                       "    getTypeIndex(paramAttr.getValue());\n",
+                      param.accessorName);
+        break;
+      case BytecodeAttrParameter::Kind::Type:
+        os << formatv("  if (auto paramType = concreteAttr.{0}())\n"
+                      "    getTypeIndex(paramType);\n",
                       param.accessorName);
         break;
       case BytecodeAttrParameter::Kind::NestedAttr:

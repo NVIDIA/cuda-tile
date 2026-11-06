@@ -1910,6 +1910,24 @@ cuda_tile.module @kernels {
         : tile<2x2xi32>, partition_view<tile=(2x2), tensor_view<2x2xi32, strides=[2, 1]>>, tile<i32> -> token
   }
 
+  testing$func @test_atomic_red_view_tko_padded_partition_view(
+      %view: !cuda_tile.partition_view<tile=(2x2), padding_value = zero, !cuda_tile.tensor_view<2x2xi32, strides=[2, 1]>>,
+      %value: !cuda_tile.tile<2x2xi32>) {
+    %c0 = constant <i32: 0> : !cuda_tile.tile<i32>
+    // CHECK: %{{.+}} = atomic_red_view_tko relaxed device %{{.+}}[%{{.+}}, %{{.+}}], add, %{{.+}} : tile<2x2xi32>, partition_view<tile=(2x2), padding_value = zero, tensor_view<2x2xi32, strides=[2,1]>>, tile<i32> -> token
+    %t = atomic_red_view_tko relaxed device %view[%c0, %c0], add, %value
+        : tile<2x2xi32>, partition_view<tile=(2x2), padding_value = zero, tensor_view<2x2xi32, strides=[2, 1]>>, tile<i32> -> token
+  }
+
+  testing$func @test_atomic_red_view_tko_padded_strided_view(
+      %view: !cuda_tile.strided_view<tile=(2x2), traversal_strides=[2, 2], padding_value = zero, !cuda_tile.tensor_view<2x2xi32, strides=[2, 1]>>,
+      %value: !cuda_tile.tile<2x2xi32>) {
+    %c0 = constant <i32: 0> : !cuda_tile.tile<i32>
+    // CHECK: %{{.+}} = atomic_red_view_tko relaxed device %{{.+}}[%{{.+}}, %{{.+}}], add, %{{.+}} : tile<2x2xi32>, strided_view<tile=(2x2), traversal_strides=[2,2], padding_value = zero, tensor_view<2x2xi32, strides=[2,1]>>, tile<i32> -> token
+    %t = atomic_red_view_tko relaxed device %view[%c0, %c0], add, %value
+        : tile<2x2xi32>, strided_view<tile=(2x2), traversal_strides=[2, 2], padding_value = zero, tensor_view<2x2xi32, strides=[2, 1]>>, tile<i32> -> token
+  }
+
   // --- Loop terminator operand type check ---
 
   // Tests that yield, break, and continue accept operands of types that are
@@ -1917,44 +1935,10 @@ cuda_tile.module @kernels {
   // This supports frontends that embed non-CudaTile ops and values inside
   // CudaTile control flow.
 
-  // CHECK-LABEL: testing$func @yield_foreign_type_in_if
-  // CHECK-SAME: (%[[VAL:.*]]: index, %[[COND:.*]]: tile<i1>)
-  testing$func @yield_foreign_type_in_if(%val: index, %cond: !cuda_tile.tile<i1>) {
-    // CHECK: if %[[COND]] -> (index)
-    %r = if %cond -> (index) {
-      // CHECK: yield %[[VAL]] : index
-      yield %val : index
-    } else {
-      yield %val : index
-    }
-  }
 
-  // CHECK-LABEL: testing$func @break_foreign_type_in_loop
-  // CHECK-SAME: (%[[VAL:.*]]: index, %[[COND:.*]]: tile<i1>)
-  testing$func @break_foreign_type_in_loop(%val: index, %cond: !cuda_tile.tile<i1>) {
-    // CHECK: loop : index
-    %r = loop : index {
-      if %cond {
-        // CHECK: break %[[VAL]] : index
-        break %val : index
-      }
-      break %val : index
-    }
-  }
-
-  // CHECK-LABEL: testing$func @continue_foreign_type_in_loop_index
-  // CHECK-SAME: (%[[VAL:.*]]: index)
-  testing$func @continue_foreign_type_in_loop_index(%val: index) {
-    // CHECK: loop iter_values(%{{.*}} = %[[VAL]]) : index
-    loop iter_values(%arg = %val) : index {
-      // CHECK: continue %{{.*}} : index
-      continue %arg : index
-    }
-  }
-
-  // CHECK-LABEL: testing$func @continue_foreign_type_in_loop_i32
+  // CHECK-LABEL: testing$func @continue_non_cuda_tile_type_in_loop_i32
   // CHECK-SAME: (%[[VAL:.*]]: i32)
-  testing$func @continue_foreign_type_in_loop_i32(%val: i32) {
+  testing$func @continue_non_cuda_tile_type_in_loop_i32(%val: i32) {
     // CHECK: loop iter_values(%{{.*}} = %[[VAL]]) : i32
     loop iter_values(%arg = %val) : i32 {
       // CHECK: continue %{{.*}} : i32
@@ -1962,9 +1946,9 @@ cuda_tile.module @kernels {
     }
   }
 
-  // CHECK-LABEL: testing$func @continue_foreign_type_in_loop_f32
+  // CHECK-LABEL: testing$func @continue_non_cuda_tile_type_in_loop_f32
   // CHECK-SAME: (%[[VAL:.*]]: f32)
-  testing$func @continue_foreign_type_in_loop_f32(%val: f32) {
+  testing$func @continue_non_cuda_tile_type_in_loop_f32(%val: f32) {
     // CHECK: loop iter_values(%{{.*}} = %[[VAL]]) : f32
     loop iter_values(%arg = %val) : f32 {
       // CHECK: continue %{{.*}} : f32

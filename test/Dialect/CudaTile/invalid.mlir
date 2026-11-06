@@ -164,8 +164,23 @@ cuda_tile.print_tko "Expect one parameter %i" -> !cuda_tile.token
 
 // -----
 
-// expected-error @below{{expected static shape}}
+// expected-error @below{{expected valid keyword}}
 %1 = "use_type"() : () -> !cuda_tile.tile<5x?xf32>
+
+// -----
+
+// expected-error @below{{all dimensions must be positive constants, got -1}}
+%1 = "use_type"() : () -> !cuda_tile.tile<-1xf32>
+
+// -----
+
+// expected-error @below{{shape dimension 0 must be an integer-valued expression}}
+%1 = "use_type"() : () -> !cuda_tile.tile<[M/2]xf32>
+
+// -----
+
+// expected-error @below{{shape dimension 0 must be an integer-valued expression}}
+%1 = "use_type"() : () -> !cuda_tile.tile<[M/+2]xf32>
 
 // -----
 
@@ -263,7 +278,7 @@ cuda_tile.module @kernels {
 
 cuda_tile.module @kernels {
   testing$func @bcast_invalid_dyn_dim1(%arg0: !cuda_tile.tile<1x4x4xf32>) {
-    // expected-error @below{{expected static shape}}
+    // expected-error @below{{expected valid keyword}}
     %0 = cuda_tile.broadcast %arg0 : tile<1x4x4xf32> -> tile<4x?x4xf32>
   }
 }
@@ -271,7 +286,7 @@ cuda_tile.module @kernels {
 // -----
 
 cuda_tile.module @kernels {
-  // expected-error @below{{expected static shape}}
+  // expected-error @below{{expected valid keyword}}
   testing$func @bcast_invalid_dyn_dim2(%arg0: !cuda_tile.tile<1x?x4xf32>) {
     %0 = cuda_tile.broadcast %arg0 : tile<1x?x4xf32> -> tile<4x?x4xf32>
   }
@@ -298,7 +313,7 @@ cuda_tile.module @kernels {
 // -----
 
 cuda_tile.module @kernels {
-  // expected-error @below{{expected valid keyword}}
+  // expected-error @below{{all dimensions must be positive constants, got 1, -1, 4}}
   testing$func @bcast_invalid_neg_dim(%arg0: !cuda_tile.tile<1x-1x4xf32>) {
     %0 = cuda_tile.broadcast %arg0 : tile<1x-1x4xf32> -> tile<4x-1x4xf32>
   }
@@ -308,7 +323,7 @@ cuda_tile.module @kernels {
 
 cuda_tile.module @kernels {
   testing$func @bcast_invalid_neg_dim2(%arg0: !cuda_tile.tile<4x1x4xf32>) {
-    // expected-error @below{{expected valid keyword}}
+    // expected-error @below{{all dimensions must be positive constants, got 4, -4, 4}}
     %0 = cuda_tile.broadcast %arg0 : tile<4x1x4xf32> -> tile<4x-4x4xf32>
   }
 }
@@ -670,46 +685,6 @@ cuda_tile.module @kernels {
   testing$func @mmaf_scaled_unsupported_f32_scale(%arg0: !cuda_tile.tile<128x128xf4E2M1FN>, %arg1: !cuda_tile.tile<128x128xf4E2M1FN>, %arg2: !cuda_tile.tile<128x128xf32>, %arg3: !cuda_tile.tile<128x4xf32>, %arg4: !cuda_tile.tile<4x128xf32>) {
     // expected-error @below {{op operand #3 must be mmaf_scaled scale tile type of f8E4M3FN or f8E8M0FNU or f8E5M3FNU values, but got '!cuda_tile.tile<128x4xf32>'}}
     %0 = cuda_tile.mmaf_scaled %arg0, %arg1, %arg2, %arg3, %arg4 : !cuda_tile.tile<128x128xf4E2M1FN>, !cuda_tile.tile<128x128xf4E2M1FN>, !cuda_tile.tile<128x128xf32>, !cuda_tile.tile<128x4xf32>, !cuda_tile.tile<4x128xf32>
-  }
-}
-
-// -----
-
-// Test mmaf_scaled with M dimension mismatch between lhs and lhs_scale
-cuda_tile.module @kernels {
-  testing$func @mmaf_scaled_m_dim_mismatch(%arg0: !cuda_tile.tile<128x128xf4E2M1FN>, %arg1: !cuda_tile.tile<128x128xf4E2M1FN>, %arg2: !cuda_tile.tile<128x128xf32>, %arg3: !cuda_tile.tile<64x4xf8E8M0FNU>, %arg4: !cuda_tile.tile<4x128xf8E8M0FNU>) {
-    // expected-error @below {{shape error: dim 0 of lhs (128) and dim 0 of lhs_scale (64) must match}}
-    %0 = cuda_tile.mmaf_scaled %arg0, %arg1, %arg2, %arg3, %arg4 : !cuda_tile.tile<128x128xf4E2M1FN>, !cuda_tile.tile<128x128xf4E2M1FN>, !cuda_tile.tile<128x128xf32>, !cuda_tile.tile<64x4xf8E8M0FNU>, !cuda_tile.tile<4x128xf8E8M0FNU>
-  }
-}
-
-// -----
-
-// Test mmaf_scaled with N dimension mismatch between rhs and rhs_scale
-cuda_tile.module @kernels {
-  testing$func @mmaf_scaled_n_dim_mismatch(%arg0: !cuda_tile.tile<128x128xf4E2M1FN>, %arg1: !cuda_tile.tile<128x128xf4E2M1FN>, %arg2: !cuda_tile.tile<128x128xf32>, %arg3: !cuda_tile.tile<128x4xf8E8M0FNU>, %arg4: !cuda_tile.tile<4x64xf8E8M0FNU>) {
-    // expected-error @below {{shape error: dim 1 of rhs (128) and dim 1 of rhs_scale (64) must match}}
-    %0 = cuda_tile.mmaf_scaled %arg0, %arg1, %arg2, %arg3, %arg4 : !cuda_tile.tile<128x128xf4E2M1FN>, !cuda_tile.tile<128x128xf4E2M1FN>, !cuda_tile.tile<128x128xf32>, !cuda_tile.tile<128x4xf8E8M0FNU>, !cuda_tile.tile<4x64xf8E8M0FNU>
-  }
-}
-
-// -----
-
-// Test mmaf_scaled with batch dimension mismatch (3D tiles)
-cuda_tile.module @kernels {
-  testing$func @mmaf_scaled_batch_dim_mismatch(%arg0: !cuda_tile.tile<4x64x64xf4E2M1FN>, %arg1: !cuda_tile.tile<4x64x64xf4E2M1FN>, %arg2: !cuda_tile.tile<4x64x64xf32>, %arg3: !cuda_tile.tile<2x64x2xf8E8M0FNU>, %arg4: !cuda_tile.tile<4x2x64xf8E8M0FNU>) {
-    // expected-error @below {{shape error: dim 0 of lhs (4) and dim 0 of lhs_scale (2) must match}}
-    %0 = cuda_tile.mmaf_scaled %arg0, %arg1, %arg2, %arg3, %arg4 : !cuda_tile.tile<4x64x64xf4E2M1FN>, !cuda_tile.tile<4x64x64xf4E2M1FN>, !cuda_tile.tile<4x64x64xf32>, !cuda_tile.tile<2x64x2xf8E8M0FNU>, !cuda_tile.tile<4x2x64xf8E8M0FNU>
-  }
-}
-
-// -----
-
-// Test mmaf_scaled with f8E8M0FNU scale and unsupported f16 operand
-cuda_tile.module @kernels {
-  testing$func @mmaf_scaled_unsupported_f16_operand(%arg0: !cuda_tile.tile<128x128xf16>, %arg1: !cuda_tile.tile<128x128xf16>, %arg2: !cuda_tile.tile<128x128xf32>, %arg3: !cuda_tile.tile<128x4xf8E8M0FNU>, %arg4: !cuda_tile.tile<4x128xf8E8M0FNU>) {
-    // expected-error @below {{op operand #0 must be mmaf_scaled operand tile type of f8E4M3FN or f8E5M2 or f4E2M1FN values, but got '!cuda_tile.tile<128x128xf16>'}}
-    %0 = cuda_tile.mmaf_scaled %arg0, %arg1, %arg2, %arg3, %arg4 : !cuda_tile.tile<128x128xf16>, !cuda_tile.tile<128x128xf16>, !cuda_tile.tile<128x128xf32>, !cuda_tile.tile<128x4xf8E8M0FNU>, !cuda_tile.tile<4x128xf8E8M0FNU>
   }
 }
 
@@ -1420,6 +1395,31 @@ cuda_tile.module @test_global_visibility_wrong_syntax {
 
 // -----
 
+cuda_tile.module @test_entry_nested_visibility {
+  // expected-error @below{{entry op must have public symbol visibility}}
+  cuda_tile.entry @kernel() {
+    cuda_tile.return
+  } {sym_visibility = "nested"}
+}
+
+// -----
+
+cuda_tile.module @test_entry_private_visibility {
+  // expected-error @below{{entry op must have public symbol visibility}}
+  cuda_tile.entry @kernel() {
+    cuda_tile.return
+  } {sym_visibility = "private"}
+}
+
+// -----
+
+cuda_tile.module @test_global_builtin_visibility {
+  // expected-error @below{{expected visibility to be specified with `symbol_visibility`, not `sym_visibility`}}
+  cuda_tile.global @g1 {sym_visibility = "nested"} <i32: [42]> : !cuda_tile.tile<1xi32>
+}
+
+// -----
+
 cuda_tile.module @test_kernel_scope {
   // expected-error @below{{entry op must have scalar types (rank 0 !cuda_tile.tile)}}
   cuda_tile.entry @entry_with_result(%arg0: !cuda_tile.tile<2x2xf32>) {}
@@ -1644,7 +1644,7 @@ cuda_tile.module @test_return_in_for_loop {
     %c10 = cuda_tile.constant <i32: 10> : !cuda_tile.tile<i32>
     %c1 = cuda_tile.constant <i32: 1> : !cuda_tile.tile<i32>
     cuda_tile.for %i in (%c0 to %c10, step %c1) : !cuda_tile.tile<i32> {
-      // expected-error @below{{'cuda_tile.return' op expects parent op to be one of 'cuda_tile.entry, cuda_tile.if, cuda_tile.loop}}
+      // expected-error @below{{'cuda_tile.return' op expects parent op to be one of 'cuda_tile.entry, cuda_tile.preview$func, cuda_tile.if, cuda_tile.loop}}
       cuda_tile.return %arg0 : !cuda_tile.tile<4xi64>
     }
   }
@@ -1695,7 +1695,7 @@ cuda_tile.module @test_return_in_reduce {
     %identity = cuda_tile.constant <f32: 0.0> : !cuda_tile.tile<f32>
     %result = cuda_tile.reduce %arg0 dim=0 identities=[0.0 : f32] : !cuda_tile.tile<8xf32> -> !cuda_tile.tile<f32>
     (%val: !cuda_tile.tile<f32>, %acc: !cuda_tile.tile<f32>) {
-      // expected-error @below{{'cuda_tile.return' op expects parent op to be one of 'cuda_tile.entry, cuda_tile.if, cuda_tile.loop}}
+      // expected-error @below{{'cuda_tile.return' op expects parent op to be one of 'cuda_tile.entry, cuda_tile.preview$func, cuda_tile.if, cuda_tile.loop}}
       cuda_tile.return %identity : !cuda_tile.tile<f32>
     }
     cuda_tile.return %result : !cuda_tile.tile<f32>
@@ -1710,7 +1710,7 @@ cuda_tile.module @test_return_in_scan {
     %identity = cuda_tile.constant <f32: 0.0> : !cuda_tile.tile<f32>
     %result = cuda_tile.scan %arg0 dim=0 reverse=false identities=[0.0 : f32] : !cuda_tile.tile<8xf32> -> !cuda_tile.tile<8xf32>
     (%val: !cuda_tile.tile<f32>, %acc: !cuda_tile.tile<f32>) {
-      // expected-error @below{{'cuda_tile.return' op expects parent op to be one of 'cuda_tile.entry, cuda_tile.if, cuda_tile.loop}}
+      // expected-error @below{{'cuda_tile.return' op expects parent op to be one of 'cuda_tile.entry, cuda_tile.preview$func, cuda_tile.if, cuda_tile.loop}}
       cuda_tile.return %identity : !cuda_tile.tile<f32>
     }
     cuda_tile.return %result : !cuda_tile.tile<8xf32>
@@ -2315,9 +2315,9 @@ cuda_tile.testing$func @ftof_rp_f16_to_bf16(%arg0: !cuda_tile.tile<2x2xf16>) -> 
 // -----
 
 cuda_tile.entry @tensor_view_store_dynamic(%tensor_view: !cuda_tile.tensor_view<?x4096xf64, strides=[4096,1]>) {
-  %view = make_partition_view %tensor_view
+  %view = make_partition_view %tensor_view 
   // expected-error @below {{'cuda_tile.make_partition_view' expected 'partition_view' type, but got '!cuda_tile.tensor_view<?x4096xf64, strides=[4096,1]>'}}
-    : !cuda_tile.tensor_view<?x4096xf64, strides=[4096,1]>
+    : !cuda_tile.tensor_view<?x4096xf64, strides=[4096,1]> 
     -> !cuda_tile.partition_view<tile=(1024x1024), tensor_view<?x4096xf64, strides=[4096,1]>>
 }
 
@@ -2353,6 +2353,14 @@ cuda_tile.testing$func @f4e2m1fn_invalid_scalar(%arg0 : !cuda_tile.tile<f4E2M1FN
 // -----
 // expected-error @below {{F4E2M1FN tiles must have an even number of elements}}
 cuda_tile.testing$func @f4e2m1fn_invalid_shape(%arg0 : !cuda_tile.tile<3x3x3xf4E2M1FN>) {
+  return
+}
+
+// -----
+
+// expected-error @+2 {{tiles of ptr<f4E2M1FN> must have rank 0}}
+cuda_tile.testing$func @f4e2m1fn_invalid_pointer_tile(
+    %arg0 : !cuda_tile.tile<2x!cuda_tile.ptr<f4E2M1FN>>) {
   return
 }
 
@@ -2644,39 +2652,14 @@ cuda_tile.module @module {
 
 // -----
 
-cuda_tile.module @module {
-  testing$func @test_atomic_red_view_tko_padded_partition_view(
-      %view: !cuda_tile.partition_view<tile=(2x2), padding_value = zero, !cuda_tile.tensor_view<2x2xi32, strides=[2, 1]>>,
-      %value: !cuda_tile.tile<2x2xi32>) {
-    %c0 = constant <i32: 0> : !cuda_tile.tile<i32>
-    // expected-error @below {{views with padding_value are not supported for atomic reductions}}
-    %t = atomic_red_view_tko relaxed device %view[%c0, %c0], add, %value
-        : tile<2x2xi32>, partition_view<tile=(2x2), padding_value = zero, tensor_view<2x2xi32, strides=[2, 1]>>, tile<i32> -> token
-  }
-}
-
-// -----
-
-cuda_tile.module @module {
-  testing$func @test_atomic_red_view_tko_padded_strided_view(
-      %view: !cuda_tile.strided_view<tile=(2x2), traversal_strides=[2, 2], padding_value = zero, !cuda_tile.tensor_view<2x2xi32, strides=[2, 1]>>,
-      %value: !cuda_tile.tile<2x2xi32>) {
-    %c0 = constant <i32: 0> : !cuda_tile.tile<i32>
-    // expected-error @below {{views with padding_value are not supported for atomic reductions}}
-    %t = atomic_red_view_tko relaxed device %view[%c0, %c0], add, %value
-        : tile<2x2xi32>, strided_view<tile=(2x2), traversal_strides=[2, 2], padding_value = zero, tensor_view<2x2xi32, strides=[2, 1]>>, tile<i32> -> token
-  }
-}
-
-// -----
-
 // Verify that type checking on control-flow edges is preserved when operands
-// carry types foreign to the cuda_tile dialect (e.g. builtin `index`, `f32`).
+// carry types not defined by the cuda_tile dialect (e.g. builtin `index`,
+// `f32`).
 
-// yield: foreign type mismatch between yield operand and if-op result.
+// yield: non-CudaTile type mismatch between yield operand and if-op result.
 %cond_ft = cuda_tile.constant <i1: true> : !cuda_tile.tile<i1>
-%fval = "foreign.const"() : () -> f32
-%ival = "foreign.const"() : () -> index
+%fval = "unknown.const"() : () -> f32
+%ival = "unknown.const"() : () -> index
 // expected-error @below {{op type does not match yield type, else branch yields 'index' but op result type is 'f32'}}
 %r1 = cuda_tile.if %cond_ft -> (f32) {
   cuda_tile.yield %fval : f32
@@ -2686,8 +2669,8 @@ cuda_tile.module @module {
 
 // -----
 
-// break: foreign type mismatch between break operand and loop result type.
-%ival2 = "foreign.const"() : () -> index
+// break: non-CudaTile type mismatch between break operand and loop result type.
+%ival2 = "unknown.const"() : () -> index
 %r2 = cuda_tile.loop : f32 {
   // expected-error @below {{operand types must correspond to the parent loop result types}}
   cuda_tile.break %ival2 : index
@@ -2695,9 +2678,10 @@ cuda_tile.module @module {
 
 // -----
 
-// continue: foreign type mismatch between continue operand and loop iter type.
-%idx_init = "foreign.const"() : () -> index
-%fval2 = "foreign.const"() : () -> f32
+// continue: non-CudaTile type mismatch between continue operand and loop iter
+// type.
+%idx_init = "unknown.const"() : () -> index
+%fval2 = "unknown.const"() : () -> f32
 cuda_tile.loop iter_values(%arg = %idx_init) : index {
   // expected-error @below {{`loop` is missing a valid terminator. `continue` op should have operand types that match the parent loop iter_values}}
   cuda_tile.continue %fval2 : f32
